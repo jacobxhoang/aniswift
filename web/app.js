@@ -39,6 +39,49 @@ const safeImage = (url) => typeof url === 'string' && url.startsWith('https://')
 const listStatus = (kind) => [kind === 'anime' ? 'watching' : 'reading', 'completed', 'on_hold', 'dropped', kind === 'anime' ? 'plan_to_watch' : 'plan_to_read'];
 const ordered = (entries) => [...entries].sort((a, b) => (Date.parse(b.updated) || 0) - (Date.parse(a.updated) || 0));
 
+const months = 'january february march april may june july august september october november december'.split(' ');
+const isoDate = /^\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))?$/i;
+
+function parseFriendDate(value, fetchedAt) {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (isoDate.test(text)) {
+    const timestamp = Date.parse(text);
+    if (!Number.isFinite(timestamp) || (text.length === 10 && new Date(timestamp).toISOString().slice(0, 10) !== text)) return null;
+    return { timestamp, calendarDate: text.length === 10 ? text : null };
+  }
+
+  const relative = /^(today|yesterday)(?:,?\s+(\d{1,2}):(\d{2})\s*(am|pm))?$/i.exec(text);
+  const named = /^([a-z]+)\s+(\d{1,2})(?:,?\s+(\d{4}))?(?:,?\s+(\d{1,2}):(\d{2})\s*(am|pm))?$/i.exec(text);
+  if (!relative && !named) return null;
+  const referenceTime = typeof fetchedAt === 'string' && isoDate.test(fetchedAt) ? Date.parse(fetchedAt) : NaN;
+  const reference = new Date(Number.isFinite(referenceTime) ? referenceTime : Date.now());
+  let year = reference.getUTCFullYear();
+  let month = reference.getUTCMonth();
+  let day = reference.getUTCDate();
+  if (relative?.[1].toLowerCase() === 'yesterday') {
+    reference.setUTCDate(day - 1);
+    year = reference.getUTCFullYear();
+    month = reference.getUTCMonth();
+    day = reference.getUTCDate();
+  }
+  if (named) {
+    const name = named[1].toLowerCase();
+    month = name === 'sept' ? 8 : months.findIndex((item) => item === name || item.slice(0, 3) === name);
+    day = Number(named[2]);
+    if (month < 0 || day < 1 || day > 31) return null;
+    if (named[3]) year = Number(named[3]);
+    else if (month > reference.getUTCMonth() || (month === reference.getUTCMonth() && day > reference.getUTCDate())) year--;
+  }
+  const [hour, minute, period] = relative ? relative.slice(2) : named.slice(4);
+  if (hour && (Number(hour) < 1 || Number(hour) > 12 || Number(minute) > 59)) return null;
+  const hours = hour ? Number(hour) % 12 + (period.toLowerCase() === 'pm' ? 12 : 0) : 0;
+  const date = new Date(Date.UTC(year, month, day, hours, Number(minute || 0)));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month || date.getUTCDate() !== day) return null;
+  // Public MAL dates can omit the time zone. Preserve their calendar day for display.
+  return { timestamp: date.getTime(), calendarDate: date.toISOString().slice(0, 10) };
+}
+
 function mountIcons(root = document) {
   for (const node of root.querySelectorAll('[data-icon]:empty')) {
     const paths = icons[node.dataset.icon];
@@ -226,8 +269,8 @@ function friendActivity({ entry, username, status, progress, total, rating, upda
     Number.isFinite(progress) ? `${progress}${total > 0 ? ` / ${total}` : ''} ${unit(entry.kind, progress)}` : '',
     rating > 0 ? `Scored ${rating}` : '',
   ].filter(Boolean).join(' · ');
-  const date = updated ? new Date(updated) : null;
-  const when = date ? ` <span class="separator">·</span> <time datetime="${date.toISOString()}">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time>` : '';
+  const date = updated ? new Date(updated.timestamp) : null;
+  const when = date ? ` <span class="separator">·</span> <time datetime="${updated.calendarDate || date.toISOString()}">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: updated.calendarDate ? 'UTC' : undefined })}</time>` : '';
   const person = `<a href="https://myanimelist.net/profile/${encodeURIComponent(username)}" target="_blank" rel="noopener">${escape(username)}</a>`;
   const statusKey = status.toLowerCase().replaceAll(' ', '_');
   const knownStatus = Object.hasOwn(labels, statusKey);
@@ -277,10 +320,11 @@ async function loadFriends(refresh = false) {
   refreshFriendsView();
   try {
     if (!feed.people) {
-      const { data } = await catalog(`/users/${encodeURIComponent(username)}/friends`, refresh);
+      const { data, meta } = await catalog(`/users/${encodeURIComponent(username)}/friends`, refresh);
       if (!Array.isArray(data)) throw new Error('Invalid friends list.');
       const people = data.filter((person) => /^[a-z0-9_-]{1,32}$/i.test(person?.username) && person.username.toLowerCase() !== username.toLowerCase());
-      people.sort((a, b) => (Date.parse(b.lastOnline) || 0) - (Date.parse(a.lastOnline) || 0));
+      const lastOnline = ({ lastOnline }) => parseFriendDate(lastOnline, meta?.fetchedAt)?.timestamp ?? -Infinity;
+      people.sort((a, b) => lastOnline(b) - lastOnline(a));
       const names = new Map();
       for (const { username: friend } of people) {
         if (!names.has(friend.toLowerCase())) names.set(friend.toLowerCase(), friend);
@@ -290,17 +334,17 @@ async function loadFriends(refresh = false) {
     if (state.friends !== feed) return;
     const batch = feed.people.slice(feed.checked, feed.checked + friendBatchSize);
     const results = await Promise.allSettled(batch.map(async (friend) => {
-      const { data } = await catalog(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
+      const { data, meta } = await catalog(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
       if (!Array.isArray(data?.anime) || !Array.isArray(data?.manga)) throw new Error('Invalid friend updates.');
       return kinds.flatMap((kind) => data[kind].filter((item) => item?.entry).map((item) => ({
         entry: adapt(item.entry, kind), username: friend, status: typeof item.status === 'string' ? item.status.trim() : '',
-        progress: item.progress, total: item.total, rating: item.score, updated: Number.isFinite(Date.parse(item.date)) ? item.date : null,
+        progress: item.progress, total: item.total, rating: item.score, updated: parseFriendDate(item.date, meta?.fetchedAt),
       })).filter(({ entry }) => Number.isInteger(entry.id) && entry.id > 0 && entry.title));
     }));
     if (state.friends !== feed) return;
     const updates = results.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
     remember(updates.map(({ entry }) => entry));
-    feed.entries = ordered([...feed.entries, ...updates]);
+    feed.entries = [...feed.entries, ...updates].sort((a, b) => (b.updated?.timestamp ?? -Infinity) - (a.updated?.timestamp ?? -Infinity));
     feed.failures += results.filter((result) => result.status === 'rejected').length;
     feed.checked += batch.length;
   } catch {
