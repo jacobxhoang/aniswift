@@ -1,32 +1,87 @@
 # AniLedger
 
-AniLedger is a dark, two-column anime and manga dashboard. [Tenrai](https://tenrai.org/) supplies the catalog, with [Jikan Edge](https://jikan.lucashdo.com/docs) as its fallback and the source for public friend activity. The official MyAnimeList API handles account authorization and list changes.
+AniLedger is a responsive anime and manga tracker with a MyAnimeList-inspired dashboard. It uses Tenrai for catalog data, Jikan Edge when Tenrai is unavailable, and the official MyAnimeList API for account sign-in and personal list changes.
+
+## What it does
+
+- Shows recent anime and manga list updates at the top of the dashboard, followed by this season's anime, catalog picks, statistics, and friends' public list activity.
+- Browses anime and manga, searches the catalog, and opens title details without requiring an account.
+- Signs in through MyAnimeList OAuth. AniLedger never asks for or stores a MyAnimeList password.
+- Reads the signed-in user's anime and manga lists from MyAnimeList, including mature entries. Add, edit, and remove actions are written to the user's MyAnimeList list.
+- Prefers English titles and uses romaji when an English title is unavailable. MyAnimeList list entries use their English alternative title when provided.
+- Checks the existing session before showing account-dependent dashboard content. During that check the app shows a loading status; it doesn't briefly render the signed-out sign-in prompt. If the check fails, the user can retry.
+
+The **Friends feed** shows public updates from followed users. Friends activity comes from Jikan Edge, which exposes the public user-update feed. Feed dates are interpreted using the feed's fetch time, including relative dates such as “Yesterday” and entries without a year.
+
+## Data sources
+
+| Data | Source | Behavior |
+| --- | --- | --- |
+| Anime and manga catalog, season, rankings, and title metadata | [Tenrai](https://tenrai.org/) | Tried first for catalog requests |
+| Catalog fallback and public friends activity | [Jikan Edge](https://jikan.lucashdo.com/docs) | Used if a Tenrai catalog request fails; used directly for public user updates |
+| Account profile, personal lists, and list edits | [MyAnimeList API](https://myanimelist.net/apiconfig) | Requires the app owner's OAuth credentials and the user's authorization |
+
+Catalog requests are cached in memory while the app is running. A successful fallback is retried against Tenrai after one minute so the preferred provider can recover without a restart. MyAnimeList list requests include `nsfw=true` so mature list entries are not filtered out.
+
+## Requirements
+
+- Node.js 22 or newer.
+- No third-party npm packages are required.
+- OAuth credentials are required only for MyAnimeList sign-in and personal list access. Catalog browsing works without them.
 
 ## Run locally
-
-Use Node.js 22 or later. There are no package dependencies to install.
 
 ```sh
 npm run dev
 ```
 
-Open `http://localhost:4173`. You can browse and search the catalog without signing in. Saved titles keep the catalog browsable when both providers are unavailable.
-
-## Enable MyAnimeList sign-in
-
-1. Register a **Web** application in [MyAnimeList API settings](https://myanimelist.net/apiconfig). Use the application's URL and register its exact callback URL. The local callback is `http://localhost:4173/auth/mal/callback`. Add `https://YOUR-SITE/auth/mal/callback` for your hosted instance.
-2. Copy `.env.example` to `.env` and set `MAL_CLIENT_ID` and `MAL_CLIENT_SECRET` to the issued credentials. Set `MAL_REDIRECT_URI` to the registered callback URL. An optional random `MAL_SESSION_SECRET` allows independent session-key rotation.
-3. Restart the local server or redeploy your hosted worker. In production, set these values in the host's runtime settings and store the secrets as encrypted variables.
-
-Sign-in takes place on MyAnimeList. Once authorized, AniLedger loads the account's anime and manga lists. Saving or removing an entry updates MyAnimeList directly. Site sessions use encrypted HttpOnly cookies that expire after 30 days. Signing out clears the local session.
-
-## Build
+Open <http://localhost:4173>. The development command builds the app and starts the local server. To check JavaScript syntax and build the deployable bundle:
 
 ```sh
 npm run check
 npm run build
 ```
 
-The build creates a self-contained Cloudflare Worker at `dist/server/index.js`. Serve the app and its API routes from the same origin. Set the OAuth callback to that origin's `/auth/mal/callback` path before deployment.
+The build produces `dist/server/index.js`, a self-contained Worker module. `npm start` runs that built module behind the included Node HTTP adapter; build it first with `npm run build`.
 
-For a Node host, use `npm run build` as the build command and `npm start` as the start command. Set `APP_ORIGIN` to the service’s HTTPS origin without a trailing path. Render supplies the origin automatically through `RENDER_EXTERNAL_URL`. The server listens on the host’s `PORT` and uses the HTTPS origin for OAuth cookies and request validation.
+## Configure MyAnimeList OAuth
+
+1. Register a **Web** application in [MyAnimeList API settings](https://myanimelist.net/apiconfig).
+2. Set its redirect URL to the exact callback for the environment you are configuring:
+   - Local: `http://localhost:4173/auth/mal/callback`
+   - Production: `https://YOUR-SITE/auth/mal/callback`
+3. Copy `.env.example` to `.env` for local development. Set `MAL_CLIENT_ID` and `MAL_CLIENT_SECRET` to the values MyAnimeList issued, and set `MAL_REDIRECT_URI` to the callback URL registered for that environment. `MAL_SESSION_SECRET` is optional; set it to a long random value if you want a session-encryption key separate from the client secret.
+4. Restart the local server after changing `.env`. For deployment, configure these values as private runtime environment variables in the hosting service. Never commit `.env` or put OAuth secrets in browser JavaScript.
+
+OAuth starts at `/auth/mal` and returns to `/auth/mal/callback`. The callback exchanges the authorization code with MyAnimeList and checks the account profile before creating a session. Session and refresh tokens are held in encrypted, `HttpOnly`, `SameSite=Lax` cookies. Cookies use `Secure` over HTTPS. Sessions expire after 30 days; an expired MyAnimeList access token is refreshed when possible. Signing out clears the local session cookies.
+
+If OAuth isn't configured, catalog browsing remains available. The account prompt provides a setup message rather than starting an incomplete sign-in flow.
+
+## API routes
+
+The app serves its browser client, OAuth routes, and JSON API from one origin.
+
+| Method and path | Purpose | Sign-in required |
+| --- | --- | --- |
+| `GET /auth/mal` | Start MyAnimeList OAuth | No |
+| `GET /auth/mal/callback` | Complete OAuth and create a local session | OAuth callback |
+| `GET /api/session` | Check OAuth configuration and current user | No |
+| `POST /api/logout` | Clear the local session | No |
+| `GET /api/lists/anime?page=1` | Read a page of the user's anime list | Yes |
+| `GET /api/lists/manga?page=1` | Read a page of the user's manga list | Yes |
+| `PUT /api/lists/{anime\|manga}/{id}` | Add or update an entry's status, progress, and score | Yes |
+| `DELETE /api/lists/{anime\|manga}/{id}` | Remove an entry from the list | Yes |
+
+List writes are sent directly to MyAnimeList by the server. Non-GET API requests must come from the app's own origin.
+
+## Deploy on Render
+
+This repository is configured for a Render Node web service:
+
+- Build command: `npm run build`
+- Start command: `npm start`
+- Runtime: Node.js 22 or newer
+- Health and public origin: Render provides `RENDER_EXTERNAL_URL`; the adapter uses it for HTTPS origin validation and OAuth cookies.
+- Environment variables: set `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `MAL_REDIRECT_URI`, and optionally `MAL_SESSION_SECRET` in the service's private environment settings. The production redirect URI must match the callback registered in MyAnimeList exactly.
+
+When using another production host, set `APP_ORIGIN` to the public HTTPS origin with no path, and configure that same origin's `/auth/mal/callback` as the OAuth redirect URI. The service listens on the host-provided `PORT`.
