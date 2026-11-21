@@ -1,0 +1,11 @@
+{
+  "name": "ani-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "dev": "node --env-file-if-exists=.env scripts/preview.mjs",
+    "check": "node --check web/app.js && node --check worker.js"
+  }
+}
