@@ -8,24 +8,10 @@ const account = document.querySelector('#header-account');
 const kinds = ['anime', 'manga'];
 const labels = { watching: 'Watching', reading: 'Reading', completed: 'Completed', on_hold: 'On hold', dropped: 'Dropped', plan_to_watch: 'Plan to watch', plan_to_read: 'Plan to read' };
 const icons = {
-  bolt: '<path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/>',
-  user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',
-  friends: '<circle cx="9" cy="8" r="3.5"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M16 4.5a3.5 3.5 0 0 1 0 7M18 15a5 5 0 0 1 4 5v1"/>',
-  grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
-  play: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3V9Z"/>',
-  book: '<path d="M12 7c-3-2-6-2-9-1v13c3-1 6-1 9 1 3-2 6-2 9-1V6c-3-1-6-1-9 1Zm0 0v13"/>',
-  calendar: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18"/>',
-  list: '<path d="M9 6h12M9 12h12M9 18h12M3 6h1M3 12h1M3 18h1"/>',
   search: '<circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 5 5"/>',
-  history: '<path d="M3 12a9 9 0 1 1 2.6 6.4M3 5v7h7m2-5v5l3 2"/>',
-  bars: '<path d="M4 20h16M7 16v-5m5 5V7m5 9V4"/>',
-  flame: '<path d="M12 22a7 7 0 0 0 7-7c0-3-2-5-3-6 .2 2-1 3-2 3 0-4-2-7-5-9 0 4-1 5-3 8-1 1-1 3-1 4a7 7 0 0 0 7 7Z"/>',
-  sparkle: '<path d="M12 2c1 6 4 9 10 10-6 1-9 4-10 10-1-6-4-9-10-10 6-1 9-4 10-10Z"/>',
-  link: '<path d="m10 13 4-4m-6 6-1 1a3 3 0 0 1-4-4l4-4a3 3 0 0 1 4 0m2 5a3 3 0 0 0 4 0l4-4a3 3 0 0 0-4-4l-1 1"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   edit: '<path d="m12 6 6 6M4 20l5-1L21 7l-4-4L5 15l-1 5Z"/>',
   close: '<path d="m6 6 12 12M18 6 6 18"/>',
-  check: '<path d="m5 12 4 4L19 6"/>',
 };
 
 const friendBatchSize = 6;
@@ -41,7 +27,6 @@ let detailTicket = 0;
 let toastTimer;
 
 const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-const icon = (name) => `<span data-icon="${name}"></span>`;
 const unit = (kind, n) => kind === 'manga' ? (n === 1 ? 'chapter' : 'chapters') : (n === 1 ? 'episode' : 'episodes');
 const score = (value) => Number(value) > 0 ? Number(value).toFixed(2) : '';
 const key = (entry) => `${entry.kind}-${entry.id}`;
@@ -117,28 +102,28 @@ function itemAction(entry, editable = false) {
   return `<button type="button" class="icon-button" data-entry="${key(entry)}" data-edit="true" aria-label="${label} ${escape(entry.title)}" data-icon="${editable ? 'edit' : 'plus'}"></button>`;
 }
 
-function section(title, symbol, body, action = '') {
-  return `<section class="panel"><div class="panel-heading">${icon(symbol)}<h2>${title}</h2>${action}</div>${body}</section>`;
+function section(title, body, action = '') {
+  return `<section class="panel"><div class="panel-heading"><h2>${title}</h2>${action}</div>${body}</section>`;
 }
 
 const actionLink = (href, label) => `<a class="text-button" href="${href}">${label}</a>`;
-const button = (label, action, symbol = '', style = '') => `<button type="button" class="button ${style}" data-action="${action}">${symbol ? icon(symbol) : ''}${label}</button>`;
-const malButton = (style = '') => `<a href="/auth/mal" class="button primary ${style}">${icon('link')}Sign in with MyAnimeList</a>`;
+const button = (label, action, style = '') => `<button type="button" class="button ${style}" data-action="${action}">${label}</button>`;
+const malButton = (style = '') => `<a href="/auth/mal" class="button primary ${style}">Sign in with MyAnimeList</a>`;
 
-function heading(title, description, action = '') {
-  return `<header class="page-heading"><div><h1>${title}</h1><p>${description}</p></div>${action}</header>`;
+function heading(title, description = '', action = '') {
+  const name = `<h1>${title}</h1>`;
+  return `<header class="page-heading">${description ? `<div>${name}<p>${description}</p></div>` : name}${action}</header>`;
 }
 
 function accountCard() {
   if (state.user) {
-    return `<section class="account-card"><h2 class="account-title">${icon('link')} MyAnimeList connected</h2><p>Signed in as ${escape(state.user.name)}. Edits sync to your MyAnimeList lists.</p><a class="button wide" href="https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}" target="_blank" rel="noopener">View profile</a></section>`;
+    return `<section class="account-card"><h2 class="account-title">MyAnimeList connected</h2><p>List edits sync to MyAnimeList.</p><a class="button wide" href="https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}" target="_blank" rel="noopener">View profile</a></section>`;
   }
-  return `<section class="account-card"><h2 class="account-title">${icon('link')} Connect MyAnimeList</h2><p>Sign in to see your lists and sync episodes, chapters, and scores.</p>${malButton('wide')}</section>`;
+  return `<section class="account-card"><h2 class="account-title">Connect MyAnimeList</h2><p>Sync list progress and scores.</p>${malButton('wide')}</section>`;
 }
 
 function renderAccount() {
-  account.innerHTML = state.user ? button(escape(state.user.name), 'account', 'user') : button('Sign in', 'account', 'user', 'primary');
-  mountIcons(account);
+  account.innerHTML = state.user ? button(escape(state.user.name), 'account') : button('Sign in', 'account', 'primary');
 }
 
 function activityRows(entries, editable) {
@@ -176,7 +161,7 @@ function friendActivity({ entry, username, status, progress, total, rating, upda
 }
 
 function friendsContent(preview = false) {
-  if (!state.user) return `<div class="empty">Sign in to see activity from your MyAnimeList friends.${malButton()}</div>`;
+  if (!state.user) return `<div class="empty">Sign in to see your friends’ updates.${malButton()}</div>`;
   const feed = state.friends;
   const entries = preview ? feed.entries.slice(0, 3) : feed.entries;
   const canLoadMore = !preview && feed.people && feed.checked < feed.people.length;
@@ -188,7 +173,7 @@ function friendsContent(preview = false) {
   } else if (feed.error || feed.failures) {
     body = '<div class="empty">Friend activity is temporarily unavailable.</div>';
   } else if (feed.people.length) {
-    body = '<div class="empty">No public anime or manga updates from the friends checked so far.</div>';
+    body = '<div class="empty">No public updates from these friends.</div>';
   } else {
     const profile = `https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}/friends`;
     body = `<div class="empty">No public friends found.<a href="${profile}" class="text-button" target="_blank" rel="noopener">View friends on MyAnimeList</a></div>`;
@@ -201,7 +186,7 @@ function friendsContent(preview = false) {
 
 function renderFriends() {
   const refresh = state.user && !state.friends.loading && !state.friends.error && !state.friends.failures ? button('Refresh', 'refresh-friends') : '';
-  view.innerHTML = `${heading('Friends Feed', 'Recent public anime and manga updates from your MyAnimeList friends.', refresh)}<section class="panel friend-page" aria-label="Friend activity">${friendsContent()}</section>`;
+  view.innerHTML = `${heading('Friends feed', 'Public updates from your MyAnimeList friends.', refresh)}<section class="panel friend-page" aria-label="Friend activity">${friendsContent()}</section>`;
 }
 
 function refreshFriendsView() {
@@ -273,13 +258,13 @@ function renderPanel() {
   const airing = state.airing.length ? state.airing.slice(0, 4) : [featured[0], featured[1], otherAnime[0], featured[3]];
   const list = display.length ? activityRows(display, !sample) : `<div class="empty">${escape(state.listError || 'Your list updates will appear here.')}${actionLink('#anime', 'Browse anime')}</div>`;
   const updatesAction = `${sample ? '<span class="preview-label">Sample</span>' : ''}${actionLink('#lists', 'View lists')}`;
-  const discover = state.season.length ? 'This Season' : 'Featured Anime';
-  const rankHeading = state.airing.length ? 'Top Airing Anime' : 'Popular Picks';
-  view.innerHTML = `${heading('My Panel', 'Your anime and manga at a glance.', button('Find a title', 'search', 'search'))}<div class="dashboard"><div class="stack">
-    ${section('Recent List Updates', 'history', list, updatesAction)}
-    ${section(discover, 'calendar', posters(picks), actionLink('#season', 'View season'))}
-    ${section('More to Explore', 'sparkle', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
-    </div><aside class="sidebar" aria-label="Dashboard sidebar">${section('My Statistics', 'bars', statistics())}${accountCard()}${section('Friends Feed', 'friends', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, 'flame', rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
+  const discover = state.season.length ? 'This season' : 'Featured anime';
+  const rankHeading = state.airing.length ? 'Top airing anime' : 'Popular picks';
+  view.innerHTML = `${heading('My panel', '', button('Find a title', 'search'))}<div class="dashboard"><div class="stack">
+    ${section('Recent list updates', list, updatesAction)}
+    ${section(discover, posters(picks), actionLink('#season', 'View season'))}
+    ${section('More to explore', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
+    </div><aside class="sidebar" aria-label="Dashboard sidebar">${section('My statistics', statistics())}${accountCard()}${section('Friends feed', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
 }
 
 function renderLists() {
@@ -289,7 +274,7 @@ function renderLists() {
   const options = [['all', 'All statuses'], ...listStatus(kind).map((value) => [value, labels[value]])];
   const select = `<label><span class="sr-only">Status</span><select id="status-filter">${options.map(([value, label]) => `<option value="${value}" ${state.status === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label>`;
   const content = entries.length ? activityRows(entries, true) : `<div class="empty">${state.listLoading ? 'Loading your list…' : 'No entries to show.'}${state.listLoading ? '' : actionLink(`#${kind}`, `Browse ${kind}`)}</div>`;
-  view.innerHTML = `${heading('My Lists', 'Track progress and score the titles you finish.')}${state.user ? `<div class="toolbar"><div class="filters">${tabs}</div>${select}</div><section class="panel">${state.listError ? `<p class="notice">${escape(state.listError)} ${button('Retry', 'retry-lists')}</p>` : ''}${content}${state.listPaging[kind] ? `<div class="empty">${button('Load more', 'more-list')}</div>` : ''}</section>` : `<div class="sidebar account-only">${accountCard()}</div>`}`;
+  view.innerHTML = `${heading('My lists')}${state.user ? `<div class="toolbar"><div class="filters">${tabs}</div>${select}</div><section class="panel">${state.listError ? `<p class="notice">${escape(state.listError)} ${button('Retry', 'retry-lists')}</p>` : ''}${content}${state.listPaging[kind] ? `<div class="empty">${button('Load more', 'more-list')}</div>` : ''}</section>` : `<div class="sidebar account-only">${accountCard()}</div>`}`;
 }
 
 const seasonNames = ['Winter', 'Spring', 'Summer', 'Fall'];
@@ -312,14 +297,14 @@ function fallback(page, q, kind) {
 function renderCatalog(page, params) {
   const q = params.get('q') || '';
   const type = params.get('kind') || 'all';
-  const names = { anime: 'Anime', manga: 'Manga', season: 'Seasonal Anime', airing: 'Top Airing Anime', search: 'Search Results' };
-  const descriptions = { anime: 'Explore the top anime in the catalog.', manga: 'Explore the top manga in the catalog.', season: 'Browse releases by season.', airing: 'Explore anime currently airing.', search: q ? `Results for “${escape(q)}”` : 'Find a title by name.' };
+  const names = { anime: 'Top anime', manga: 'Top manga', season: 'Seasonal anime', airing: 'Top airing anime', search: 'Search results' };
+  const queryLabel = page === 'search' && q ? `Results for “${escape(q)}”` : '';
   const controls = page === 'season' ? `<form id="season-form" class="filters"><label class="field">Season<select name="season">${seasonNames.map((name) => `<option value="${name.toLowerCase()}" ${name.toLowerCase() === seasonFilter.season ? 'selected' : ''}>${name}</option>`).join('')}</select></label><label class="field">Year<input type="number" name="year" required min="1917" max="${today.getFullYear() + 2}" value="${seasonFilter.year}"></label><button type="submit" class="button season-submit">Browse</button></form>` : '';
   const { items, loading, error, next } = state.browse || { items: [], loading: true };
   const content = !loading && !items.length && !error ? 'No matching titles.' : (loading ? 'Loading the catalog…' : 'No titles are available.');
   const note = error ? `<div class="notice">${escape(error)}${items.length ? ' Showing saved picks.' : ''} ${button('Retry', 'retry-catalog')}</div>` : '';
   const more = next ? `<div class="empty">${button('Load more', 'more-catalog')}</div>` : '';
-  view.innerHTML = `${heading(names[page], descriptions[page])}${controls ? `<div class="toolbar">${controls}</div>` : ''}<section class="panel" aria-live="polite">${note}${items.length ? posters(items, true) : `<div class="empty">${content}</div>`}${more}</section>`;
+  view.innerHTML = `${heading(names[page], queryLabel)}${controls ? `<div class="toolbar">${controls}</div>` : ''}<section class="panel" aria-live="polite">${note}${items.length ? posters(items, true) : `<div class="empty">${content}</div>`}${more}</section>`;
   if (page === 'search' && q) {
     document.querySelector('#query').value = q;
     document.querySelector('#search-kind').value = [...kinds, 'all'].includes(type) ? type : 'all';
@@ -415,25 +400,26 @@ function showAccount(setup = false) {
   if (state.user) {
     open('Your account', `<p>Signed in to MyAnimeList as <strong>${escape(state.user.name)}</strong>.</p><div class="dialog-actions"><a class="button" href="https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}" target="_blank" rel="noopener">View profile</a>${button('Sign out', 'logout')}</div>`);
   } else if (setup || state.configured === false) {
-    open('MyAnimeList sign-in', `<p>This site needs a MyAnimeList OAuth application to enable sign-in. You can browse the catalog while setup is pending.</p><div class="dialog-actions"><a class="button" href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">MyAnimeList app settings</a></div>`);
+    open('MyAnimeList sign-in', `<p>Set up a MyAnimeList OAuth app to enable sign-in.</p><div class="dialog-actions"><a class="button" href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">MyAnimeList app settings</a></div>`);
   } else {
-    open('Sign in', `<p>Continue to MyAnimeList to authorize AniLedger and sync your anime and manga lists.</p><div class="dialog-actions">${malButton()}</div>`);
+    open('Sign in', `<p>Authorize AniLedger to sync your MyAnimeList lists.</p><div class="dialog-actions">${malButton()}</div>`);
   }
 }
 
 function detailBody(entry, edit, saved) {
   const kind = entry.kind;
-  const meta = [entry.type, entry.total ? `${entry.total} ${unit(kind, entry.total)}` : '', score(entry.score) ? `★ ${score(entry.score)}` : '', entry.year].filter(Boolean).join(' · ');
+  const release = [entry.type, entry.year].filter(Boolean).join(' ');
+  const meta = [release, entry.total ? `${entry.total} ${unit(kind, entry.total)}` : '', score(entry.score) ? `★ ${score(entry.score)}` : ''].filter(Boolean).join(', ');
   const details = `<div class="detail">${cover(entry)}<div>${meta ? `<p class="row-meta">${escape(meta)}</p>` : ''}<p data-synopsis>${escape(entry.synopsis || 'Synopsis is unavailable.')}</p></div></div>`;
   const mal = `<a class="button" href="https://myanimelist.net/${kind}/${entry.id}" target="_blank" rel="noopener">View on MyAnimeList</a>`;
   if (!state.user || !edit) {
-    const cta = state.user ? `<button type="button" class="button primary" data-entry="${key(entry)}" data-edit="true">${icon(saved ? 'edit' : 'plus')}${saved ? 'Edit list entry' : 'Add to my list'}</button>` : malButton();
+    const cta = state.user ? `<button type="button" class="button primary" data-entry="${key(entry)}" data-edit="true">${saved ? 'Edit list entry' : 'Add to my list'}</button>` : malButton();
     return `${details}<div class="dialog-actions">${cta}${mal}</div>`;
   }
   const statuses = listStatus(kind);
   const selected = saved?.status || statuses.at(-1);
   const rating = `<option value="0">Unscored</option>${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}" ${saved?.rating === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}`;
-  return `${details}<form id="edit-form" data-id="${key(entry)}"><div class="edit-fields"><label class="field">Status<select name="status">${statuses.map((status) => `<option value="${status}" ${status === selected ? 'selected' : ''}>${labels[status]}</option>`).join('')}</select></label><label class="field">${kind === 'anime' ? 'Episodes' : 'Chapters'}<input name="progress" type="number" min="0" max="${Math.max(entry.total || 100000, saved?.progress || 0)}" value="${saved?.progress || 0}" required></label><label class="field">Score<select name="rating">${rating}</select></label></div><p class="form-error" hidden role="alert"></p><div class="dialog-actions"><button type="submit" class="button primary">${icon('check')}Save to MyAnimeList</button>${saved ? button('Remove', 'remove', '', 'danger') : ''}${mal}</div></form>`;
+  return `${details}<form id="edit-form" data-id="${key(entry)}"><div class="edit-fields"><label class="field">Status<select name="status">${statuses.map((status) => `<option value="${status}" ${status === selected ? 'selected' : ''}>${labels[status]}</option>`).join('')}</select></label><label class="field">${kind === 'anime' ? 'Episodes' : 'Chapters'}<input name="progress" type="number" min="0" max="${Math.max(entry.total || 100000, saved?.progress || 0)}" value="${saved?.progress || 0}" required></label><label class="field">Score<select name="rating">${rating}</select></label></div><p class="form-error" hidden role="alert"></p><div class="dialog-actions"><button type="submit" class="button primary">Save to MyAnimeList</button>${saved ? button('Remove', 'remove', 'danger') : ''}${mal}</div></form>`;
 }
 
 async function showEntry(id, edit) {
