@@ -115,6 +115,15 @@ nav a [data-icon] { color: #c7adf2; font-size: 15px; }
 .rank-row .title-button { font-size: 13px; line-height: 1.28; }
 .rank-row .icon-button { width: 29px; min-height: 29px; }
 .rank-number { color: #c5b2df; font: 700 15px/1 var(--heading); text-align: center; }
+.friend-page { width: min(100%, 720px); }
+.friend-rows { padding: 0 15px; }
+.friend-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 10px; min-height: 72px; padding: 9px 0; }
+.friend-row + .friend-row { border-top: 1px solid #2c2539; }
+.friend-title { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.friend-title .title-button { font-size: 14px; line-height: 1.25; overflow-wrap: anywhere; }
+.friend-row .row-meta { overflow-wrap: anywhere; }
+.friend-controls { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 15px; border-top: 1px solid var(--edge); }
+.friend-page .notice { border-top: 1px solid var(--edge); border-bottom: 0; }
 .star { color: #ffcf85; }
 .poster-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; padding: 13px; }
 .poster { position: relative; isolation: isolate; overflow: hidden; width: 100%; padding: 0; aspect-ratio: 2 / 3; border: 1px solid #483954; border-radius: 8px; background: #292036; color: #fff; text-align: left; }

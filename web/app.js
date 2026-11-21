@@ -10,6 +10,7 @@ const labels = { watching: 'Watching', reading: 'Reading', completed: 'Completed
 const icons = {
   bolt: '<path d="m13 2-9 12h7l-1 8 10-12h-7l1-8Z"/>',
   user: '<circle cx="12" cy="8" r="3.5"/><path d="M5 21v-2a7 7 0 0 1 14 0v2"/>',
+  friends: '<circle cx="9" cy="8" r="3.5"/><path d="M2 21v-2a7 7 0 0 1 14 0v2M16 4.5a3.5 3.5 0 0 1 0 7M18 15a5 5 0 0 1 4 5v1"/>',
   grid: '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
   play: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3V9Z"/>',
   book: '<path d="M12 7c-3-2-6-2-9-1v13c3-1 6-1 9 1 3-2 6-2 9-1V6c-3-1-6-1-9 1Zm0 0v13"/>',
@@ -27,9 +28,11 @@ const icons = {
   check: '<path d="m5 12 4 4L19 6"/>',
 };
 
+const friendBatchSize = 6;
+const emptyFeed = () => ({ people: null, entries: [], checked: 0, failures: 0, loading: false, error: false });
 const state = {
   user: null, configured: null, entries: { anime: [], manga: [] }, listPaging: {}, listError: '',
-  listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [],
+  listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [], friends: emptyFeed(),
 };
 const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, item]));
 const memory = new Map();
@@ -81,7 +84,8 @@ function rows(data, kind) {
   return remember(list.map((item) => adapt(item, kind)).filter((item) => item.id > 0 && item.title));
 }
 
-async function jikan(path) {
+async function jikan(path, refresh = false) {
+  if (refresh) memory.delete(path);
   if (memory.has(path)) return memory.get(path);
   const request = (async () => {
     const response = await fetch(`${JIKAN}${path}`, { signal: AbortSignal.timeout(8500) });
@@ -157,6 +161,100 @@ function rankings(entries) {
   return `<div class="rank-list">${entries.map((entry, index) => `<article class="rank-row"><span class="rank-number">${index + 1}</span>${cover(entry, 'thumb')}<div>${entryButton(entry)}<p class="row-meta">${score(entry.score) ? `<span class="star">★</span> ${score(entry.score)}` : escape(entry.type || 'Anime')}${entry.total ? ` <span class="separator">·</span> ${entry.total} eps` : ''}</p></div>${itemAction(entry)}</article>`).join('')}</div>`;
 }
 
+function friendActivity({ entry, username, status, progress, total, rating, updated }) {
+  const details = [
+    Number.isFinite(progress) ? `${progress}${total > 0 ? ` / ${total}` : ''} ${unit(entry.kind, progress)}` : '',
+    rating > 0 ? `Scored ${rating}` : '',
+  ].filter(Boolean).join(' · ');
+  const date = updated ? new Date(updated) : null;
+  const when = date ? ` <span class="separator">·</span> <time datetime="${date.toISOString()}">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</time>` : '';
+  const person = `<a href="https://myanimelist.net/profile/${encodeURIComponent(username)}" target="_blank" rel="noopener">${escape(username)}</a>`;
+  const statusKey = status.toLowerCase().replaceAll(' ', '_');
+  const knownStatus = Object.hasOwn(labels, statusKey);
+  const label = status ? `<span class="status ${knownStatus ? statusKey : ''}">${escape(knownStatus ? labels[statusKey] : status)}</span>` : '';
+  return `<article class="friend-row">${cover(entry, 'thumb')}<div><div class="friend-title">${entryButton(entry)}${label}</div><p class="row-meta">${person}${when}</p>${details ? `<p class="row-meta">${escape(details)}</p>` : ''}</div></article>`;
+}
+
+function friendsContent(preview = false) {
+  if (!state.user) return `<div class="empty">Sign in to see activity from your MyAnimeList friends.${malButton()}</div>`;
+  const feed = state.friends;
+  const entries = preview ? feed.entries.slice(0, 3) : feed.entries;
+  const canLoadMore = !preview && feed.people && feed.checked < feed.people.length;
+  let body;
+  if (entries.length) {
+    body = `<div class="friend-rows">${entries.map(friendActivity).join('')}</div>`;
+  } else if (feed.loading || (!feed.people && !feed.error)) {
+    body = '<div class="empty" role="status">Loading friend activity…</div>';
+  } else if (feed.error || feed.failures) {
+    body = '<div class="empty">Friend activity is temporarily unavailable.</div>';
+  } else if (feed.people.length) {
+    body = '<div class="empty">No public anime or manga updates from the friends checked so far.</div>';
+  } else {
+    const profile = `https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}/friends`;
+    body = `<div class="empty">No public friends found.<a href="${profile}" class="text-button" target="_blank" rel="noopener">View friends on MyAnimeList</a></div>`;
+  }
+  const partial = entries.length && feed.failures ? '<p class="notice">Some friends’ updates are unavailable.</p>' : '';
+  const controls = !feed.loading && (canLoadMore || feed.error || feed.failures)
+    ? `<div class="friend-controls">${canLoadMore ? button('Load more friends', 'more-friends') : ''}${feed.error || feed.failures ? button('Retry', 'refresh-friends') : ''}</div>` : '';
+  return `<div aria-live="polite" aria-busy="${feed.loading}">${body}${partial}${controls}</div>`;
+}
+
+function renderFriends() {
+  const refresh = state.user && !state.friends.loading && !state.friends.error && !state.friends.failures ? button('Refresh', 'refresh-friends') : '';
+  view.innerHTML = `${heading('Friends Feed', 'Recent public anime and manga updates from your MyAnimeList friends.', refresh)}<section class="panel friend-page" aria-label="Friend activity">${friendsContent()}</section>`;
+}
+
+function refreshFriendsView() {
+  if (['panel', 'friends'].includes(route().page)) render();
+}
+
+async function loadFriends(refresh = false) {
+  if (!state.user || state.friends.loading) return;
+  const feed = state.friends = refresh ? emptyFeed() : state.friends;
+  const username = state.user.name;
+  feed.loading = true;
+  feed.error = false;
+  refreshFriendsView();
+  try {
+    if (!feed.people) {
+      const { data } = await jikan(`/users/${encodeURIComponent(username)}/friends`, refresh);
+      if (!Array.isArray(data)) throw new Error('Invalid friends list.');
+      const people = data.filter((person) => /^[a-z0-9_-]{1,32}$/i.test(person?.username) && person.username.toLowerCase() !== username.toLowerCase());
+      people.sort((a, b) => (Date.parse(b.lastOnline) || 0) - (Date.parse(a.lastOnline) || 0));
+      const names = new Map();
+      for (const { username: friend } of people) {
+        if (!names.has(friend.toLowerCase())) names.set(friend.toLowerCase(), friend);
+      }
+      feed.people = [...names.values()];
+    }
+    if (state.friends !== feed) return;
+    const batch = feed.people.slice(feed.checked, feed.checked + friendBatchSize);
+    const results = await Promise.allSettled(batch.map(async (friend) => {
+      const { data } = await jikan(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
+      if (!Array.isArray(data?.anime) || !Array.isArray(data?.manga)) throw new Error('Invalid friend updates.');
+      return kinds.flatMap((kind) => data[kind].filter((item) => item?.entry).map((item) => ({
+        entry: adapt(item.entry, kind), username: friend, status: typeof item.status === 'string' ? item.status.trim() : '',
+        progress: item.progress, total: item.total, rating: item.score, updated: Number.isFinite(Date.parse(item.date)) ? item.date : null,
+      })).filter(({ entry }) => Number.isInteger(entry.id) && entry.id > 0 && entry.title));
+    }));
+    if (state.friends !== feed) return;
+    const updates = results.flatMap((result) => result.status === 'fulfilled' ? result.value : []);
+    remember(updates.map(({ entry }) => entry));
+    feed.entries = ordered([...feed.entries, ...updates]);
+    feed.failures += results.filter((result) => result.status === 'rejected').length;
+    feed.checked += batch.length;
+  } catch {
+    feed.error = true;
+  } finally {
+    feed.loading = false;
+    if (state.friends === feed) refreshFriendsView();
+  }
+}
+
+function loadVisibleFriends() {
+  if (!state.friends.people && !state.friends.error && ['panel', 'friends'].includes(route().page)) loadFriends();
+}
+
 function statistics() {
   const anime = state.entries.anime.length;
   const manga = state.entries.manga.length;
@@ -181,7 +279,7 @@ function renderPanel() {
     ${section('Recent List Updates', 'history', list, updatesAction)}
     ${section(discover, 'calendar', posters(picks), actionLink('#season', 'View season'))}
     ${section('More to Explore', 'sparkle', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
-    </div><aside class="sidebar" aria-label="Dashboard sidebar">${section('My Statistics', 'bars', statistics())}${accountCard()}${section(rankHeading, 'flame', rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
+    </div><aside class="sidebar" aria-label="Dashboard sidebar">${section('My Statistics', 'bars', statistics())}${accountCard()}${section('Friends Feed', 'friends', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, 'flame', rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
 }
 
 function renderLists() {
@@ -201,7 +299,7 @@ let seasonFilter = { year: today.getFullYear(), season: defaultSeason };
 
 function route() {
   const [page, params = ''] = location.hash.slice(1).split('?');
-  return { page: ['anime', 'manga', 'season', 'airing', 'lists', 'search'].includes(page) ? page : 'panel', params: new URLSearchParams(params) };
+  return { page: ['anime', 'manga', 'season', 'airing', 'lists', 'friends', 'search'].includes(page) ? page : 'panel', params: new URLSearchParams(params) };
 }
 
 function fallback(page, q, kind) {
@@ -236,13 +334,14 @@ function render() {
   }
   if (page === 'panel') renderPanel();
   else if (page === 'lists') renderLists();
+  else if (page === 'friends') renderFriends();
   else renderCatalog(page, params);
   mountIcons(view);
 }
 
 async function browse(reset = true) {
   const { page, params } = route();
-  if (page === 'panel' || page === 'lists') return;
+  if (['panel', 'lists', 'friends'].includes(page)) return;
   const ticket = ++browseTicket;
   const q = params.get('q') || '';
   const type = kinds.includes(params.get('kind')) ? params.get('kind') : 'all';
@@ -413,6 +512,8 @@ document.addEventListener('click', async (event) => {
     case 'more-catalog': state.catalogPage++; browse(false); break;
     case 'retry-lists': loadLists(); break;
     case 'more-list': moreList(control); break;
+    case 'more-friends': loadFriends(); break;
+    case 'refresh-friends': loadFriends(true); break;
     case 'remove': saveEntry(dialog.querySelector('#edit-form'), true); break;
     case 'logout':
       try {
@@ -421,6 +522,7 @@ document.addEventListener('click', async (event) => {
         state.entries = { anime: [], manga: [] };
         state.listError = '';
         state.listPaging = {};
+        state.friends = emptyFeed();
         dialog.close();
         renderAccount();
         render();
@@ -467,6 +569,7 @@ window.addEventListener('hashchange', () => {
   state.browse = null;
   render();
   browse();
+  loadVisibleFriends();
   window.scrollTo(0, 0);
 });
 
@@ -480,8 +583,9 @@ siteApi('session').then((session) => {
   state.user = session.user;
   state.configured = session.configured;
   renderAccount();
-  if (route().page === 'panel' || route().page === 'lists') render();
+  if (['panel', 'lists', 'friends'].includes(route().page)) render();
   if (state.user) loadLists();
+  loadVisibleFriends();
   if (auth === 'setup') showAccount(true);
   else if (auth === 'connected') toast('MyAnimeList connected.');
   else if (auth) toast({ expired: 'Sign-in expired. Please try again.', cancelled: 'MyAnimeList sign-in was cancelled.', failed: 'MyAnimeList sign-in could not be completed.' }[auth] || 'Please try signing in again.');
