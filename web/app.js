@@ -18,7 +18,7 @@ const icons = {
 const friendBatchSize = 6;
 const emptyFeed = () => ({ people: null, entries: [], checked: 0, failures: 0, loading: false, error: false });
 const state = {
-  user: null, configured: null, entries: { anime: [], manga: [] }, listPaging: {}, listError: '',
+  user: null, configured: null, sessionStatus: 'loading', entries: { anime: [], manga: [] }, listPaging: {}, listError: '',
   listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [], friends: emptyFeed(),
 };
 const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, { ...item, englishTitle: item.title }]));
@@ -216,6 +216,9 @@ function section(title, body, action = '') {
 const actionLink = (href, label) => `<a class="text-button" href="${href}">${label}</a>`;
 const button = (label, action, style = '') => `<button type="button" class="button ${style}" data-action="${action}">${label}</button>`;
 const malButton = (style = '') => `<a href="/auth/mal" class="button primary ${style}">Sign in with MyAnimeList</a>`;
+const sessionMessage = () => state.sessionStatus === 'error'
+  ? `<div class="empty">Could not check your session.${button('Retry', 'retry-session')}</div>`
+  : '<div class="empty" role="status">Checking session…</div>';
 
 function heading(title, description = '', action = '') {
   const name = `<h1>${title}</h1>`;
@@ -223,6 +226,7 @@ function heading(title, description = '', action = '') {
 }
 
 function accountCard() {
+  if (state.sessionStatus !== 'ready') return `<section class="panel" aria-label="MyAnimeList account">${sessionMessage()}</section>`;
   if (state.user) {
     return `<section class="account-card"><h2 class="account-title">MyAnimeList connected</h2><p>List edits sync to MyAnimeList.</p><a class="button wide" href="https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}" target="_blank" rel="noopener">View profile</a></section>`;
   }
@@ -230,7 +234,9 @@ function accountCard() {
 }
 
 function renderAccount() {
-  account.innerHTML = state.user ? button(escape(state.user.name), 'account') : button('Sign in', 'account', 'primary');
+  if (state.sessionStatus === 'loading') account.innerHTML = '<span class="button" role="status">Checking session…</span>';
+  else if (state.sessionStatus === 'error') account.innerHTML = button('Retry session', 'retry-session');
+  else account.innerHTML = state.user ? button(escape(state.user.name), 'account') : button('Sign in', 'account', 'primary');
 }
 
 function activityRows(entries, editable) {
@@ -268,6 +274,7 @@ function friendActivity({ entry, username, status, progress, total, rating, upda
 }
 
 function friendsContent(preview = false) {
+  if (state.sessionStatus !== 'ready') return sessionMessage();
   if (!state.user) return `<div class="empty">Sign in to see your friends’ updates.${malButton()}</div>`;
   const feed = state.friends;
   const entries = preview ? feed.entries.slice(0, 3) : feed.entries;
@@ -362,7 +369,11 @@ function renderPanel() {
   const recent = ordered([...state.entries.anime, ...state.entries.manga]).slice(0, 4);
   const picks = state.season.length ? state.season.slice(0, 4) : featured;
   const airing = state.airing.length ? state.airing.slice(0, 4) : [featured[0], featured[1], otherAnime[0], featured[3]];
-  const list = recent.length ? activityRows(recent, true) : `<div class="empty">${escape(state.listError || (state.user ? 'Your list updates will appear here.' : 'Sign in to see your list updates.'))}${actionLink('#anime', 'Browse anime')}</div>`;
+  let list;
+  if (state.sessionStatus !== 'ready') list = sessionMessage();
+  else if (recent.length) list = activityRows(recent, true);
+  else if (state.listLoading) list = '<div class="empty" role="status">Loading your list updates…</div>';
+  else list = `<div class="empty">${escape(state.listError || (state.user ? 'Your list updates will appear here.' : 'Sign in to see your list updates.'))}${actionLink('#anime', 'Browse anime')}</div>`;
   const discover = state.season.length ? 'This season' : 'Featured anime';
   const rankHeading = state.airing.length ? 'Top airing anime' : 'Popular picks';
   view.innerHTML = `${heading('My panel')}<div class="dashboard"><div class="stack">
@@ -602,6 +613,7 @@ document.addEventListener('click', async (event) => {
   }
   switch (control.dataset.action) {
     case 'account': showAccount(); break;
+    case 'retry-session': checkSession(); break;
     case 'close': dialog.close(); break;
     case 'retry-catalog': browse(); break;
     case 'more-catalog': state.catalogPage++; browse(false); break;
@@ -674,17 +686,32 @@ browse();
 
 const auth = new URLSearchParams(location.search).get('auth');
 if (auth) history.replaceState(null, '', `/${location.hash}`);
-siteApi('session').then((session) => {
-  state.user = session.user;
-  state.configured = session.configured;
+async function checkSession(authResult = '') {
+  state.sessionStatus = 'loading';
   renderAccount();
   if (['panel', 'lists', 'friends'].includes(route().page)) render();
+  let session;
+  try {
+    session = await siteApi('session', { signal: AbortSignal.timeout(10000) });
+  } catch {
+    state.sessionStatus = 'error';
+    renderAccount();
+    if (['panel', 'lists', 'friends'].includes(route().page)) render();
+    return;
+  }
+  state.user = session.user;
+  state.configured = session.configured;
+  state.sessionStatus = 'ready';
+  renderAccount();
   if (state.user) loadLists();
+  else if (['panel', 'lists', 'friends'].includes(route().page)) render();
   loadVisibleFriends();
-  if (auth === 'setup') showAccount(true);
-  else if (auth === 'connected') toast('MyAnimeList connected.');
-  else if (auth) toast({ expired: 'Sign-in expired. Please try again.', cancelled: 'MyAnimeList sign-in was cancelled.', failed: 'MyAnimeList sign-in could not be completed.' }[auth] || 'Please try signing in again.');
-}).catch(() => { if (auth) toast('Could not check your sign-in. Please try again.'); });
+  if (authResult === 'setup') showAccount(true);
+  else if (authResult === 'connected' && state.user) toast('MyAnimeList connected.');
+  else if (authResult) toast({ expired: 'Sign-in expired. Please try again.', cancelled: 'MyAnimeList sign-in was cancelled.', failed: 'MyAnimeList sign-in could not be completed.' }[authResult] || 'Please try signing in again.');
+}
+
+checkSession(auth);
 
 Promise.allSettled([
   catalog('/seasons/now').then(({ data }) => { state.season = rows(data, 'anime'); }),
