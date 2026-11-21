@@ -171,13 +171,13 @@ async function withMal(request, env, session, operation) {
 }
 
 async function getList(call, kind, page) {
-  const fields = kind === 'anime' ? 'list_status,mean,num_episodes,media_type' : 'list_status,mean,num_chapters,media_type';
+  const fields = `list_status,mean,media_type,alternative_titles,${kind === 'anime' ? 'num_episodes' : 'num_chapters'}`;
   const params = new URLSearchParams({ fields, limit: '100', offset: String((page - 1) * 100), sort: 'list_updated_at' });
   const response = await call(`/users/@me/${kind}list?${params}`);
   const { data, paging } = await response.json();
   return {
     entries: data.map(({ node, list_status: item }) => ({
-      id: node.id, kind, title: node.title, image: node.main_picture?.large || node.main_picture?.medium,
+      id: node.id, kind, title: node.title, englishTitle: node.alternative_titles?.en?.trim() || null, image: node.main_picture?.large || node.main_picture?.medium,
       type: node.media_type?.toUpperCase(), score: node.mean, total: node.num_episodes || node.num_chapters || null,
       status: item.status, progress: item.num_episodes_watched ?? item.num_chapters_read ?? 0,
       rating: item.score, updated: item.updated_at,
@@ -263,7 +263,7 @@ export default {
       'Content-Type': asset.type,
       'X-Content-Type-Options': 'nosniff',
       'Referrer-Policy': 'strict-origin-when-cross-origin',
-      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://jikan.lucashdo.com; form-action 'self'; base-uri 'none'; object-src 'none'",
+      'Content-Security-Policy': "default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' https: data:; connect-src 'self' https://api.tenrai.org https://jikan.lucashdo.com; form-action 'self'; base-uri 'none'; object-src 'none'",
     } });
   },
 };

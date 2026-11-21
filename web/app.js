@@ -1,6 +1,7 @@
 import { featured, otherAnime, mangaPicks, seed, previewUpdates } from './catalog.js';
 
 const JIKAN = 'https://jikan.lucashdo.com/v1';
+const TENRAI = 'https://api.tenrai.org/v1';
 const view = document.querySelector('#view');
 const dialog = document.querySelector('#dialog');
 const dialogBody = document.querySelector('#dialog-body');
@@ -20,8 +21,11 @@ const state = {
   user: null, configured: null, entries: { anime: [], manga: [] }, listPaging: {}, listError: '',
   listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [], friends: emptyFeed(),
 };
-const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, item]));
+const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, { ...item, englishTitle: item.title }]));
 const memory = new Map();
+const titleQueue = new Map();
+const checkedTitles = new Set();
+let resolvingTitles = false;
 let browseTicket = 0;
 let detailTicket = 0;
 let toastTimer;
@@ -30,6 +34,7 @@ const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '
 const unit = (kind, n) => kind === 'manga' ? (n === 1 ? 'chapter' : 'chapters') : (n === 1 ? 'episode' : 'episodes');
 const score = (value) => Number(value) > 0 ? Number(value).toFixed(2) : '';
 const key = (entry) => `${entry.kind}-${entry.id}`;
+const displayTitle = (entry) => registry.get(key(entry))?.englishTitle || entry.title;
 const safeImage = (url) => typeof url === 'string' && url.startsWith('https://') ? url : '';
 const listStatus = (kind) => [kind === 'anime' ? 'watching' : 'reading', 'completed', 'on_hold', 'dropped', kind === 'anime' ? 'plan_to_watch' : 'plan_to_read'];
 const ordered = (entries) => [...entries].sort((a, b) => (Date.parse(b.updated) || 0) - (Date.parse(a.updated) || 0));
@@ -54,9 +59,10 @@ function adapt(item, kind) {
   const id = Number(item.malId ?? item.mal_id ?? item.id);
   const existing = registry.get(`${kind}-${id}`);
   const images = item.images;
-  const title = item.titleEnglish || (Array.isArray(item.titles) ? item.titles.find((x) => x.type === 'English')?.title : item.titles?.english);
+  const title = [item.titleEnglish, item.title_english, Array.isArray(item.titles) ? item.titles.find((x) => x.type === 'English')?.title : item.titles?.english]
+    .find((value) => typeof value === 'string' && value.trim());
   return {
-    id, kind, title: title || existing?.title || item.title, alt: item.title, image: item.imageUrl || images?.large || images?.jpg?.large_image_url || images?.jpg?.image_url || existing?.image,
+    id, kind, title: item.title || title || existing?.title, englishTitle: title?.trim(), alt: item.title, image: item.imageUrl || images?.large || images?.jpg?.large_image_url || images?.jpg?.image_url || existing?.image,
     score: item.score || existing?.score, total: item.episodes || item.chapters || existing?.total, type: item.type || existing?.type,
     genres: item.genres?.map((genre) => typeof genre === 'string' ? genre : genre.name).filter(Boolean) || existing?.genres,
     synopsis: item.synopsis || existing?.synopsis, year: item.year || item.aired?.from?.slice(0, 4), season: item.season,
@@ -69,17 +75,75 @@ function rows(data, kind) {
   return remember(list.map((item) => adapt(item, kind)).filter((item) => item.id > 0 && item.title));
 }
 
-async function jikan(path, refresh = false) {
-  if (refresh) memory.delete(path);
-  if (memory.has(path)) return memory.get(path);
-  const request = (async () => {
-    const response = await fetch(`${JIKAN}${path}`, { signal: AbortSignal.timeout(8500) });
-    if (!response.ok) throw new Error(response.status === 429 ? 'The catalog is busy. Try again shortly.' : 'The live catalog is temporarily unavailable.');
-    return response.json();
-  })();
-  memory.set(path, request);
-  try { return await request; } catch (error) { memory.delete(path); throw error; }
+async function fetchCatalog(base, path, timeout) {
+  const response = await fetch(`${base}${path}`, { signal: AbortSignal.timeout(timeout) });
+  if (!response.ok) throw new Error(response.status === 429 ? 'The catalog is busy. Try again shortly.' : 'The live catalog is temporarily unavailable.');
+  const payload = await response.json();
+  if (!payload?.data || typeof payload.data !== 'object') throw new Error('Invalid catalog response.');
+  return payload;
 }
+
+async function catalog(path, refresh = false) {
+  const cached = memory.get(path);
+  if (!refresh && cached && cached.expires > Date.now()) return cached.request;
+  const entry = { expires: Infinity };
+  entry.request = (async () => {
+    if (!path.startsWith('/users/')) {
+      try { return await fetchCatalog(TENRAI, path, 4500); } catch {
+        // A successful fallback can be refreshed after Tenrai has recovered.
+        entry.expires = Date.now() + 60000;
+      }
+    }
+    return fetchCatalog(JIKAN, path, 8500);
+  })();
+  memory.set(path, entry);
+  try { return await entry.request; } catch (error) { if (memory.get(path) === entry) memory.delete(path); throw error; }
+}
+
+function updateTitle(id) {
+  const entry = registry.get(id);
+  if (!entry) return;
+  const title = displayTitle(entry);
+  for (const node of view.querySelectorAll(`[data-catalog-title="${id}"]`)) node.textContent = title;
+  for (const node of view.querySelectorAll(`[data-entry="${id}"][data-edit="true"][aria-label]`)) {
+    const action = node.dataset.icon === 'edit' ? 'Edit' : 'Add';
+    node.setAttribute('aria-label', `${action} ${title}`);
+  }
+  const active = dialogBody.querySelector(`[data-dialog-title="${id}"]`);
+  if (active) active.textContent = title;
+}
+
+async function resolveTitles() {
+  if (resolvingTitles) return;
+  resolvingTitles = true;
+  try {
+    for (const [id, node] of titleQueue) {
+      titleQueue.delete(id);
+      if (!node.isConnected || checkedTitles.has(id)) continue;
+      const entry = registry.get(id);
+      if (!entry || entry.englishTitle) continue;
+      checkedTitles.add(id);
+      try {
+        const { data } = await catalog(`/${entry.kind}/${entry.id}`);
+        remember([adapt(data, entry.kind)]);
+        updateTitle(id);
+      } catch {
+        // Keep the catalog title if details are unavailable.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+  } finally {
+    resolvingTitles = false;
+  }
+}
+
+const titleObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver((changes) => {
+  for (const { target, isIntersecting } of changes) {
+    const id = target.dataset.catalogTitle;
+    if (isIntersecting && target.isConnected && !checkedTitles.has(id) && !registry.get(id)?.englishTitle) titleQueue.set(id, target);
+  }
+  resolveTitles();
+}) : null;
 
 async function siteApi(path, init) {
   const response = await fetch(`/api/${path}`, { ...init, headers: { Accept: 'application/json', ...init?.headers } });
@@ -93,13 +157,13 @@ function cover(entry, variant = '') {
   return `<span class="cover ${variant}" ${src ? '' : 'data-failed'}>${src ? `<img src="${escape(src)}" alt="" decoding="async">` : ''}</span>`;
 }
 
-function entryButton(entry, text = entry.title) {
-  return `<button type="button" class="title-button" data-entry="${key(entry)}">${escape(text)}</button>`;
+function entryButton(entry) {
+  return `<button type="button" class="title-button" data-entry="${key(entry)}" data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</button>`;
 }
 
 function itemAction(entry, editable = false) {
   const label = editable ? 'Edit' : 'Add';
-  return `<button type="button" class="icon-button" data-entry="${key(entry)}" data-edit="true" aria-label="${label} ${escape(entry.title)}" data-icon="${editable ? 'edit' : 'plus'}"></button>`;
+  return `<button type="button" class="icon-button" data-entry="${key(entry)}" data-edit="true" aria-label="${label} ${escape(displayTitle(entry))}" data-icon="${editable ? 'edit' : 'plus'}"></button>`;
 }
 
 function section(title, body, action = '') {
@@ -138,7 +202,7 @@ function activityRows(entries, editable) {
 function posters(entries, catalog = false) {
   return `<div class="poster-grid ${catalog ? 'catalog-grid' : ''}">${entries.map((entry) => {
     const genre = entry.genres?.slice(0, 2).join(' · ');
-    return `<button type="button" class="poster" data-entry="${key(entry)}">${cover(entry)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong>${escape(entry.title)}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></button>`;
+    return `<button type="button" class="poster" data-entry="${key(entry)}">${cover(entry)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></button>`;
   }).join('')}</div>`;
 }
 
@@ -202,7 +266,7 @@ async function loadFriends(refresh = false) {
   refreshFriendsView();
   try {
     if (!feed.people) {
-      const { data } = await jikan(`/users/${encodeURIComponent(username)}/friends`, refresh);
+      const { data } = await catalog(`/users/${encodeURIComponent(username)}/friends`, refresh);
       if (!Array.isArray(data)) throw new Error('Invalid friends list.');
       const people = data.filter((person) => /^[a-z0-9_-]{1,32}$/i.test(person?.username) && person.username.toLowerCase() !== username.toLowerCase());
       people.sort((a, b) => (Date.parse(b.lastOnline) || 0) - (Date.parse(a.lastOnline) || 0));
@@ -215,7 +279,7 @@ async function loadFriends(refresh = false) {
     if (state.friends !== feed) return;
     const batch = feed.people.slice(feed.checked, feed.checked + friendBatchSize);
     const results = await Promise.allSettled(batch.map(async (friend) => {
-      const { data } = await jikan(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
+      const { data } = await catalog(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
       if (!Array.isArray(data?.anime) || !Array.isArray(data?.manga)) throw new Error('Invalid friend updates.');
       return kinds.flatMap((kind) => data[kind].filter((item) => item?.entry).map((item) => ({
         entry: adapt(item.entry, kind), username: friend, status: typeof item.status === 'string' ? item.status.trim() : '',
@@ -322,6 +386,10 @@ function render() {
   else if (page === 'friends') renderFriends();
   else renderCatalog(page, params);
   mountIcons(view);
+  titleObserver?.disconnect();
+  if (titleObserver) {
+    for (const node of view.querySelectorAll('[data-catalog-title]')) titleObserver.observe(node);
+  }
 }
 
 async function browse(reset = true) {
@@ -336,8 +404,8 @@ async function browse(reset = true) {
   state.browse = { items: old, loading: true, next: false };
   render();
   const request = async (path, kind) => {
-    const { data, meta } = await jikan(`${path}${path.includes('?') ? '&' : '?'}page=${pageNumber}`);
-    return { items: rows(data, kind), next: Boolean(meta?.pagination?.hasNextPage) };
+    const { data, meta, pagination } = await catalog(`${path}${path.includes('?') ? '&' : '?'}page=${pageNumber}`);
+    return { items: rows(data, kind), next: Boolean(pagination?.has_next_page ?? meta?.pagination?.hasNextPage) };
   };
   try {
     let result;
@@ -389,8 +457,8 @@ function toast(message) {
   toastTimer = setTimeout(() => { node.hidden = true; }, 5000);
 }
 
-function open(title, body) {
-  dialogBody.innerHTML = `<div class="dialog-content"><div class="dialog-heading"><h2 id="dialog-title">${escape(title)}</h2><button type="button" class="icon-button" data-action="close" data-icon="close" aria-label="Close"></button></div>${body}</div>`;
+function open(title, body, entryId = '') {
+  dialogBody.innerHTML = `<div class="dialog-content"><div class="dialog-heading"><h2 id="dialog-title" data-dialog-title="${entryId}">${escape(title)}</h2><button type="button" class="icon-button" data-action="close" data-icon="close" aria-label="Close"></button></div>${body}</div>`;
   mountIcons(dialog);
   if (!dialog.open) dialog.showModal();
 }
@@ -427,11 +495,12 @@ async function showEntry(id, edit) {
   if (!entry) return;
   const ticket = ++detailTicket;
   const saved = state.entries[entry.kind].find((item) => item.id === entry.id);
-  open(entry.title, detailBody(entry, edit, saved));
+  open(displayTitle(entry), detailBody(entry, edit, saved), id);
   try {
-    const { data } = await jikan(`/${entry.kind}/${entry.id}`);
+    const { data } = await catalog(`/${entry.kind}/${entry.id}`);
     const full = adapt(data, entry.kind);
     remember([full]);
+    updateTitle(id);
     if (dialog.open && ticket === detailTicket && full.synopsis) dialogBody.querySelector('[data-synopsis]').textContent = full.synopsis;
   } catch {
     // Keep the available catalog details visible.
@@ -578,6 +647,6 @@ siteApi('session').then((session) => {
 }).catch(() => { if (auth) toast('Could not check your sign-in. Please try again.'); });
 
 Promise.allSettled([
-  jikan('/seasons/now').then(({ data }) => { state.season = rows(data, 'anime'); }),
-  jikan('/top/anime?filter=airing').then(({ data }) => { state.airing = rows(data, 'anime'); }),
+  catalog('/seasons/now').then(({ data }) => { state.season = rows(data, 'anime'); }),
+  catalog('/top/anime?filter=airing').then(({ data }) => { state.airing = rows(data, 'anime'); }),
 ]).then(() => { if (route().page === 'panel') render(); });
