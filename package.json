@@ -6,6 +6,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node --env-file-if-exists=.env scripts/preview.mjs",
-    "check": "node --check web/app.js && node --check worker.js"
+    "start": "node scripts/preview.mjs --production",
+    "check": "node --check web/app.js && node --check worker.js && node --check scripts/preview.mjs"
   }
 }

@@ -193,7 +193,10 @@ async function writeList(request, call, kind, id) {
     return { ok: true };
   }
   let input;
-  try { input = await request.json(); } catch { throw new MalError('Invalid list update.', 400); }
+  try { input = await readListUpdate(request); } catch (error) {
+    if (error instanceof MalError) throw error;
+    throw new MalError('Invalid list update.', 400);
+  }
   const statuses = kind === 'anime'
     ? ['watching', 'completed', 'on_hold', 'dropped', 'plan_to_watch']
     : ['reading', 'completed', 'on_hold', 'dropped', 'plan_to_read'];
@@ -207,6 +210,29 @@ async function writeList(request, call, kind, id) {
   });
   const saved = await response.json();
   return { status: saved.status, progress: saved.num_episodes_watched ?? saved.num_chapters_read ?? input.progress, rating: saved.score, updated: saved.updated_at };
+}
+
+async function readListUpdate(request) {
+  if (!request.body) throw new MalError('Invalid list update.', 400);
+  const reader = request.body.getReader();
+  let size = 0;
+  let text = '';
+  const decoder = new TextDecoder();
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 4096) {
+        await reader.cancel();
+        throw new MalError('The list update is too large.', 413);
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    return JSON.parse(text + decoder.decode());
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 export default {

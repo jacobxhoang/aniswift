@@ -28,3 +28,5 @@ npm run build
 ```
 
 The build creates a self-contained Cloudflare Worker at `dist/server/index.js`. Serve the app and its API routes from the same origin. Set the OAuth callback to that origin's `/auth/mal/callback` path before deployment.
+
+For a Node host, use `npm run build` as the build command and `npm start` as the start command. Set `APP_ORIGIN` to the service’s HTTPS origin without a trailing path. Render supplies the origin automatically through `RENDER_EXTERNAL_URL`. The server listens on the host’s `PORT` and uses the HTTPS origin for OAuth cookies and request validation.
