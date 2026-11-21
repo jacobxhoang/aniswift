@@ -253,17 +253,6 @@ function rankings(entries) {
   return `<div class="rank-list">${entries.map((entry, index) => `<article class="rank-row"><span class="rank-number">${index + 1}</span>${cover(entry, 'thumb')}<div>${entryButton(entry)}<p class="row-meta">${score(entry.score) ? `<span class="star">★</span> ${score(entry.score)}` : escape(entry.type || 'Anime')}${entry.total ? ` <span class="separator">·</span> ${entry.total} eps` : ''}</p></div>${itemAction(entry)}</article>`).join('')}</div>`;
 }
 
-function seasonSpotlight(entries) {
-  const lead = entries.find((entry) => safeImage(entry.image)) || featured[0];
-  const rest = entries.filter((entry) => key(entry) !== key(lead)).slice(0, 3);
-  const meta = [lead.type, lead.genres?.slice(0, 2).join(' / '), score(lead.score) && `★ ${score(lead.score)}`].filter(Boolean).join(' · ');
-  return `<article class="season-spotlight"><div class="spotlight-copy">
-    <h3 data-catalog-title="${key(lead)}">${escape(displayTitle(lead))}</h3>
-    ${meta ? `<p class="spotlight-meta">${escape(meta)}</p>` : ''}
-    <button type="button" class="button primary" data-entry="${key(lead)}">View anime details</button>
-  </div><div class="spotlight-art">${cover(lead)}</div></article>${rest.length ? `<div class="season-rail">${posters(rest)}</div>` : ''}`;
-}
-
 function friendActivity({ entry, username, status, progress, total, rating, updated }) {
   const details = [
     Number.isFinite(progress) ? `${progress}${total > 0 ? ` / ${total}` : ''} ${unit(entry.kind, progress)}` : '',
@@ -377,8 +366,8 @@ function renderPanel() {
   const discover = state.season.length ? 'This season' : 'Featured anime';
   const rankHeading = state.airing.length ? 'Top airing anime' : 'Popular picks';
   view.innerHTML = `${heading('My panel')}<div class="dashboard"><div class="stack">
-    ${section(discover, seasonSpotlight(picks), actionLink('#season', 'View season'))}
     ${section('Recent list updates', list, actionLink('#lists', 'View lists'))}
+    ${section(discover, `<div class="season-rail">${posters(picks)}</div>`, actionLink('#season', 'View season'))}
     ${section('Anime and manga picks', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
     </div><aside class="sidebar" aria-label="Dashboard sidebar">${accountCard()}${section('My statistics', statistics())}${section('Friends feed', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
 }

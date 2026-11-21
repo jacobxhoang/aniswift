@@ -172,7 +172,7 @@ async function withMal(request, env, session, operation) {
 
 async function getList(call, kind, page) {
   const fields = `list_status,mean,media_type,alternative_titles,${kind === 'anime' ? 'num_episodes' : 'num_chapters'}`;
-  const params = new URLSearchParams({ fields, limit: '100', offset: String((page - 1) * 100), sort: 'list_updated_at' });
+  const params = new URLSearchParams({ fields, limit: '100', offset: String((page - 1) * 100), sort: 'list_updated_at', nsfw: 'true' });
   const response = await call(`/users/@me/${kind}list?${params}`);
   const { data, paging } = await response.json();
   return {
