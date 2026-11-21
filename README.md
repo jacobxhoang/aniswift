@@ -1,6 +1,6 @@
 # AniLedger
 
-AniLedger is a dark, two-column anime and manga dashboard. [jikan-edge](https://jikan.lucashdo.com/docs) supplies the public catalog, seasonal releases, title details, and rankings. The official MyAnimeList API handles account authorization and list changes.
+AniLedger is a dark, two-column anime and manga dashboard. [Tenrai](https://tenrai.org/) supplies the catalog, with [Jikan Edge](https://jikan.lucashdo.com/docs) as its fallback and the source for public friend activity. The official MyAnimeList API handles account authorization and list changes.
 
 ## Run locally
 
@@ -10,7 +10,7 @@ Use Node.js 22 or later. There are no package dependencies to install.
 npm run dev
 ```
 
-Open `http://localhost:4173`. You can browse and search the catalog without signing in. The signed-out dashboard shows sample activity. A small set of saved titles keeps the catalog browsable if jikan-edge is unavailable.
+Open `http://localhost:4173`. You can browse and search the catalog without signing in. Saved titles keep the catalog browsable when both providers are unavailable.
 
 ## Enable MyAnimeList sign-in
 

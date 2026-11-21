@@ -1,4 +1,4 @@
-import { featured, otherAnime, mangaPicks, seed, previewUpdates } from './catalog.js';
+import { featured, otherAnime, mangaPicks, seed } from './catalog.js';
 
 const JIKAN = 'https://jikan.lucashdo.com/v1';
 const TENRAI = 'https://api.tenrai.org/v1';
@@ -210,6 +210,17 @@ function rankings(entries) {
   return `<div class="rank-list">${entries.map((entry, index) => `<article class="rank-row"><span class="rank-number">${index + 1}</span>${cover(entry, 'thumb')}<div>${entryButton(entry)}<p class="row-meta">${score(entry.score) ? `<span class="star">★</span> ${score(entry.score)}` : escape(entry.type || 'Anime')}${entry.total ? ` <span class="separator">·</span> ${entry.total} eps` : ''}</p></div>${itemAction(entry)}</article>`).join('')}</div>`;
 }
 
+function seasonSpotlight(entries) {
+  const lead = entries.find((entry) => safeImage(entry.image)) || featured[0];
+  const rest = entries.filter((entry) => key(entry) !== key(lead)).slice(0, 3);
+  const meta = [lead.type, lead.genres?.slice(0, 2).join(' / '), score(lead.score) && `★ ${score(lead.score)}`].filter(Boolean).join(' · ');
+  return `<article class="season-spotlight"><div class="spotlight-copy">
+    <h3 data-catalog-title="${key(lead)}">${escape(displayTitle(lead))}</h3>
+    ${meta ? `<p class="spotlight-meta">${escape(meta)}</p>` : ''}
+    <button type="button" class="button primary" data-entry="${key(lead)}">View anime details</button>
+  </div><div class="spotlight-art">${cover(lead)}</div></article>${rest.length ? `<div class="season-rail">${posters(rest)}</div>` : ''}`;
+}
+
 function friendActivity({ entry, username, status, progress, total, rating, updated }) {
   const details = [
     Number.isFinite(progress) ? `${progress}${total > 0 ? ` / ${total}` : ''} ${unit(entry.kind, progress)}` : '',
@@ -316,19 +327,16 @@ function statistics() {
 
 function renderPanel() {
   const recent = ordered([...state.entries.anime, ...state.entries.manga]).slice(0, 4);
-  const sample = !state.user;
-  const display = sample ? previewUpdates : recent;
   const picks = state.season.length ? state.season.slice(0, 4) : featured;
   const airing = state.airing.length ? state.airing.slice(0, 4) : [featured[0], featured[1], otherAnime[0], featured[3]];
-  const list = display.length ? activityRows(display, !sample) : `<div class="empty">${escape(state.listError || 'Your list updates will appear here.')}${actionLink('#anime', 'Browse anime')}</div>`;
-  const updatesAction = `${sample ? '<span class="preview-label">Sample</span>' : ''}${actionLink('#lists', 'View lists')}`;
+  const list = recent.length ? activityRows(recent, true) : `<div class="empty">${escape(state.listError || (state.user ? 'Your list updates will appear here.' : 'Sign in to see your list updates.'))}${actionLink('#anime', 'Browse anime')}</div>`;
   const discover = state.season.length ? 'This season' : 'Featured anime';
   const rankHeading = state.airing.length ? 'Top airing anime' : 'Popular picks';
-  view.innerHTML = `${heading('My panel', '', button('Find a title', 'search'))}<div class="dashboard"><div class="stack">
-    ${section('Recent list updates', list, updatesAction)}
-    ${section(discover, posters(picks), actionLink('#season', 'View season'))}
-    ${section('More to explore', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
-    </div><aside class="sidebar" aria-label="Dashboard sidebar">${section('My statistics', statistics())}${accountCard()}${section('Friends feed', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
+  view.innerHTML = `${heading('My panel')}<div class="dashboard"><div class="stack">
+    ${section(discover, seasonSpotlight(picks), actionLink('#season', 'View season'))}
+    ${section('Recent list updates', list, actionLink('#lists', 'View lists'))}
+    ${section('Anime and manga picks', posters([...otherAnime, ...mangaPicks]), actionLink('#anime', 'Browse catalog'))}
+    </div><aside class="sidebar" aria-label="Dashboard sidebar">${accountCard()}${section('My statistics', statistics())}${section('Friends feed', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, rankings(airing), actionLink('#airing', 'See all'))}</aside></div>`;
 }
 
 function renderLists() {
@@ -560,7 +568,6 @@ document.addEventListener('click', async (event) => {
     return;
   }
   switch (control.dataset.action) {
-    case 'search': document.querySelector('#query').focus(); break;
     case 'account': showAccount(); break;
     case 'close': dialog.close(); break;
     case 'retry-catalog': browse(); break;

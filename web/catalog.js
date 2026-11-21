@@ -12,7 +12,7 @@ export const featured = [
 export const otherAnime = [
   anime(51009, 'Jujutsu Kaisen Season 2', 'Jujutsu Kaisen 2nd Season', tmdb('emxyWxnb15ahE9Lm9uqmwpgWLYs.jpg'), 8.8, 23, ['Action', 'Supernatural'], 'Gojo’s past and the Shibuya Incident come into focus as sorcerers face a rising threat.'),
   anime(50265, 'Spy × Family', 'Spy x Family', tmdb('pGeYGDVyHPraHqG2V3G3zIsfKCG.jpg'), 8.5, 12, ['Action', 'Comedy'], 'A spy assembles a family for an undercover mission, unaware his new wife is an assassin and his daughter can read minds.'),
-  anime(47917, 'Bocchi the Rock!', 'Bocchi the Rock!', 'https://pics.filmaffinity.com/Bocchi_the_Rock_TV_Series-553473141-large.jpg', 8.8, 12, ['Comedy', 'Music'], 'A talented but painfully shy guitarist finds a place in a band and learns to play in front of others.'),
+  anime(47917, 'Bocchi the Rock!', 'Bocchi the Rock!', 'https://cdn.myanimelist.net/images/anime/1448/127956.jpg', 8.8, 12, ['Comedy', 'Music'], 'A talented but painfully shy guitarist finds a place in a band and learns to play in front of others.'),
 ];
 
 export const mangaPicks = [
@@ -20,9 +20,3 @@ export const mangaPicks = [
 ];
 
 export const seed = [...featured, ...otherAnime, ...mangaPicks];
-export const previewUpdates = [
-  { ...otherAnime[0], status: 'watching', progress: 17, when: 'Today' },
-  { ...mangaPicks[0], status: 'reading', progress: 28, when: 'Yesterday' },
-  { ...otherAnime[2], status: 'completed', progress: 12, when: 'Yesterday' },
-  { ...otherAnime[1], status: 'plan_to_watch', progress: 0, when: 'This week' },
-];
