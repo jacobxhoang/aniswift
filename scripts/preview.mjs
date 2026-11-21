@@ -8,15 +8,39 @@ if (!production) {
 }
 const { default: worker } = await import('../dist/server/index.js');
 const port = Number(process.env.PORT || 4173);
-const host = production ? '0.0.0.0' : '127.0.0.1';
 const publicOrigin = process.env.APP_ORIGIN || process.env.RENDER_EXTERNAL_URL;
 if (production && !publicOrigin) throw new Error('Set APP_ORIGIN to the public HTTPS origin of AniLedger.');
-const origin = new URL(production ? publicOrigin : `http://localhost:${port}`);
+const pinnedOrigin = production ? new URL(publicOrigin) : null;
+if (pinnedOrigin && pinnedOrigin.protocol !== 'https:') throw new Error('Set APP_ORIGIN to the public HTTPS origin of AniLedger.');
 
-if (production && origin.protocol !== 'https:') throw new Error('Set APP_ORIGIN to the public HTTPS origin of AniLedger.');
+const authority = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::\d{1,5})?$/i;
+const firstHeader = (incoming, name) => {
+  const value = incoming.headers[name];
+  return typeof value === 'string' ? value.split(',')[0].trim() : '';
+};
+
+// Production folds every request onto APP_ORIGIN. Development answers whatever
+// hostname it is reached at, so tunnels, preview hostnames and LAN addresses all
+// work; the worker still rejects writes addressed to another host.
+function requestOrigin(incoming) {
+  if (pinnedOrigin) return pinnedOrigin;
+  const requested = firstHeader(incoming, 'x-forwarded-host') || firstHeader(incoming, 'host');
+  const host = authority.test(requested) ? requested : `localhost:${port}`;
+  let secure = firstHeader(incoming, 'x-forwarded-proto').toLowerCase() === 'https';
+  if (!secure) {
+    try {
+      const browser = new URL(firstHeader(incoming, 'origin'));
+      secure = browser.host === host && browser.protocol === 'https:';
+    } catch {
+      // A scheme-less request keeps http; only a matching Origin may upgrade it.
+    }
+  }
+  return new URL(`${secure ? 'https' : 'http'}://${host}`);
+}
 
 createServer(async (incoming, outgoing) => {
   try {
+    const origin = requestOrigin(incoming);
     const url = new URL(incoming.url, origin);
     if (url.origin !== origin.origin) {
       outgoing.writeHead(400).end('Invalid request URL');
@@ -40,4 +64,4 @@ createServer(async (incoming, outgoing) => {
     console.error(error);
     outgoing.writeHead(500).end('Preview error');
   }
-}).listen(port, host, () => console.log(production ? `Serving ${origin.origin}` : `Local: ${origin.origin}`));
+}).listen(port, '0.0.0.0', () => console.log(production ? `Serving ${pinnedOrigin.origin}` : `Local: http://localhost:${port}`));

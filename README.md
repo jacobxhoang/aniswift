@@ -35,7 +35,7 @@ Catalog requests are cached in memory while the app is running. A successful fal
 npm run dev
 ```
 
-Open <http://localhost:4173>. The development command builds the app and starts the local server. To check JavaScript syntax and build the deployable bundle:
+Open <http://localhost:4173>. The development command builds the app and starts the local server. The server listens on all interfaces (set `PORT` to change the port) and answers whatever hostname it is reached at, so tunnels, preview URLs and LAN addresses work; list writes keep their same-origin check. To check JavaScript syntax and build the deployable bundle:
 
 ```sh
 npm run check
