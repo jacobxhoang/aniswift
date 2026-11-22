@@ -112,60 +112,192 @@ struct HomeScreen: View {
 
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
-    @State private var kind: Kind = .anime
-    @State private var status = "all"
+    let kind: Kind
+    @State private var collapsed: Set<String> = []
+    @State private var query = ""
+    @State private var searching = false
+    @State private var sort = ListSort.recent
     @State private var paging = false
+    @State private var pendingRemoval: ListEntry?
+    @State private var saving: Set<String> = []
+    @FocusState private var searchFocused: Bool
+
+    private enum ListSort: String, CaseIterable {
+        case recent = "Recently updated"
+        case title = "Title"
+        case rating = "My rating"
+    }
+
+    init(kind: Kind) {
+        self.kind = kind
+        _collapsed = State(initialValue: Set(kind.statuses.dropFirst().dropLast()))
+    }
+
+    private var entries: [ListEntry] { store.lists[kind, default: []] }
+    private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var removalPresented: Binding<Bool> {
+        Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
+    }
 
     var body: some View {
         List {
-            if store.checking { ProgressView("Checking session") }
-            else if store.account == nil { SignInButton() }
-            else {
-                Section {
-                    Picker("List", selection: $kind) {
-                        ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                    }.pickerStyle(.segmented)
-                    Picker("Status", selection: $status) {
-                        Text("All statuses").tag("all")
-                        ForEach(kind.statuses, id: \.self) { Text(statusLabel($0)).tag($0) }
-                    }
+            if store.checking {
+                ProgressView("Checking session").listRowBackground(Color.clear)
+            } else if store.account == nil {
+                SignInButton().listRowBackground(Color.clear)
+            } else {
+                if searching {
+                    TextField("Search \(kind.label) list", text: $query)
+                        .focused($searchFocused)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .listRowBackground(Palette.surface)
                 }
-                let entries = store.lists[kind, default: []].filter { status == "all" || $0.status == status }
-                if entries.isEmpty { Text("No entries loaded for this filter.").foregroundStyle(.secondary) }
-                ForEach(entries) { item in
-                    NavigationLink(value: item.title) {
-                        TitleRow(title: item.title, note: "\(statusLabel(item.status)) · \(item.progress)/\(item.title.total.map { String($0) } ?? "?")")
-                    }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                        if item.title.total == nil || item.progress < item.title.total! {
-                            Button {
-                                Task {
-                                    do {
-                                        try await store.change(item.title, ListChange(status: item.status, progress: item.progress + 1, rating: item.rating))
-                                    } catch { store.handle(error) }
-                                }
-                            } label: { Label("+1 progress", systemImage: "plus") }.tint(Palette.accent)
+                ForEach(kind.statuses, id: \.self) { status in
+                    let group = entries.filter { $0.status == status }
+                    let matches = visibleEntries(group)
+                    if searchTerm.isEmpty || !matches.isEmpty {
+                        groupHeader(status, count: searchTerm.isEmpty ? group.count : matches.count)
+                            .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                        if !collapsed.contains(status) || !searchTerm.isEmpty {
+                            ForEach(matches) { item in entryRow(item) }
                         }
                     }
+                }
+                if !searchTerm.isEmpty && visibleEntries(entries).isEmpty {
+                    Text("No matches in your loaded list.").foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
                 }
                 if let page = store.nextList[kind] {
-                    Button(paging ? "Loading…" : "Load more") {
-                        let selected = kind
+                    Button(paging ? "Loading…" : "Load more entries") {
                         Task {
+                            guard !paging else { return }
                             paging = true
                             defer { paging = false }
-                            do { try await store.loadList(selected, page: page) }
+                            do { try await store.loadList(kind, page: page) }
                             catch { store.handle(error) }
                         }
-                    }.disabled(paging)
+                    }.disabled(paging).listRowBackground(Color.clear)
                 }
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
-        .navigationTitle("My Lists")
-        .onChange(of: kind) { _, _ in status = "all" }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle(kind.label)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if store.account != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort by", selection: $sort) {
+                            ForEach(ListSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                        }
+                    } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        searching.toggle()
+                        if !searching { query = "" }
+                    } label: { Label(searching ? "Close search" : "Search list", systemImage: searching ? "xmark" : "magnifyingglass") }
+                }
+            }
+        }
+        .onChange(of: searching) { _, showing in searchFocused = showing }
         .refreshable { await store.loadLists(force: true) }
+        .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
+            Button("Remove", role: .destructive) { update(item, change: nil) }
+            Button("Cancel", role: .cancel) {}
+        } message: { item in Text(item.title.name) }
+    }
+
+    private func groupHeader(_ status: String, count: Int) -> some View {
+        let expanded = !collapsed.contains(status) || !searchTerm.isEmpty
+        let partial = store.nextList[kind] != nil && searchTerm.isEmpty
+        return Button {
+            if collapsed.contains(status) { collapsed.remove(status) }
+            else { collapsed.insert(status) }
+        } label: {
+            HStack(spacing: 12) {
+                Text(statusLabel(status)).font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(count)\(partial ? "+" : "")").monospacedDigit()
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .font(.caption.weight(.semibold)).accessibilityHidden(true)
+            }
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .ledgerGlassBadge()
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        .disabled(!searchTerm.isEmpty)
+    }
+
+    private func visibleEntries(_ group: [ListEntry]) -> [ListEntry] {
+        let matches = group.filter { entry in
+            searchTerm.isEmpty || entry.title.name.localizedCaseInsensitiveContains(searchTerm)
+                || entry.title.original.localizedCaseInsensitiveContains(searchTerm)
+        }
+        switch sort {
+        case .recent: return matches.sorted { $0.updated > $1.updated }
+        case .title: return matches.sorted { $0.title.name.localizedStandardCompare($1.title.name) == .orderedAscending }
+        case .rating: return matches.sorted { $0.rating == $1.rating ? $0.updated > $1.updated : $0.rating > $1.rating }
+        }
+    }
+
+    private func entryRow(_ item: ListEntry) -> some View {
+        NavigationLink(value: item.title) {
+            HStack(alignment: .top, spacing: 12) {
+                Art(url: item.title.image, symbol: kind == .anime ? "film" : "book")
+                    .frame(width: 80, height: 116)
+                    .clipShape(.rect(cornerRadius: 7))
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.title.name).font(.body.weight(.medium)).foregroundStyle(.primary)
+                    let total = item.title.total.flatMap { $0 > 0 ? String($0) : nil }
+                    if item.status.hasPrefix("plan_to"), let total {
+                        Text("\(total) \(kind.unit.lowercased()) total").foregroundStyle(.secondary)
+                    } else if !item.status.hasPrefix("plan_to") {
+                        Text("\(item.progress) / \(total ?? "?") \(kind.unit.lowercased())").foregroundStyle(.secondary)
+                    }
+                    if item.rating > 0 {
+                        Label("\(item.rating)", systemImage: "star.fill")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("My rating \(item.rating) out of ten")
+                    }
+                }.font(.subheadline)
+                Spacer(minLength: 0)
+            }
+            .padding(.vertical, 3)
+        }
+        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            Button(role: .destructive) { pendingRemoval = item } label: { Label("Remove", systemImage: "trash") }
+                .disabled(saving.contains(item.id))
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            if (item.title.total ?? 0) <= 0 || item.progress < (item.title.total ?? 0) {
+                Button {
+                    update(item, change: ListChange(status: item.status, progress: item.progress + 1, rating: item.rating))
+                } label: { Label("+1 progress", systemImage: "plus") }
+                .tint(.gray)
+                .disabled(saving.contains(item.id))
+            }
+        }
+    }
+
+    private func update(_ item: ListEntry, change: ListChange?) {
+        guard saving.insert(item.id).inserted else { return }
+        Task {
+            defer { saving.remove(item.id) }
+            do { try await store.change(item.title, change) }
+            catch { store.handle(error) }
+        }
     }
 }
 

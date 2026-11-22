@@ -24,25 +24,25 @@ struct AniLedgerApp: App {
     private var rootTabs: some View {
         if #available(iOS 26.0, *) {
             TabView {
-                Tab("Home", systemImage: "house") { stack { HomeScreen() } }
-                Tab("My Lists", systemImage: "checklist") { stack { ListsScreen() } }
+                Tab("Anime", systemImage: "tv") { stack { ListsScreen(kind: .anime) } }
+                Tab("Manga", systemImage: "books.vertical") { stack { ListsScreen(kind: .manga) } }
                 Tab("Discover", systemImage: "safari") { stack { DiscoverScreen() } }
-                Tab("Friends", systemImage: "person.2") { stack { FriendsScreen() } }
-                Tab("Account", systemImage: "person.crop.circle") { stack { AccountScreen() } }
+                Tab("Feed", systemImage: "person.2") { stack { FriendsScreen() } }
+                Tab("Profile", systemImage: "person.crop.circle") { stack { AccountScreen() } }
             }
             .tabBarMinimizeBehavior(.onScrollDown)
         } else {
             TabView {
-                stack { HomeScreen() }
-                    .tabItem { Label("Home", systemImage: "house") }
-                stack { ListsScreen() }
-                    .tabItem { Label("My Lists", systemImage: "checklist") }
+                stack { ListsScreen(kind: .anime) }
+                    .tabItem { Label("Anime", systemImage: "tv") }
+                stack { ListsScreen(kind: .manga) }
+                    .tabItem { Label("Manga", systemImage: "books.vertical") }
                 stack { DiscoverScreen() }
                     .tabItem { Label("Discover", systemImage: "safari") }
                 stack { FriendsScreen() }
-                    .tabItem { Label("Friends", systemImage: "person.2") }
+                    .tabItem { Label("Feed", systemImage: "person.2") }
                 stack { AccountScreen() }
-                    .tabItem { Label("Account", systemImage: "person.crop.circle") }
+                    .tabItem { Label("Profile", systemImage: "person.crop.circle") }
             }
         }
     }
@@ -246,6 +246,7 @@ struct AccountScreen: View {
                 }
             }
             Section("AniLedger") {
+                NavigationLink { HomeScreen() } label: { Label("Dashboard", systemImage: "house") }
                 Link("AniLedger website", destination: API.backend)
                 Link("Tenrai", destination: URL(string: "https://tenrai.org")!)
                 Link("Jikan Edge", destination: URL(string: "https://jikan.lucashdo.com")!)
@@ -253,6 +254,6 @@ struct AccountScreen: View {
         }
         .scrollContentBackground(.hidden)
         .background(Palette.canvas)
-        .navigationTitle("Account")
+        .navigationTitle("Profile")
     }
 }
