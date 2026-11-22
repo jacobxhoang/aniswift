@@ -493,12 +493,77 @@ struct DiscoverScreen: View {
     }
 }
 
+struct CatalogFacet: Hashable, Identifiable {
+    enum Category: String {
+        case genre, theme, studio, producer
+
+        var filter: String {
+            switch self {
+            case .genre, .theme: "genres"
+            case .studio, .producer: "producers"
+            }
+        }
+    }
+
+    let name: String
+    let malID: Int?
+    let category: Category
+    let kind: Kind
+    var id: String { name.lowercased() }
+
+    @MainActor
+    func page(_ page: Int, api: API) async throws -> Page<Title> {
+        let id: Int
+        if let malID, malID > 0 {
+            id = malID
+        } else {
+            id = try await resolveID(api: api)
+        }
+        let filters = [
+            URLQueryItem(name: category.filter, value: String(id)),
+            URLQueryItem(name: "page", value: String(page))
+        ]
+        return catalogPage(try await api.catalog(kind.rawValue, filters), kind: kind)
+    }
+
+    @MainActor
+    private func resolveID(api: API) async throws -> Int {
+        let usesGenreIndex = category.filter == "genres"
+        let path = usesGenreIndex ? "genres/\(kind.rawValue)" : "producers"
+        let query = usesGenreIndex
+            ? URLQueryItem(name: "filter", value: category == .theme ? "themes" : "genres")
+            : URLQueryItem(name: "q", value: name)
+        let response = try await api.catalog(path, [query])
+        let entries: [Fields] = response.read("data") ?? []
+        for entry in entries {
+            let aliases: [Fields] = entry.read("titles") ?? []
+            let names = [entry.string("name")].compactMap { $0 } + aliases.compactMap { $0.string("title", "name") }
+            if names.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame }),
+               let id: Int = entry.read("mal_id", "malId", "id"), id > 0 {
+                return id
+            }
+        }
+        throw APIError(status: 404, message: "Could not find \(name) in the catalog.")
+    }
+}
+
+struct CatalogFacetScreen: View {
+    let facet: CatalogFacet
+
+    var body: some View {
+        PosterResults(name: facet.name, shelf: nil, query: "", kind: facet.kind, facet: facet)
+            .navigationTitle(facet.name)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
 private struct PosterResults: View {
     @EnvironmentObject private var store: Store
     let name: String
     let shelf: DiscoverShelf?
     let query: String
     let kind: Kind
+    var facet: CatalogFacet? = nil
     @State private var titles: [Title] = []
     @State private var page = 1
     @State private var more = false
@@ -538,6 +603,7 @@ private struct PosterResults: View {
         do {
             let result: Page<Title>
             if let shelf { result = try await shelf.page(page, api: store.api) }
+            else if let facet { result = try await facet.page(page, api: store.api) }
             else {
                 if page == 1 { try await Task.sleep(for: .milliseconds(300)) }
                 let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]

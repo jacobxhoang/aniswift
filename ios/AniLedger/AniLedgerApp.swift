@@ -54,6 +54,7 @@ struct AniLedgerApp: App {
                 .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
                 .navigationDestination(for: Friend.self) { FriendProfileScreen(friend: $0) }
                 .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
+                .navigationDestination(for: CatalogFacet.self) { CatalogFacetScreen(facet: $0) }
         }
     }
 }
@@ -76,6 +77,8 @@ enum Palette {
 }
 
 enum LedgerLayout {
+    static let detailPosterWidth: CGFloat = 108
+    static let detailPosterRatio: CGFloat = 0.685
     static let inset: CGFloat = 20
     static let gap: CGFloat = 12
     static let sectionGap: CGFloat = 28
@@ -232,7 +235,7 @@ struct CoverTile: View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
                 Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
-                    .aspectRatio(2 / 3, contentMode: .fit)
+                    .aspectRatio(reservesCaptionSpace ? 2 / 3 : LedgerLayout.detailPosterRatio, contentMode: .fit)
                     .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
                     .overlay {
                         RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
@@ -246,7 +249,9 @@ struct CoverTile: View {
                                 .ledgerGlassBadge().padding(6)
                         }
                     }
-                Text(title.name).font(.subheadline.weight(.medium)).lineLimit(2, reservesSpace: reservesCaptionSpace)
+                Text(title.name)
+                    .font(reservesCaptionSpace ? .subheadline.weight(.medium) : .subheadline)
+                    .lineLimit(2, reservesSpace: reservesCaptionSpace)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -444,22 +449,17 @@ struct AccountScreen: View {
 
     @ViewBuilder
     private func favoriteShelf(_ kind: Kind) -> some View {
-        if let titles = store.malFavorites[kind] {
-            if titles.isEmpty {
-                Text("No public favorite \(kind.rawValue).").font(.subheadline)
-                    .foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
-            } else {
-                PosterShelf(heading: "Favorite \(kind.rawValue)", titles: titles) {
-                    NavigationLink {
-                        ScrollView {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 16) {
-                                ForEach(unique(titles)) { CoverTile(title: $0) }
-                            }.padding(18)
-                        }
-                        .background(Palette.background)
-                        .navigationTitle("Favorite \(kind.rawValue)")
-                    } label: { Text("View all").font(.caption.weight(.semibold)) }
-                }
+        if let titles = store.malFavorites[kind], !titles.isEmpty {
+            PosterShelf(heading: "Favorite \(kind.rawValue)", titles: titles) {
+                NavigationLink {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 16) {
+                            ForEach(unique(titles)) { CoverTile(title: $0) }
+                        }.padding(18)
+                    }
+                    .background(Palette.background)
+                    .navigationTitle("Favorite \(kind.rawValue)")
+                } label: { Text("View all").font(.caption.weight(.semibold)) }
             }
         }
     }

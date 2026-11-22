@@ -173,9 +173,19 @@ struct TitleScreen: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            let credit = fieldNames(title.kind == .anime ? "studios" : "authors").joined(separator: " · ")
-            if !credit.isEmpty {
-                Text(credit.uppercased()).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            let studios = catalogFacets("studios", category: .studio)
+            let authors = fieldNames("authors").joined(separator: " · ")
+            if title.kind == .anime, !studios.isEmpty {
+                FlowLayout {
+                    ForEach(studios) { studio in
+                        NavigationLink(value: studio) {
+                            Text(studio.name.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            } else if title.kind == .manga, !authors.isEmpty {
+                Text(authors.uppercased()).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             } else if current.original != current.name {
                 Text(current.original).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
@@ -288,9 +298,14 @@ struct TitleScreen: View {
                     let aliases: [String] = record.read("title_synonyms", "titleSynonyms") ?? []
                     if !aliases.isEmpty { infoCell("Also known as", aliases.joined(separator: "\n")) }
                 }
-                chips("Themes", fieldNames("themes"))
-                chips("Genres", fieldNames("genres"))
-                chips(title.kind == .anime ? "Producers" : "Serialization", fieldNames(title.kind == .anime ? "producers" : "serializations"))
+                facetChips("Themes", catalogFacets("themes", category: .theme))
+                facetChips("Genres", catalogFacets("genres", category: .genre))
+                if title.kind == .anime {
+                    facetChips("Studios", catalogFacets("studios", category: .studio))
+                    facetChips("Producers", catalogFacets("producers", category: .producer))
+                } else {
+                    chips("Serialization", fieldNames("serializations"))
+                }
             }
         }
     }
@@ -303,16 +318,45 @@ struct TitleScreen: View {
         .accessibilityElement(children: .combine)
     }
 
+    private func catalogFacets(_ key: String, category: CatalogFacet.Category) -> [CatalogFacet] {
+        let rows: [Fields] = record?.read(key) ?? []
+        let names: [String] = record?.read(key) ?? []
+        let structured: [CatalogFacet] = rows.compactMap { row in
+            guard let name = row.string("name") else { return nil }
+            return CatalogFacet(name: name, malID: row.read("mal_id", "malId", "id"),
+                                category: category, kind: title.kind)
+        }
+        return unique(structured + names.map { CatalogFacet(name: $0, malID: nil, category: category, kind: title.kind) })
+    }
+
+    @ViewBuilder
+    private func facetChips(_ label: String, _ facets: [CatalogFacet]) -> some View {
+        if !facets.isEmpty {
+            block(label) {
+                FlowLayout {
+                    ForEach(facets) { facet in
+                        NavigationLink(value: facet) { chipLabel(facet.name) }
+                            .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+    }
+
+    private func chipLabel(_ name: String) -> some View {
+        Text(name).font(.subheadline)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Palette.surface, in: .capsule)
+    }
+
     @ViewBuilder
     private func chips(_ label: String, _ values: [String]) -> some View {
         if !values.isEmpty {
             block(label) {
                 FlowLayout {
                     ForEach(Array(Set(values)).sorted(), id: \.self) { value in
-                        Text(value).font(.subheadline)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 10).padding(.vertical, 6)
-                            .background(Palette.surface, in: .capsule)
+                        chipLabel(value)
                     }
                 }
             }
@@ -342,7 +386,7 @@ struct TitleScreen: View {
             }
             LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
                 ForEach(items.prefix(12)) { item in
-                    shelfCover(item, note: notes[item.id]).frame(width: LedgerLayout.posterWidth)
+                    shelfCover(item, note: notes[item.id]).frame(width: LedgerLayout.detailPosterWidth)
                 }
             }
             .padding(.horizontal, -LedgerLayout.inset)
@@ -370,7 +414,7 @@ struct TitleScreen: View {
             }
             LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
                 ForEach(characters.prefix(12)) { member in
-                    CastCard(member: member, showsRoleOnly: true).frame(width: LedgerLayout.posterWidth)
+                    CastCard(member: member, showsRoleOnly: true).frame(width: LedgerLayout.detailPosterWidth)
                 }
             }
             .padding(.horizontal, -LedgerLayout.inset)

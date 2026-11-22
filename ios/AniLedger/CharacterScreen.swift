@@ -42,7 +42,7 @@ struct CastCard: View {
             let detail = inDirectory || showsRoleOnly ? (member.role ?? "") :
                 [member.role, member.actor].compactMap { $0 }.joined(separator: " · ")
             PortraitCard(image: member.character.image, name: member.character.name,
-                         detail: detail, inDirectory: inDirectory)
+                         detail: detail, inDirectory: inDirectory, compactCaption: showsRoleOnly)
         }
         .buttonStyle(.plain)
     }
@@ -294,21 +294,24 @@ private struct PortraitCard: View {
     let name: String
     let detail: String
     var inDirectory = false
+    var compactCaption = false
+
+    private var reservesCaptionSpace: Bool { !inDirectory && !compactCaption }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Art(url: image, symbol: "person.fill")
-                .aspectRatio(inDirectory ? 0.70 : 2 / 3, contentMode: .fit)
+                .aspectRatio(inDirectory ? 0.70 : (compactCaption ? LedgerLayout.detailPosterRatio : 2 / 3), contentMode: .fit)
                 .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
             Text(name)
                 .font(inDirectory ? .body : .subheadline)
                 .foregroundStyle(.primary)
-                .lineLimit(2, reservesSpace: !inDirectory)
-            if !inDirectory || !detail.isEmpty {
+                .lineLimit(2, reservesSpace: reservesCaptionSpace)
+            if reservesCaptionSpace || !detail.isEmpty {
                 Text(detail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2, reservesSpace: !inDirectory)
+                    .lineLimit(2, reservesSpace: reservesCaptionSpace)
                     .accessibilityHidden(detail.isEmpty)
             }
         }
