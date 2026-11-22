@@ -3,9 +3,6 @@ import SwiftUI
 struct TitleScreen: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dynamicTypeSize) private var typeSize
-    @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
-    @State private var managingFavorite = false
     @ScaledMetric(relativeTo: .body) private var quickSheetExtra: CGFloat = 32
     let title: Title
     @State private var record: Fields?
@@ -74,15 +71,6 @@ struct TitleScreen: View {
                     .accessibilityLabel(saved == nil ? "Add to My List" : "Edit list entry")
                     .disabled(changingList)
                 }
-                Button {
-                    managingFavorite = true
-                    openURL(title.malURL)
-                } label: {
-                    Image(systemName: store.isMALFavorite(current) ? "heart.fill" : "heart")
-                }
-                .accessibilityLabel("Manage favorite on MyAnimeList")
-                .accessibilityValue(store.isMALFavorite(current) ? "Favorited" : "")
-                .accessibilityHint("Opens the title page where you can change your favorite")
                 Menu {
                     ShareLink(item: API.backend.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
                     Link(destination: title.malURL) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
@@ -103,12 +91,6 @@ struct TitleScreen: View {
             }
         }
         .task { await load() }
-        .task(id: store.account?.id) { await store.loadFavorites() }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active, managingFavorite else { return }
-            managingFavorite = false
-            Task { await store.loadFavorites(refresh: true) }
-        }
         .task(id: store.account?.id) {
             friendRows = []
             friendOffset = 0

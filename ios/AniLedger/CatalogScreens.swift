@@ -115,6 +115,7 @@ struct ListsScreen: View {
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
+    @State private var searchPresented = false
     @State private var sort = ListSort.recent
     @State private var paging = false
     @State private var pendingRemoval: ListEntry?
@@ -141,16 +142,13 @@ struct ListsScreen: View {
     var body: some View {
         if store.account == nil {
             list
-        } else if #available(iOS 26.0, *) {
-            list
-                .searchable(text: $query, prompt: "Search")
-                .searchToolbarBehavior(.minimize)
-                .toolbar {
-                    DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
-                }
         } else {
             list
-                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+                .searchable(text: $query, isPresented: $searchPresented,
+                            placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
+                .onChange(of: searchPresented) { _, presented in
+                    if !presented { query = "" }
+                }
         }
     }
 
@@ -204,6 +202,13 @@ struct ListsScreen: View {
                             ForEach(ListSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
                     } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
+                }
+                if !searchPresented {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { searchPresented = true } label: {
+                            Label("Search list", systemImage: "magnifyingglass")
+                        }
+                    }
                 }
             }
         }

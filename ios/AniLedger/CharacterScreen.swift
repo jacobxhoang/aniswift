@@ -5,8 +5,6 @@ struct CharacterReference: Hashable, Identifiable {
     let name: String
     let image: URL?
 
-    var malURL: URL { URL(string: "https://myanimelist.net/character/\(id)")! }
-
     init?(_ fields: Fields) {
         guard let id: Int = fields.read("mal_id", "malId", "id"), id > 0,
               let name = fields.string("name") else { return nil }
@@ -48,17 +46,13 @@ struct CastCard: View {
 
 struct CharacterScreen: View {
     @EnvironmentObject private var store: Store
-    @Environment(\.openURL) private var openURL
-    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.dynamicTypeSize) private var typeSize
     let character: CharacterReference
 
     @State private var profile: Fields?
     @State private var failed = false
-    @State private var managingFavorite = false
 
     private var name: String { profile.flatMap { $0.string("name") }.map(displayPersonName) ?? character.name }
-    private var isFavorite: Bool { store.malCharacterFavorites.contains(character.id) }
     private var voices: [CharacterVoice] {
         let rows: [Fields] = profile?.read("voices", "voice_actors", "voiceActors") ?? []
         return unique(rows.compactMap(CharacterVoice.init))
@@ -91,25 +85,7 @@ struct CharacterScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle(name)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    managingFavorite = true
-                    openURL(character.malURL)
-                } label: {
-                    Image(systemName: isFavorite ? "heart.fill" : "heart")
-                }
-                .accessibilityLabel("Manage favorite on MyAnimeList")
-                .accessibilityValue(isFavorite ? "Favorited" : "")
-            }
-        }
         .task { await load() }
-        .task(id: store.account?.id) { await store.loadFavorites() }
-        .onChange(of: scenePhase) { _, phase in
-            guard phase == .active, managingFavorite else { return }
-            managingFavorite = false
-            Task { await store.loadFavorites(refresh: true) }
-        }
         .refreshable { await load(refresh: true) }
     }
 
