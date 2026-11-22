@@ -6,47 +6,71 @@ final class Store: ObservableObject {
     @Published var account: Account?
     @Published var checking = true
     @Published var message: String?
-    @Published var lists: [Kind: [ListEntry]] = [:]
-    @Published var nextList: [Kind: Int] = [:]
+    @Published private var savedLists: [Kind: SavedList] = [:]
+    @Published private(set) var refreshingLists: Set<Kind> = []
     @Published var friends: [Friend] = []
     @Published var activity: [FriendUpdate] = []
     @Published var friendMessage: String?
     @Published var loadingFriends = false
     @Published var checkedFriends = 0
-    private var loadedAccount: Int?
+    private var accountGeneration = UUID()
+    private var listRevisions: [Kind: Int] = [:]
+    private var pagingLists: Set<Kind> = []
+
+    var lists: [Kind: [ListEntry]] { savedLists.mapValues(\.items) }
+    var nextList: [Kind: Int] { savedLists.compactMapValues { $0.more ? $0.page + 1 : nil } }
 
     var recent: [ListEntry] {
         (lists[.anime, default: []] + lists[.manga, default: []]).sorted { $0.updated > $1.updated }
     }
 
     func restore() async {
+        if api.hasSession, let cache = ListCache.read() {
+            account = cache.account
+            savedLists = cache.lists
+            checking = false
+        }
+        let generation = accountGeneration
         do {
-            account = try await api.session()
+            let user = try await api.session()
+            guard accountGeneration == generation else { return }
+            setAccount(user)
             checking = false
-            await loadLists()
+            await loadLists(force: true)
         } catch {
+            guard accountGeneration == generation else { return }
             checking = false
-            message = error.localizedDescription
+            if !api.hasSession { setAccount(nil) }
+            if account == nil { message = error.localizedDescription }
         }
     }
 
     func connected(_ user: Account) async {
-        account = user
-        await loadLists()
+        setAccount(user)
+        await loadLists(force: true)
     }
 
     func disconnect() {
         do {
             try api.signOut()
-            account = nil
-            loadedAccount = nil
-            lists = [:]
-            nextList = [:]
+            setAccount(nil)
+        } catch { message = error.localizedDescription }
+    }
+
+    private func setAccount(_ user: Account?) {
+        if account?.id != user?.id || user == nil {
+            accountGeneration = UUID()
+            listRevisions = [:]
+            pagingLists = []
+            refreshingLists = []
+            savedLists = [:]
             activity = []
             friends = []
             checkedFriends = 0
             friendMessage = nil
-        } catch { message = error.localizedDescription }
+            ListCache.remove()
+        }
+        account = user
     }
 
     func handle(_ error: Error) {
@@ -55,32 +79,91 @@ final class Store: ObservableObject {
     }
 
     func loadLists(force: Bool = false) async {
-        guard let user = account, force || loadedAccount != user.id else { return }
-        loadedAccount = user.id
+        let generation = accountGeneration
         for kind in Kind.allCases {
-            do { try await loadList(kind, page: 1) }
+            guard accountGeneration == generation else { return }
+            guard force || savedLists[kind] == nil else { continue }
+            do { try await refreshList(kind) }
             catch {
-                loadedAccount = nil
-                handle(error)
-                if account == nil { return }
+                if accountGeneration == generation,
+                   ((error as? APIError)?.status == 401 || savedLists[kind] == nil) {
+                    handle(error)
+                }
             }
         }
     }
 
+    private func refreshList(_ kind: Kind) async throws {
+        guard account != nil, !refreshingLists.contains(kind), !pagingLists.contains(kind) else { return }
+        let generation = accountGeneration
+        refreshingLists.insert(kind)
+        defer {
+            if accountGeneration == generation { refreshingLists.remove(kind) }
+        }
+
+        // Fetch the loaded range as a unit so entries that move between pages stay consistent.
+        repeat {
+            let revision = listRevisions[kind, default: 0]
+            let lastPage = max(1, savedLists[kind]?.page ?? 0)
+            var items: [ListEntry] = []
+            var page = 1
+            while true {
+                let result = try await api.list(kind, page: page)
+                guard accountGeneration == generation else { return }
+                if listRevisions[kind, default: 0] != revision { break }
+                items.append(contentsOf: result.items)
+                if page == lastPage || !result.more {
+                    updateList(kind, SavedList(items: unique(items), page: page, more: result.more))
+                    return
+                }
+                page += 1
+            }
+            // A saved edit arrived mid-sync. Start again with fresh pages.
+        } while !Task.isCancelled
+    }
+
     func loadList(_ kind: Kind, page: Int) async throws {
-        guard let user = account else { return }
+        guard account != nil, !refreshingLists.contains(kind), !pagingLists.contains(kind),
+              page == nextList[kind] else { return }
+        let generation = accountGeneration
+        if savedLists[kind]?.needsReconciliation == true {
+            try await refreshList(kind)
+            guard accountGeneration == generation, page == nextList[kind],
+                  savedLists[kind]?.needsReconciliation == false, !pagingLists.contains(kind) else { return }
+        }
+        let revision = listRevisions[kind, default: 0]
+        pagingLists.insert(kind)
+        defer {
+            if accountGeneration == generation { pagingLists.remove(kind) }
+        }
         let result = try await api.list(kind, page: page)
-        guard account == user else { return }
-        let previous = page == 1 ? [] : lists[kind, default: []]
-        lists[kind] = unique(previous + result.items)
-        nextList[kind] = result.more ? page + 1 : nil
+        guard accountGeneration == generation, listRevisions[kind, default: 0] == revision else { return }
+        let previous = savedLists[kind]?.items ?? []
+        updateList(kind, SavedList(items: unique(previous + result.items), page: page, more: result.more))
     }
 
     func change(_ title: Title, _ change: ListChange?) async throws {
-        guard let user = account else { return }
+        guard account != nil else { return }
+        let generation = accountGeneration
         try await api.save(title, change: change)
-        guard account == user else { return }
-        try await loadList(title.kind, page: 1)
+        guard accountGeneration == generation else { return }
+
+        let kind = title.kind
+        listRevisions[kind, default: 0] += 1
+        var snapshot = savedLists[kind] ?? SavedList(items: [], page: 0, more: true)
+        snapshot.needsReconciliation = snapshot.more
+        let previous = snapshot.items.first { $0.id == title.id }
+        snapshot.items.removeAll { $0.id == title.id }
+        if let change {
+            snapshot.items.insert(ListEntry(title: previous?.title ?? title, change: change), at: 0)
+        }
+        updateList(kind, snapshot)
+    }
+
+    private func updateList(_ kind: Kind, _ snapshot: SavedList) {
+        guard let account, savedLists[kind] != snapshot else { return }
+        savedLists[kind] = snapshot
+        ListCache(account: account, lists: savedLists).write()
     }
 
     func loadFriends(reset: Bool = false) async {
@@ -145,6 +228,36 @@ final class Store: ObservableObject {
             if !(pagination?.read("hasNextPage") ?? (entries.count == 300)) { break }
         }
         return nil
+    }
+}
+
+private struct SavedList: Codable, Equatable {
+    var items: [ListEntry]
+    let page: Int
+    let more: Bool
+    var needsReconciliation = false
+}
+
+private struct ListCache: Codable {
+    let account: Account
+    let lists: [Kind: SavedList]
+
+    private static var file: URL {
+        URL.cachesDirectory.appending(path: "AniLedger-lists-v1.json")
+    }
+
+    static func read() -> Self? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    func write() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        try? data.write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func remove() {
+        try? FileManager.default.removeItem(at: file)
     }
 }
 

@@ -62,7 +62,7 @@ func publicURL(_ raw: String?) -> URL? {
     return url
 }
 
-struct Title: Identifiable, Hashable {
+struct Title: Identifiable, Hashable, Codable {
     let malID: Int
     let kind: Kind
     let name: String
@@ -95,13 +95,21 @@ struct Title: Identifiable, Hashable {
     }
 }
 
-struct ListEntry: Identifiable {
+struct ListEntry: Identifiable, Codable, Equatable {
     let title: Title
     let status: String
     let progress: Int
     let rating: Int
     let updated: String
     var id: String { title.id }
+
+    init(title: Title, change: ListChange) {
+        self.title = title
+        status = change.status
+        progress = change.progress
+        rating = change.rating
+        updated = Date().ISO8601Format()
+    }
 
     init?(_ fields: Fields, kind: Kind) {
         guard let title = Title(fields, kind: kind) else { return nil }

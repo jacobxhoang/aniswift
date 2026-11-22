@@ -179,7 +179,7 @@ struct ListsScreen: View {
                             do { try await store.loadList(kind, page: page) }
                             catch { store.handle(error) }
                         }
-                    }.disabled(paging).listRowBackground(Color.clear)
+                    }.disabled(paging || store.refreshingLists.contains(kind)).listRowBackground(Color.clear)
                 }
             }
         }

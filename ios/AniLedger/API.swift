@@ -133,6 +133,8 @@ final class API {
         }
     }
 
+    var hasSession: Bool { token != nil }
+
     func session() async throws -> Account? {
         guard token != nil else { return nil }
         let response = try await privateRequest("api/session")
