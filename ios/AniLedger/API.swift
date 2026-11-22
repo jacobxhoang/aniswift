@@ -144,14 +144,18 @@ final class API {
         throw APIError(status: 0, message: "Catalog unavailable.")
     }
 
-    func resolveTitle(_ title: Title) async -> Title? {
+    func cachedTitle(_ title: Title) -> Title? {
         let path = "\(title.kind.rawValue)/\(title.malID)"
         let key = Self.url(tenrai, path)
+        guard let (date, response) = cached[key], Date().timeIntervalSince(date) < 60,
+              let fields: Fields = response.read("data") else { return nil }
+        return Title(fields, kind: title.kind)
+    }
+
+    func resolveTitle(_ title: Title) async -> Title? {
+        let path = "\(title.kind.rawValue)/\(title.malID)"
         while !Task.isCancelled {
-            if let (date, response) = cached[key], Date().timeIntervalSince(date) < 60,
-               let fields: Fields = response.read("data") {
-                return Title(fields, kind: title.kind)
-            }
+            if let cached = cachedTitle(title) { return cached }
             let now = ContinuousClock().now
             if now >= nextTitleLookup {
                 nextTitleLookup = now.advanced(by: .milliseconds(270))

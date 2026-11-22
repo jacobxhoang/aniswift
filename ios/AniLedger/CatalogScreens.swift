@@ -128,6 +128,7 @@ private struct ListStatusGlass: ViewModifier {
 
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
@@ -240,14 +241,17 @@ struct ListsScreen: View {
         let expanded = !collapsed.contains(status) || !searchTerm.isEmpty
         let partial = store.nextList[kind] != nil && searchTerm.isEmpty
         return Button {
-            if collapsed.contains(status) { collapsed.remove(status) }
-            else { collapsed.insert(status) }
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+                if expanded { collapsed.insert(status) }
+                else { collapsed.remove(status) }
+            }
         } label: {
             HStack(spacing: 12) {
                 Text(statusLabel(status)).foregroundStyle(.secondary)
                 Spacer(minLength: 8)
                 Text("\(count)\(partial ? "+" : "")").monospacedDigit()
-                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)
@@ -736,14 +740,14 @@ private struct SearchResultCard: View {
     }
 
     var body: some View {
-        PreferredTitle(title: title) { item in
+        PreferredTitle(title: title) { item, name in
             NavigationLink(value: item) {
                 let layout = typeSize.isAccessibilitySize
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                     : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
                 layout {
                     poster(item)
-                    details(item)
+                    details(item, name: name)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -775,9 +779,9 @@ private struct SearchResultCard: View {
             .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
     }
 
-    private func details(_ item: Title) -> some View {
+    private func details(_ item: Title, name: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(item.name).font(.headline).foregroundStyle(.white).lineLimit(2)
+            Text(name).font(.headline).foregroundStyle(.white).lineLimit(2)
             Text(summary).font(.footnote).foregroundStyle(.white.opacity(0.78))
             if let synopsis = item.synopsis {
                 Text(synopsis).font(.subheadline).foregroundStyle(.white.opacity(0.82)).lineLimit(6)
@@ -837,13 +841,13 @@ private struct ProducerTitleRow: View {
     let title: Title
 
     var body: some View {
-        PreferredTitle(title: title) { item in
+        PreferredTitle(title: title) { item, name in
             NavigationLink(value: item) {
                 HStack(alignment: .top, spacing: 8) {
                     PosterArt(url: item.image, symbol: item.kind == .anime ? "film" : "book", width: 78)
                         .clipShape(.rect(cornerRadius: 7))
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(item.name).font(.body)
+                        Text(name).font(.body)
                         if let total = item.total {
                             let unit = item.kind == .anime ? "episode" : "chapter"
                             Text("\(total) \(total == 1 ? unit : unit + "s") total")
@@ -1120,15 +1124,13 @@ struct FriendsScreen: View {
                             Button("Retry") { Task { await store.loadFriends(reset: true) } }
                         }.padding(rowInsets)
                     }
-                    ForEach(Array(store.activity.enumerated()), id: \.element.id) { index, item in
-                        PreferredTitle(title: item.title) { title in
-                            feedRow(item, title: title)
+                    ForEach(store.activity) { item in
+                        PreferredTitle(title: item.title) { title, name in
+                            feedRow(item, title: title, name: name)
                         }
                         .padding(rowInsets)
-                        if index < store.activity.count - 1 {
-                            Divider().overlay(Color.white.opacity(0.20))
-                                .padding(.horizontal, LedgerLayout.inset)
-                        }
+                        Divider().overlay(Color.white.opacity(0.20))
+                            .padding(.horizontal, LedgerLayout.inset)
                     }
                     if store.hasMoreFriendActivity {
                         NextPageIndicator(label: "Loading friend activity", page: store.friendFeedPage) {
@@ -1162,7 +1164,7 @@ struct FriendsScreen: View {
         EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset)
     }
 
-    private func feedRow(_ item: FriendUpdate, title: Title) -> some View {
+    private func feedRow(_ item: FriendUpdate, title: Title, name: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             NavigationLink(value: item.friend) {
                 Art(url: item.friend.avatar, symbol: "person.fill")
@@ -1181,7 +1183,7 @@ struct FriendsScreen: View {
                 .accessibilityHint("Opens their profile")
 
                 NavigationLink(value: title) {
-                    Text("\(item.activityPhrase) \(Text(title.name).bold())")
+                    Text("\(item.activityPhrase) \(Text(name).bold())")
                         .font(.subheadline)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -1202,7 +1204,7 @@ struct FriendsScreen: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open \(title.name)")
+            .accessibilityLabel("Open \(name)")
         }
     }
 

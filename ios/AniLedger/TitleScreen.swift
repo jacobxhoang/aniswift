@@ -25,8 +25,15 @@ struct TitleScreen: View {
     @State private var checkingFriends = false
 
     private var current: Title {
-        let detail = record.flatMap { Title($0, kind: title.kind) } ?? title
+        let detail = record.flatMap { Title($0, kind: title.kind) } ?? store.api.cachedTitle(title) ?? title
         return detail.fillingTitleAndImage(from: title).fillingTitleAndImage(from: saved?.title)
+    }
+
+    private var displayName: String {
+        if record == nil, failure == nil, current.needsTitleLookup, store.api.cachedTitle(title) == nil {
+            return "Loading title…"
+        }
+        return current.name
     }
     private var saved: ListEntry? { store.lists[title.kind, default: []].first { $0.id == title.id } }
 
@@ -63,7 +70,7 @@ struct TitleScreen: View {
             .frame(maxWidth: .infinity)
         }
         .background(Palette.background.ignoresSafeArea())
-        .navigationTitle(current.name)
+        .navigationTitle(displayName)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -157,7 +164,7 @@ struct TitleScreen: View {
                 }
                 .padding(.top, 12)
                 .padding(.bottom, 4)
-            Text(current.name)
+            Text(displayName)
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)

@@ -201,20 +201,28 @@ struct PreferredTitle<Content: View>: View {
     @EnvironmentObject private var store: Store
     let title: Title
     var loadMissingImage = false
-    @ViewBuilder var content: (Title) -> Content
+    @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
+    @State private var attemptedID: String?
 
     private var current: Title {
         let saved = store.lists[title.kind]?.first { $0.id == title.id }?.title
-        return title.fillingTitleAndImage(from: saved).fillingTitleAndImage(from: resolved)
+        return title.fillingTitleAndImage(from: saved)
+            .fillingTitleAndImage(from: resolved ?? store.api.cachedTitle(title))
     }
 
     var body: some View {
-        content(current)
+        let item = current
+        let waiting = item.needsTitleLookup && attemptedID != title.id && store.api.cachedTitle(title) == nil
+        content(item, waiting ? "Loading title…" : item.name)
             .task(id: title) {
-                guard current.needsTitleLookup || (loadMissingImage && current.image == nil) else { return }
+                guard attemptedID != title.id,
+                      item.needsTitleLookup || (loadMissingImage && item.image == nil) else { return }
                 let result = await store.api.resolveTitle(title)
-                if !Task.isCancelled { resolved = result }
+                if !Task.isCancelled {
+                    resolved = result
+                    attemptedID = title.id
+                }
             }
     }
 }
@@ -241,12 +249,12 @@ struct CoverTile: View {
     var posterWidth: CGFloat?
 
     var body: some View {
-        PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item in
-            tile(item)
+        PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item, name in
+            tile(item, name: name)
         }
     }
 
-    private func tile(_ title: Title) -> some View {
+    private func tile(_ title: Title, name: String) -> some View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
                 PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book", width: posterWidth)
@@ -263,7 +271,7 @@ struct CoverTile: View {
                                 .ledgerGlassBadge().padding(6)
                         }
                     }
-                Text(title.name)
+                Text(name)
                     .font(reservesCaptionSpace ? .subheadline.weight(.medium) : .subheadline)
                     .lineLimit(2, reservesSpace: reservesCaptionSpace)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -300,14 +308,14 @@ struct TitleRow: View {
     let note: String
 
     var body: some View {
-        PreferredTitle(title: title) { item in row(item) }
+        PreferredTitle(title: title) { item, name in row(item, name: name) }
     }
 
-    private func row(_ title: Title) -> some View {
+    private func row(_ title: Title, name: String) -> some View {
         HStack(spacing: 12) {
             Art(url: title.image).frame(width: 40, height: 56).clipShape(.rect(cornerRadius: 5))
             VStack(alignment: .leading, spacing: 4) {
-                Text(title.name).font(.subheadline.weight(.semibold))
+                Text(name).font(.subheadline.weight(.semibold))
                 if !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
             }
         }
@@ -546,14 +554,14 @@ struct FriendProfileScreen: View {
             if let updates, !updates.isEmpty {
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(updates) { update in
-                        PreferredTitle(title: update.title) { title in
+                        PreferredTitle(title: update.title) { title, name in
                             NavigationLink(value: title) {
                                 HStack(spacing: 12) {
                                     Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
                                         .frame(width: 40, height: 56)
                                         .clipShape(.rect(cornerRadius: 5))
                                     VStack(alignment: .leading, spacing: 4) {
-                                        Text(title.name).font(.subheadline.weight(.semibold))
+                                        Text(name).font(.subheadline.weight(.semibold))
                                         Text(update.activityDescription)
                                             .font(.caption)
                                             .foregroundStyle(.secondary)
@@ -863,7 +871,7 @@ private struct AboutScreen: View {
         List {
             Section("App") {
                 LabeledContent("Version", value: version).listRowBackground(Color.clear)
-                Link(destination: URL(string: "https://github.com/jacobxhoang/ani-ledger")!) {
+                Link(destination: URL(string: "https://github.com/jacobxhoang/aniledger")!) {
                     row("AniLedger on GitHub", detail: "Source code and iOS releases", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)

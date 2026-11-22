@@ -61,7 +61,7 @@ To preconfigure sign-in in builds from `main`, add a repository Actions secret n
 
 GitHub keeps the secret out of the repository and build logs. The Client ID is readable from a distributed IPA. If your registration requires the Client ID to remain undisclosed, leave the secret unset for public releases and enter it on the device. Use the iOS Client ID only.
 
-The **Build AniLedger IPA** workflow builds each new commit on the first-parent history of `main`. Each successful build publishes a [GitHub prerelease](https://github.com/jacobxhoang/ani-ledger/releases) tagged `ios-<full commit SHA>` with `AniLedger-Unsigned.ipa` attached. Pull requests can build artifacts without publishing releases. The unsigned file is a device build and requires signing before iOS can install it.
+The **Build AniLedger IPA** workflow builds each new commit on the first-parent history of `main`. Each successful build publishes a [GitHub prerelease](https://github.com/jacobxhoang/aniledger/releases) tagged `ios-<full commit SHA>` with `AniLedger-Unsigned.ipa` attached. Pull requests can build artifacts without publishing releases. The unsigned file is a device build and requires signing before iOS can install it.
 
 For an installable Ad Hoc IPA, use an Apple Distribution certificate with its private key in a password-protected `.p12`, and an Ad Hoc provisioning profile for an explicit App ID that includes the devices you want to install on. Add these repository Actions secrets:
 

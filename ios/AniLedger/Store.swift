@@ -304,7 +304,8 @@ final class Store: ObservableObject {
             friends = refreshedFriends
             checkedFriends = start + batch.count
             let updates = results.flatMap { $0 }
-            activity = sortedFriendActivity(reset ? updates : activity + updates)
+            let sorted = sortedFriendActivity(updates)
+            activity = reset ? sorted : unique(activity + sorted)
             friendFeedPage += 1
         } catch {
             if !Task.isCancelled, accountGeneration == generation { friendMessage = error.localizedDescription }
@@ -348,7 +349,8 @@ final class Store: ObservableObject {
         for (cursor, page) in results where page.more {
             historyCursors.append(FriendHistoryCursor(friend: cursor.friend, kind: cursor.kind, page: cursor.page + 1))
         }
-        activity = sortedFriendActivity(activity + results.flatMap { $0.1.items })
+        let older = sortedFriendActivity(results.flatMap { $0.1.items })
+        activity = unique(activity + older)
         friendFeedPage += 1
     }
 
