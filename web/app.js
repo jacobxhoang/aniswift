@@ -842,6 +842,42 @@ function entryCharacters(people, kind) {
   return `<section class="entry-section"><h3>${kind === 'anime' ? 'Characters &amp; voice actors' : 'Characters'}</h3><div class="cast-grid">${cards}</div></section>`;
 }
 
+function reviewCards(data, reviewsUrl) {
+  if (!Array.isArray(data)) throw new Error('Invalid reviews response.');
+  const sentiments = new Map([
+    ['Recommended', 'recommended'], ['Mixed Feelings', 'mixed'], ['Not Recommended', 'not-recommended'],
+  ]);
+  const cards = [];
+  for (const review of data) {
+    if (cards.length === 3) break;
+    const text = [review?.review, review?.text].find((value) => typeof value === 'string' && value.trim())?.trim();
+    if (!text) continue;
+    const user = review.user;
+    const name = user?.username || user?.name || (typeof user === 'string' ? user : review.username) || 'MyAnimeList member';
+    const image = safeImage(user?.images?.webp?.image_url || user?.images?.jpg?.image_url || user?.avatarUrl || review.avatarUrl || review.avatar);
+    const tags = Array.isArray(review.tags) ? review.tags : [review.tag];
+    const sentiment = tags.map((tag) => String(tag ?? '').trim()).find((tag) => sentiments.has(tag));
+    const spoiler = review.is_spoiler || review.isSpoiler || tags.some((tag) => /spoiler/i.test(tag));
+    const parsed = parseFriendDate(review.date);
+    const date = parsed ? new Date(parsed.timestamp) : null;
+    const timestamp = date ? `<time datetime="${parsed.calendarDate || date.toISOString()}">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: parsed.calendarDate ? 'UTC' : undefined })}</time>` : '';
+    const short = text.length > 540;
+    const content = spoiler
+      ? `<details><summary>Show review with spoilers</summary><p class="entry-prose">${escape(text)}</p></details>`
+      : short ? `<p class="entry-prose review-preview">${escape(text.slice(0, 540).replace(/\s+\S*$/, ''))}…</p><details class="review-expanded"><summary><span class="review-more">Read more</span><span class="review-less">Read less</span></summary><p class="entry-prose">${escape(text)}</p></details>`
+      : `<p class="entry-prose">${escape(text)}</p>`;
+    const url = /^https:\/\/myanimelist\.net\/reviews\.php\?/i.test(review.url || '') ? review.url
+      : Number.isSafeInteger(review.mal_id) && review.mal_id > 0 ? `https://myanimelist.net/reviews.php?id=${review.mal_id}` : reviewsUrl;
+    cards.push(`<article class="entry-review">
+      <span class="review-avatar" aria-hidden="true">${image ? `<img alt="" loading="lazy" src="${escape(image)}">` : escape(String(name).slice(0, 1).toUpperCase())}</span>
+      <div class="review-body"><div class="review-byline"><strong>${escape(name)}</strong>${timestamp}</div>
+      ${sentiment ? `<span class="review-tag ${sentiments.get(sentiment)}">${sentiment}</span>` : ''}${content}
+      <a class="review-source" href="${escape(url)}" target="_blank" rel="noopener">Open on MyAnimeList</a></div>
+    </article>`);
+  }
+  return cards.join('') || '<p class="row-meta">No reviews available for this title.</p>';
+}
+
 function relatedCards(items) {
   return items.map(({ relation, ...item }) => {
     const current = registry.get(key(item)) || item;
@@ -979,17 +1015,18 @@ async function showEntry(kind, number) {
   }
   if (!active()) return;
   const entry = registry.get(id);
+  const reviewsUrl = `https://myanimelist.net${path}/_/reviews`;
   const subtitle = [entry.alt, entry.title, entry.japanese].find((value) => value && value !== displayTitle(entry));
   document.title = `${displayTitle(entry)} | AniLedger`;
   view.innerHTML = `<div class="entry-breadcrumb"><a href="/#${kind}">${label}</a><span aria-hidden="true"> / </span><span>Title details</span></div>
     <header class="page-heading entry-heading"><div><h1 data-entry-heading>${escape(displayTitle(entry))}</h1>${subtitle ? `<p>${escape(subtitle)}</p>` : ''}</div></header>
     <article class="panel entry-page" aria-label="Title details">
       <div class="entry-cover">${cover(entry, '', true)}</div>
-      <aside class="entry-metadata" aria-label="Title information">${entryMetadata(entry)}<div data-entry-links></div><div data-entry-streaming></div></aside>
+      <aside class="entry-metadata" aria-label="Title information">${entryMetadata(entry)}<div data-entry-links></div></aside>
       <div class="entry-main"><div class="entry-overview">
         <nav class="entry-jumps" aria-label="On this page">
           <a href="#synopsis">Synopsis</a><a href="#related" data-entry-jump hidden>Related entries</a><a href="#characters" data-entry-jump hidden>Characters</a>
-          ${kind === 'anime' ? '<a href="#themes">Themes</a>' : ''}<a href="#friends-activity">Friends</a>
+          ${kind === 'anime' ? '<a href="#themes">Themes</a>' : ''}<a href="#friends-activity">Friends</a><a href="#reviews">Reviews</a>
         </nav>
         <div class="entry-overview-card"><div data-summary>${summaryHtml(entry)}</div><div data-actions></div></div>
       </div>
@@ -1000,13 +1037,17 @@ async function showEntry(kind, number) {
         <div id="characters" data-entry-characters></div>
         ${kind === 'anime' ? `<div id="themes" data-entry-themes>${themeSections()}</div>` : ''}
         <section id="friends-activity" class="entry-section"><h3>Friends’ list activity</h3><div data-entry-friends></div></section>
+        <section id="reviews" class="entry-section">
+          <div class="entry-review-heading"><h3>Reviews</h3><a href="${reviewsUrl}" target="_blank" rel="noopener">All reviews on MyAnimeList</a></div>
+          <div data-entry-reviews aria-busy="true"><p class="row-meta" role="status">Loading reviews…</p></div>
+        </section>
       </div>
     </div></article>`;
   const revealJump = (name) => {
     view.querySelector(`[href="#${name}"]`).hidden = false;
     if (location.hash === `#${name}`) document.getElementById(name)?.scrollIntoView();
   };
-  if (['#synopsis', '#themes', '#friends-activity'].includes(location.hash)) {
+  if (['#synopsis', '#themes', '#friends-activity', '#reviews'].includes(location.hash)) {
     document.getElementById(location.hash.slice(1))?.scrollIntoView();
   }
   let friendOwner;
@@ -1094,9 +1135,17 @@ async function showEntry(kind, number) {
     load(`/${entry.kind}/${entry.id}/external`, (data) => {
       view.querySelector('[data-entry-links]').innerHTML = entryLinks('External links', externalLinks(data));
     }),
-    kind === 'anime' ? load(`/anime/${entry.id}/streaming`, (data) => {
-      view.querySelector('[data-entry-streaming]').innerHTML = entryLinks('Streaming platforms', externalLinks(data));
-    }) : Promise.resolve(),
+    (async () => {
+      const region = view.querySelector('[data-entry-reviews]');
+      try {
+        const { data } = await catalog(`${path}/reviews`);
+        if (active()) region.innerHTML = reviewCards(data, reviewsUrl);
+      } catch {
+        if (active()) region.innerHTML = '<p class="row-meta">Reviews are temporarily unavailable.</p>';
+      } finally {
+        if (active()) region.setAttribute('aria-busy', 'false');
+      }
+    })(),
   ]);
 }
 
