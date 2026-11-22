@@ -279,10 +279,8 @@ final class Store: ObservableObject {
             var updates: [FriendUpdate] = []
             for friend in batch {
                 guard !Task.isCancelled, account == user else { return }
-                do { updates += try await publicUpdates(friend, refresh: reset) }
-                catch {
-                    guard !Task.isCancelled, account == user else { return }
-                    friendMessage = "Some friends’ public activity is unavailable."
+                if let items = try? await publicUpdates(friend, refresh: reset) {
+                    updates += items
                 }
             }
             guard !Task.isCancelled, account == user else { return }

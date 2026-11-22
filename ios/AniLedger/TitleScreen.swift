@@ -23,7 +23,6 @@ struct TitleScreen: View {
     @State private var friendOffset = 0
     @State private var completedFriendBatches = 0
     @State private var checkingFriends = false
-    @State private var friendsUnavailable = false
 
     private var current: Title {
         let detail = record.flatMap { Title($0, kind: title.kind) } ?? title
@@ -95,7 +94,6 @@ struct TitleScreen: View {
             friendRows = []
             friendOffset = 0
             completedFriendBatches = 0
-            friendsUnavailable = false
             checkingFriends = false
             await loadFriendBatch()
         }
@@ -513,9 +511,6 @@ struct TitleScreen: View {
                     .strokeBorder(.white.opacity(0.08))
                     .allowsHitTesting(false)
             }
-            if friendsUnavailable && !checkingFriends {
-                Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary)
-            }
             if friendOffset < store.friends.count || checkingFriends {
                 NextPageIndicator(label: "Checking friends", page: completedFriendBatches) {
                     await loadFriendBatch()
@@ -687,23 +682,23 @@ struct TitleScreen: View {
         guard let user = store.account, !checkingFriends else { return }
         checkingFriends = true
         defer { if user == store.account { checkingFriends = false } }
-        do {
-            if store.friends.isEmpty { try await store.fetchFriends(user) }
-            repeat {
-                let batch = Array(store.friends.dropFirst(friendOffset).prefix(6))
-                for friend in batch {
-                    guard !Task.isCancelled, user == store.account else { return }
-                    do {
-                        if let row = try await store.friendEntry(friend, current), !Task.isCancelled, user == store.account {
-                            friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
-                        }
-                    } catch { if !Task.isCancelled { friendsUnavailable = true } }
-                    guard !Task.isCancelled, user == store.account else { return }
-                    friendOffset += 1
+        if store.friends.isEmpty {
+            do { try await store.fetchFriends(user) }
+            catch { return }
+        }
+        repeat {
+            let batch = Array(store.friends.dropFirst(friendOffset).prefix(6))
+            for friend in batch {
+                guard !Task.isCancelled, user == store.account else { return }
+                let row = try? await store.friendEntry(friend, current)
+                guard !Task.isCancelled, user == store.account else { return }
+                if let row {
+                    friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
                 }
-            } while friendRows.isEmpty && friendOffset < store.friends.count
-            completedFriendBatches += 1
-        } catch { if !Task.isCancelled { friendsUnavailable = true } }
+                friendOffset += 1
+            }
+        } while friendRows.isEmpty && friendOffset < store.friends.count
+        completedFriendBatches += 1
     }
 }
 
