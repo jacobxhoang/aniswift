@@ -56,10 +56,10 @@ struct AniLedgerApp: App {
 }
 
 enum Palette {
-    static let background = Color(red: 0.055, green: 0.085, blue: 0.13)
-    static let surface = Color(red: 0.09, green: 0.14, blue: 0.21)
-    static let accent = Color(red: 0.58, green: 0.83, blue: 0.99)
-    static let glow = Color(red: 0.12, green: 0.22, blue: 0.38)
+    static let background: Color = .black
+    static let surface = Color(white: 0.12)
+    static let accent: Color = .white
+    static let glow = Color(white: 0.16)
 
     static var canvas: some View {
         ZStack {
@@ -231,7 +231,7 @@ struct AccountScreen: View {
                     if let profile = publicURL("https://myanimelist.net/profile/\(account.name)") {
                         Link("View MyAnimeList profile", destination: profile)
                     }
-                    Button("Sign out", role: .destructive) { store.disconnect() }
+                    Button("Sign out") { store.disconnect() }
                 } else if store.checking {
                     ProgressView("Checking session")
                 } else {

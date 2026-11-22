@@ -89,6 +89,7 @@ struct TitleScreen: View {
             ZStack {
                 Palette.surface
                 Art(url: current.image ?? title.image)
+                    .saturation(0)
                     .blur(radius: 34)
                     .opacity(0.40)
                 LinearGradient(colors: [.black.opacity(0.20), .black.opacity(0.57)],
@@ -410,8 +411,8 @@ struct ListEditor: View {
                         ForEach(1...10, id: \.self) { Text("\($0)/10").tag($0) }
                     }
                 }
-                if let error { Text(error).foregroundStyle(.red) }
-                if original != nil { Button("Remove from My List", role: .destructive) { confirmRemoval = true } }
+                if let error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.primary) }
+                if original != nil { Button("Remove from My List") { confirmRemoval = true } }
             }
             .navigationTitle("List entry")
             .navigationBarTitleDisplayMode(.inline)
@@ -422,7 +423,8 @@ struct ListEditor: View {
                 }
             }
             .confirmationDialog("Remove this title from your MyAnimeList list?", isPresented: $confirmRemoval) {
-                Button("Remove", role: .destructive) { submit(nil) }
+                Button("Remove") { submit(nil) }
+                Button("Cancel", role: .cancel) {}
             }
             .interactiveDismissDisabled(busy)
         }
