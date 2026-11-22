@@ -467,6 +467,9 @@ struct FriendProfileScreen: View {
     @State private var favorites: [Kind: [Title]] = [:]
     @State private var loading = true
     @State private var unavailable = false
+    @State private var updates: [FriendUpdate]?
+    @State private var updatesUnavailable = false
+    @State private var loadingUpdates = false
 
     var body: some View {
         ScrollView {
@@ -481,6 +484,7 @@ struct FriendProfileScreen: View {
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 }
+                recentUpdates
                 ForEach(Kind.allCases) { kind in
                     if let titles = favorites[kind], !titles.isEmpty {
                         Rail(name: "Favorite \(kind.rawValue)", titles: titles)
@@ -495,7 +499,72 @@ struct FriendProfileScreen: View {
         .navigationTitle(friend.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
-        .refreshable { await load(refresh: true) }
+        .task { await loadUpdates() }
+        .refreshable {
+            async let profile: Void = load(refresh: true)
+            async let activity: Void = loadUpdates(refresh: true)
+            _ = await (profile, activity)
+        }
+    }
+
+    private var recentUpdates: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            LedgerSectionTitle("Recent list updates")
+            if let updates, !updates.isEmpty {
+                LazyVStack(alignment: .leading, spacing: 10) {
+                    ForEach(updates) { update in
+                        PreferredTitle(title: update.title) { title in
+                            NavigationLink(value: title) {
+                                HStack(spacing: 12) {
+                                    Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
+                                        .frame(width: 40, height: 56)
+                                        .clipShape(.rect(cornerRadius: 5))
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(title.name).font(.subheadline.weight(.semibold))
+                                        Text(update.activityDescription)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if !update.activityDetails.isEmpty {
+                                            Text(update.activityDetails).font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            } else if !updatesUnavailable {
+                if updates == nil { ProgressView("Loading recent updates") }
+                else { Text("No public list updates.").foregroundStyle(.secondary) }
+            }
+
+            if updatesUnavailable {
+                Text("Recent updates are unavailable.").foregroundStyle(.secondary)
+                Button("Retry recent updates") { Task { await loadUpdates(refresh: true) } }
+                    .ledgerGlassButton()
+                    .disabled(loadingUpdates)
+            }
+        }
+        .padding(.horizontal, LedgerLayout.inset)
+    }
+
+    private func loadUpdates(refresh: Bool = false) async {
+        guard !loadingUpdates, refresh || updates == nil else { return }
+        loadingUpdates = true
+        defer { loadingUpdates = false }
+        do {
+            let items = try await store.publicUpdates(friend, refresh: refresh)
+            guard !Task.isCancelled else { return }
+            let sorted = items.map { (item: $0, date: activityDate($0.date)) }
+                .sorted { $0.date > $1.date }
+            updates = unique(sorted.map(\.item))
+            updatesUnavailable = false
+        } catch {
+            if !Task.isCancelled { updatesUnavailable = true }
+        }
     }
 
     private func load(refresh: Bool = false) async {

@@ -716,7 +716,7 @@ struct FriendsScreen: View {
                 .accessibilityHint("Opens their profile")
 
                 Button { selectedTitle = title } label: {
-                    Text("\(activityPhrase(item)) \(Text(title.name).bold())")
+                    Text("\(item.activityPhrase) \(Text(title.name).bold())")
                         .font(.subheadline)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
@@ -725,9 +725,9 @@ struct FriendsScreen: View {
                 }
                 .buttonStyle(.plain)
 
-                let details = [item.score.flatMap { $0 > 0 ? "\($0)/10" : nil }, item.date.map { displayDate($0) }]
-                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
-                if !details.isEmpty { Text(details).font(.caption).foregroundStyle(.secondary) }
+                if !item.activityDetails.isEmpty {
+                    Text(item.activityDetails).font(.caption).foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -741,18 +741,6 @@ struct FriendsScreen: View {
         }
     }
 
-    private func activityPhrase(_ item: FriendUpdate) -> String {
-        let status = item.status?.lowercased().replacingOccurrences(of: "_", with: " ")
-        if status == "completed" { return "completed" }
-        if status?.hasPrefix("plan to") == true { return "plans to \(item.title.kind == .anime ? "watch" : "read")" }
-        if status == "dropped" { return "dropped" }
-        if status == "on hold" { return "put on hold" }
-        if let progress = item.progress, progress > 0 {
-            let unit = item.title.kind == .anime ? "episode" : "chapter"
-            return "\(item.title.kind == .anime ? "watched" : "read") through \(unit) \(progress) of"
-        }
-        return "updated"
-    }
 }
 
 struct FriendCaption: View {

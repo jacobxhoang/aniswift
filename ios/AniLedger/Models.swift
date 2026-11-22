@@ -245,6 +245,36 @@ struct FriendUpdate: Identifiable {
         total = fields.read("total") ?? title.total
         date = fields.string("updatedAt", "date")
     }
+
+    var activityPhrase: String {
+        let status = status?.lowercased().replacingOccurrences(of: "_", with: " ")
+        if status == "completed" { return "completed" }
+        if status?.hasPrefix("plan to") == true { return "plans to \(title.kind == .anime ? "watch" : "read")" }
+        if status == "dropped" { return "dropped" }
+        if status == "on hold" { return "put on hold" }
+        if let progress = progress, progress > 0 {
+            let unit = title.kind == .anime ? "episode" : "chapter"
+            return "\(title.kind == .anime ? "watched" : "read") through \(unit) \(progress) of"
+        }
+        return "updated"
+    }
+
+    var activityDescription: String {
+        if let status, ["completed", "dropped", "on hold", "plan to watch", "plan to read"]
+            .contains(status.lowercased().replacingOccurrences(of: "_", with: " ")) {
+            return statusLabel(status)
+        }
+        if let progress, progress > 0 {
+            let count = total.flatMap { $0 > 0 ? "\(progress) / \($0)" : nil } ?? "\(progress)"
+            return "\(count) \(title.kind.unit.lowercased())"
+        }
+        return status.map(statusLabel) ?? "Updated \(title.kind.rawValue) list"
+    }
+
+    var activityDetails: String {
+        [score.flatMap { $0 > 0 ? "\($0)/10" : nil }, date.map { displayDate($0) }]
+            .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
 }
 
 struct TitleReview: Identifiable {
