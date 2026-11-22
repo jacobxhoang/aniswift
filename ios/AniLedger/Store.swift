@@ -14,41 +14,66 @@ final class Store: ObservableObject {
     @Published var friendMessage: String?
     @Published var loadingFriends = false
     @Published var checkedFriends = 0
-    @Published private(set) var malFavorites: [Kind: [Title]] = [:]
-    @Published private(set) var favoritesUnavailable = false
+    @Published private var profiles = ProfileCache.read()
+    private var profileRequests: [String: Task<Bool, Never>] = [:]
     let previousLocalFavorites: [Title] = {
         guard let data = UserDefaults.standard.data(forKey: "aniledger.localFavorites.v1") else { return [] }
         return (try? JSONDecoder().decode([Title].self, from: data)) ?? []
     }()
-    private var favoritesRequest: UUID?
+
+    var malFavorites: [Kind: [Title]] {
+        account.flatMap { profile(for: $0.name).favorites?.value } ?? [:]
+    }
 
     func isMALFavorite(_ title: Title) -> Bool {
         malFavorites[title.kind]?.contains { $0.id == title.id } ?? false
     }
 
-    func loadFavorites(refresh: Bool = false) async {
-        guard let user = account else { return }
-        guard refresh || (malFavorites.isEmpty && favoritesRequest == nil) else { return }
-        let request = UUID()
-        favoritesRequest = request
-        defer { if favoritesRequest == request { favoritesRequest = nil } }
-        do {
-            let response = try await api.catalog("users/\(user.name)/favorites", refresh: refresh)
-            guard account?.id == user.id, favoritesRequest == request, !Task.isCancelled else { return }
-            guard let data: Fields = response.read("data") else {
-                favoritesUnavailable = true
-                return
+    func profile(for name: String) -> ProfileSnapshot {
+        profiles[name.lowercased()] ?? ProfileSnapshot()
+    }
+
+    func loadProfile(_ name: String, refresh: Bool = false) async -> Bool {
+        let key = name.lowercased()
+        if let pending = profileRequests[key] { return await pending.value }
+
+        let cached = profile(for: name)
+        let needsStats = refresh || cached.stats?.isFresh != true
+        let needsFavorites = refresh || cached.favorites?.isFresh != true
+        guard needsStats || needsFavorites else { return true }
+
+        let task = Task {
+            async let stats = needsStats ? fetchProfileStats(name, refresh: refresh) : nil
+            async let favorites = needsFavorites ? fetchProfileFavorites(name, refresh: refresh) : nil
+            let (newStats, newFavorites) = await (stats, favorites)
+            if newStats != nil || newFavorites != nil {
+                var updated = cached
+                if let newStats { updated.stats = CachedProfileValue(value: newStats, savedAt: .now) }
+                if let newFavorites { updated.favorites = CachedProfileValue(value: newFavorites, savedAt: .now) }
+                profiles[key] = updated
+                ProfileCache.write(profiles)
             }
-            malFavorites = Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
-                let entries: [Fields] = data.read(kind.rawValue) ?? []
-                return (kind, entries.compactMap { Title($0, kind: kind) })
-            })
-            favoritesUnavailable = false
-        } catch {
-            if account?.id == user.id, favoritesRequest == request, !Task.isCancelled {
-                favoritesUnavailable = true
-            }
+            return (!needsStats || newStats != nil) && (!needsFavorites || newFavorites != nil)
         }
+        profileRequests[key] = task
+        let loaded = await task.value
+        profileRequests[key] = nil
+        return loaded
+    }
+
+    private func fetchProfileStats(_ name: String, refresh: Bool) async -> ProfileStats? {
+        let response = try? await api.catalog("users/\(name)/statistics", refresh: refresh)
+        guard let data: Fields = response?.read("data") else { return nil }
+        return ProfileStats(data)
+    }
+
+    private func fetchProfileFavorites(_ name: String, refresh: Bool) async -> [Kind: [Title]]? {
+        let response = try? await api.catalog("users/\(name)/favorites", refresh: refresh)
+        guard let data: Fields = response?.read("data") else { return nil }
+        return Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
+            let entries: [Fields] = data.read(kind.rawValue) ?? []
+            return (kind, entries.compactMap { Title($0, kind: kind) })
+        })
     }
 
     private var accountGeneration = UUID()
@@ -114,9 +139,6 @@ final class Store: ObservableObject {
             friends = []
             checkedFriends = 0
             friendMessage = nil
-            malFavorites = [:]
-            favoritesUnavailable = false
-            favoritesRequest = nil
             ListCache.remove()
         }
         account = user
@@ -317,6 +339,49 @@ private struct SavedList: Codable, Equatable {
     let page: Int
     let more: Bool
     var needsReconciliation = false
+}
+
+struct ProfileStats: Codable {
+    let animeCount: Int?
+    let mangaCount: Int?
+    let daysWatched: Double?
+    let chaptersRead: Int?
+
+    init?(_ fields: Fields) {
+        let anime: Fields? = fields.read("anime")
+        let manga: Fields? = fields.read("manga")
+        guard anime != nil || manga != nil else { return nil }
+        animeCount = anime?.read("totalEntries", "total_entries")
+        mangaCount = manga?.read("totalEntries", "total_entries")
+        daysWatched = anime?.read("daysWatched", "days_watched")
+        chaptersRead = manga?.read("chaptersRead", "chapters_read", "chapters")
+    }
+}
+
+struct CachedProfileValue<Value: Codable>: Codable {
+    let value: Value
+    let savedAt: Date
+
+    var isFresh: Bool { Date.now.timeIntervalSince(savedAt) < 15 * 60 }
+}
+
+struct ProfileSnapshot: Codable {
+    var stats: CachedProfileValue<ProfileStats>?
+    var favorites: CachedProfileValue<[Kind: [Title]]>?
+}
+
+private enum ProfileCache {
+    private static let file = URL.cachesDirectory.appending(path: "AniLedger-profiles-v1.json")
+
+    static func read() -> [String: ProfileSnapshot] {
+        guard let data = try? Data(contentsOf: file) else { return [:] }
+        return (try? JSONDecoder().decode([String: ProfileSnapshot].self, from: data)) ?? [:]
+    }
+
+    static func write(_ profiles: [String: ProfileSnapshot]) {
+        guard let data = try? JSONEncoder().encode(profiles) else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
 }
 
 private struct ListCache: Codable {

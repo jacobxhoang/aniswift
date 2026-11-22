@@ -463,7 +463,6 @@ struct PosterShelf<Trailing: View>: View {
 
 struct DiscoverScreen: View {
     @EnvironmentObject private var store: Store
-    @FocusState private var searchFocused: Bool
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
     @State private var loading = true
@@ -481,53 +480,29 @@ struct DiscoverScreen: View {
             }
         }
         .background(Palette.background.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) { header }
-        .scrollDismissesKeyboard(.interactively)
-        .toolbar(.hidden, for: .navigationBar)
-        .onDisappear { searchFocused = false }
-        .task { if !finishedLoadingShelves { await loadShelves() } }
-    }
-
-    private var header: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 16) {
-                Text("Discover").font(.headline).accessibilityAddTraits(.isHeader)
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").accessibilityHidden(true)
-                    TextField("Search", text: $search)
-                        .focused($searchFocused)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.search)
-                        .onSubmit { searchFocused = false }
-                    if !search.isEmpty {
-                        Button {
-                            search = ""
-                        } label: {
-                            Image(systemName: "xmark.circle.fill")
-                                .foregroundStyle(.secondary)
-                                .frame(minWidth: 44, minHeight: 44)
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Clear search")
-                    }
-                }
-                .padding(.leading, 14)
-                .padding(.trailing, search.isEmpty ? 14 : 0)
-                .frame(minHeight: 44)
-                .modifier(ListStatusGlass(isInteractive: false))
-            }
+        .navigationTitle("Discover")
+        .navigationBarTitleDisplayMode(.inline)
+        .safeAreaInset(edge: .top, spacing: 0) {
             if !searchTerm.isEmpty {
                 Picker("Search category", selection: $searchKind) {
                     ForEach(Kind.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.vertical, 6)
+                .background(Palette.background)
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 4)
-        .padding(.bottom, 8)
-        .background(.ultraThinMaterial)
+        .scrollDismissesKeyboard(.interactively)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { CatalogBrowser() } label: {
+                    Label("Browse catalog", systemImage: "line.3.horizontal.decrease")
+                }
+            }
+        }
+        .task { if !finishedLoadingShelves { await loadShelves() } }
     }
 
     private var browse: some View {
@@ -539,7 +514,6 @@ struct DiscoverScreen: View {
                             NavigationLink {
                                 PosterResults(name: shelf.heading, shelf: shelf, query: "", kind: shelf.kind)
                                     .navigationTitle(shelf.heading)
-                                    .toolbar(.visible, for: .navigationBar)
                             } label: {
                                 Image(systemName: "chevron.right").font(.caption.weight(.semibold))
                                     .foregroundStyle(.secondary)
@@ -560,12 +534,6 @@ struct DiscoverScreen: View {
                         }
                         .frame(maxWidth: .infinity)
                     }
-                    NavigationLink {
-                        CatalogBrowser().toolbar(.visible, for: .navigationBar)
-                    } label: {
-                        Label("Browse catalog", systemImage: "line.3.horizontal.decrease")
-                    }
-                    .padding(.horizontal, LedgerLayout.inset)
                 }
             }
             .padding(.vertical, 10)

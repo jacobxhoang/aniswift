@@ -51,7 +51,7 @@ struct AniLedgerApp: App {
     private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         NavigationStack {
             content()
-                .navigationDestination(for: Title.self) { TitleScreen(title: $0).toolbar(.visible, for: .navigationBar) }
+                .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
                 .navigationDestination(for: Friend.self) { FriendProfileScreen(friend: $0) }
                 .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
                 .navigationDestination(for: CatalogFacet.self) { CatalogFacetScreen(facet: $0) }
@@ -364,20 +364,22 @@ struct SignInButton: View {
 
 struct AccountScreen: View {
     @EnvironmentObject private var store: Store
-    @State private var stats: Fields?
     @State private var loadingProfile = false
+    @State private var profileUnavailable = false
     @State private var confirmSignOut = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 if let account = store.account {
-                    ProfileStatsHeader(image: account.image, stats: stats,
+                    let profile = store.profile(for: account.name)
+                    ProfileStatsHeader(image: account.image, stats: profile.stats?.value,
                                        loadedAnime: store.lists[.anime, default: []].count,
                                        loadedManga: store.lists[.manga, default: []].count)
-                    if loadingProfile { ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset) }
-                    else if store.favoritesUnavailable {
-                        Button("Retry loading favorites") { Task { await loadProfile(refresh: true) } }
+                    if loadingProfile && profile.stats == nil && profile.favorites == nil {
+                        ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset)
+                    } else if profileUnavailable && !loadingProfile {
+                        Button("Retry loading profile") { Task { await loadProfile(refresh: true) } }
                             .padding(.horizontal, LedgerLayout.inset)
                     }
                     customListsLink
@@ -424,7 +426,7 @@ struct AccountScreen: View {
             Button("Cancel", role: .cancel) {}
         }
         .task(id: store.account?.id) {
-            stats = nil
+            profileUnavailable = false
             await loadProfile()
         }
         .refreshable { await loadProfile(refresh: true) }
@@ -482,13 +484,10 @@ struct AccountScreen: View {
     private func loadProfile(refresh: Bool = false) async {
         guard let user = store.account else { loadingProfile = false; return }
         loadingProfile = true
-        async let favorites: Void = store.loadFavorites(refresh: refresh)
-        let path = "users/\(user.name)/statistics"
-        let result = try? await store.api.catalog(path, refresh: refresh)
-        await favorites
-        guard !Task.isCancelled, store.account == user else { return }
-        stats = result?.read("data")
-        loadingProfile = false
+        defer { if store.account?.id == user.id { loadingProfile = false } }
+        let loaded = await store.loadProfile(user.name, refresh: refresh)
+        guard !Task.isCancelled, store.account?.id == user.id else { return }
+        profileUnavailable = !loaded
     }
 }
 
@@ -496,8 +495,6 @@ struct FriendProfileScreen: View {
     @EnvironmentObject private var store: Store
     let friend: Friend
 
-    @State private var stats: Fields?
-    @State private var favorites: [Kind: [Title]] = [:]
     @State private var loading = true
     @State private var unavailable = false
     @State private var updates: [FriendUpdate]?
@@ -507,10 +504,11 @@ struct FriendProfileScreen: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
-                ProfileStatsHeader(image: friend.avatar, stats: stats)
-                if loading {
+                let profile = store.profile(for: friend.name)
+                ProfileStatsHeader(image: friend.avatar, stats: profile.stats?.value)
+                if loading && profile.stats == nil && profile.favorites == nil {
                     ProgressView("Loading profile").padding(.horizontal, LedgerLayout.inset)
-                } else if unavailable {
+                } else if unavailable && !loading {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Some public profile details are unavailable.").foregroundStyle(.secondary)
                         Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
@@ -519,7 +517,7 @@ struct FriendProfileScreen: View {
                 }
                 recentUpdates
                 ForEach(Kind.allCases) { kind in
-                    if let titles = favorites[kind], !titles.isEmpty {
+                    if let titles = profile.favorites?.value[kind], !titles.isEmpty {
                         Rail(name: "Favorite \(kind.rawValue)", titles: titles)
                     }
                 }
@@ -603,45 +601,26 @@ struct FriendProfileScreen: View {
     private func load(refresh: Bool = false) async {
         loading = true
         defer { loading = false }
-        let path = "users/\(friend.name)"
-        async let statsRequest = try? store.api.catalog(path + "/statistics", refresh: refresh)
-        async let favoritesRequest = try? store.api.catalog(path + "/favorites", refresh: refresh)
-        let (statsResult, favoritesResult) = await (statsRequest, favoritesRequest)
-        guard !Task.isCancelled else { return }
-        let statsData: Fields? = statsResult?.read("data")
-        let favoritesData: Fields? = favoritesResult?.read("data")
-        if let statsData { stats = statsData }
-        if let favoritesData {
-            favorites = Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
-                let rows: [Fields] = favoritesData.read(kind.rawValue) ?? []
-                return (kind, rows.compactMap { Title($0, kind: kind) })
-            })
-        }
-        unavailable = statsData == nil || favoritesData == nil
+        let loaded = await store.loadProfile(friend.name, refresh: refresh)
+        if !Task.isCancelled { unavailable = !loaded }
     }
 }
 
 private struct ProfileStatsHeader: View {
     let image: URL?
-    let stats: Fields?
+    let stats: ProfileStats?
     var loadedAnime: Int? = nil
     var loadedManga: Int? = nil
 
     var body: some View {
-        let anime: Fields? = stats?.read("anime")
-        let manga: Fields? = stats?.read("manga")
-        let animeCount: Int? = anime?.read("totalEntries", "total_entries")
-        let mangaCount: Int? = manga?.read("totalEntries", "total_entries")
-        let days: Double? = anime?.read("daysWatched", "days_watched")
-        let chapters: Int? = manga?.read("chaptersRead", "chapters_read", "chapters")
-        return ViewThatFits(in: .horizontal) {
+        ViewThatFits(in: .horizontal) {
             HStack(spacing: 16) {
                 avatar
-                profileMetrics(animeCount, mangaCount, days, chapters)
+                profileMetrics(stats?.animeCount, stats?.mangaCount, stats?.daysWatched, stats?.chaptersRead)
             }
             VStack(alignment: .leading, spacing: 16) {
                 avatar
-                profileMetrics(animeCount, mangaCount, days, chapters)
+                profileMetrics(stats?.animeCount, stats?.mangaCount, stats?.daysWatched, stats?.chaptersRead)
             }
         }
         .padding(16)
