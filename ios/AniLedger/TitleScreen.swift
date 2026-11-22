@@ -192,7 +192,7 @@ struct TitleScreen: View {
                 Text(current.original).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
             HStack(alignment: .top, spacing: 6) {
-                let score = current.score.flatMap { $0 > 0 ? ($0 / 10).formatted(.percent.precision(.fractionLength(0))) : nil }
+                let score = current.score.flatMap { $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil }
                 let rank: Int? = record?.read("rank")
                 let popularity: Int? = record?.read("popularity")
                 statistic("Average score", score)

@@ -707,7 +707,7 @@ private struct SearchResultCard: View {
             values.append("\(total) \(total == 1 ? unit : unit + "s")")
         }
         if let score = title.score, score > 0 {
-            values.append((score / 10).formatted(.percent.precision(.fractionLength(0))))
+            values.append(score.formatted(.number.precision(.fractionLength(2))))
         }
         return values.joined(separator: " · ")
     }
