@@ -822,16 +822,15 @@ private struct ProfileStatistics: View {
 private struct ProfileStatisticsSection: View {
     let kind: Kind
     let stats: ProfileMediaStats
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = true
 
     private var statuses: [Status] {
         zip(kind.statuses, [
-            (kind == .anime ? "play.fill" : "book.fill", Color(red: 0.43, green: 0.69, blue: 0.93)),
-            ("checkmark", Color(red: 0.49, green: 0.76, blue: 0.61)),
-            ("pause.fill", Color(red: 0.89, green: 0.69, blue: 0.44)),
-            ("xmark", Color(red: 0.92, green: 0.53, blue: 0.55)),
-            ("calendar", Color(white: 0.68))
+            (kind == .anime ? "play.fill" : "book.fill", Color(uiColor: .systemBlue)),
+            ("checkmark", Color(uiColor: .systemGreen)),
+            ("pause.fill", Color(uiColor: .systemOrange)),
+            ("xmark", Color(uiColor: .systemRed)),
+            ("calendar", Color(uiColor: .systemGray))
         ]).map { key, style in
             Status(key: key, icon: style.0, color: style.1, count: stats.statusCounts[key])
         }
@@ -852,58 +851,47 @@ private struct ProfileStatisticsSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-                    expanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 12) {
-                    Text("\(kind.label) Statistics").font(.headline)
-                    Spacer(minLength: 8)
-                    Image(systemName: "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(expanded ? 0 : -90))
-                        .accessibilityHidden(true)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-
-            if expanded {
-                VStack(alignment: .leading, spacing: 12) {
-                    Divider()
-                    summary
-                    if total > 0 {
-                        VStack(alignment: .trailing, spacing: 5) {
-                            statusChart
-                            if statuses.allSatisfy({ $0.count != nil }) {
-                                Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .monospacedDigit()
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 0) {
+                    if (stats.meanScore ?? 0) > 0 || stats.days != nil || total > 0 {
+                        VStack(alignment: .leading, spacing: 10) {
+                            summary
+                            if total > 0 {
+                                statusChart
+                                if statuses.allSatisfy({ $0.count != nil }) {
+                                    Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .trailing)
+                                }
                             }
                         }
+                        .padding(16)
+                        Divider().padding(.leading, 16)
                     }
                     statusRows
-                    if !totalsLabel.isEmpty {
-                        Divider()
-                        Text(totalsLabel)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                    }
                 }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 14)
+                .background(Color(uiColor: .secondarySystemGroupedBackground),
+                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+                if !totalsLabel.isEmpty {
+                    Text(totalsLabel)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 16)
+                }
             }
+            .padding(.top, 8)
+        } label: {
+            Text("\(kind.label) Statistics")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
+                .accessibilityAddTraits(.isHeader)
         }
-        .ledgerPanel(radius: 18)
+        .tint(Color(uiColor: .secondaryLabel))
     }
 
     private var summary: some View {
@@ -952,12 +940,12 @@ private struct ProfileStatisticsSection: View {
         GeometryReader { geometry in
             HStack(spacing: 0) {
                 ForEach(statuses.filter { ($0.count ?? 0) > 0 }) { status in
-                    status.color.opacity(0.76)
+                    status.color.opacity(0.65)
                         .frame(width: geometry.size.width * CGFloat(status.count ?? 0) / CGFloat(total))
                 }
             }
         }
-        .frame(height: 8)
+        .frame(height: 6)
         .clipShape(Capsule())
         .accessibilityHidden(true)
     }
@@ -966,26 +954,26 @@ private struct ProfileStatisticsSection: View {
         VStack(spacing: 0) {
             ForEach(statuses) { status in
                 if status.id != statuses.first?.id {
-                    Divider().padding(.leading, 36)
+                    Divider().padding(.leading, 56)
                 }
-                HStack(spacing: 10) {
-                    Image(systemName: status.icon)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(status.color)
-                        .frame(width: 26, height: 26)
-                        .background(status.color.opacity(0.13), in: .rect(cornerRadius: 7))
-                        .accessibilityHidden(true)
-
-                    Text(status.label)
-                    Spacer(minLength: 8)
+                LabeledContent {
                     Text(status.count?.formatted() ?? "—")
-                        .fontWeight(.semibold)
                         .monospacedDigit()
                         .accessibilityLabel(status.count?.formatted() ?? "Count unavailable")
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: status.icon)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 30, height: 30)
+                            .background(status.color.opacity(0.72),
+                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .accessibilityHidden(true)
+                        Text(status.label)
+                    }
                 }
-                .font(.subheadline)
+                .padding(.horizontal, 16)
                 .padding(.vertical, 7)
-                .accessibilityElement(children: .combine)
             }
         }
     }
