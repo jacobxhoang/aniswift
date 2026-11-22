@@ -65,6 +65,31 @@ jobs:
           done
           echo "::error::Xcode 26 is required for the Liquid Glass build."
           exit 1
+      - name: Configure the bundled MyAnimeList iOS Client ID
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          MAL_IOS_CLIENT_ID: ${{ secrets.MAL_IOS_CLIENT_ID }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          import plistlib
+          import re
+          from pathlib import Path
+
+          path = Path("ios/AniLedger/Info.plist")
+          with path.open("rb") as source:
+              config = plistlib.load(source)
+          # Older commits in the build matrix cannot use the bundled ID.
+          client_id = os.environ.get("MAL_IOS_CLIENT_ID", "").strip()
+          if "AniLedgerMALClientID" in config and client_id:
+              if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
+                  raise SystemExit("MAL_IOS_CLIENT_ID must be a 32-character iOS Client ID.")
+              config["AniLedgerMALClientID"] = client_id
+              with path.open("wb") as output:
+                  plistlib.dump(config, output, sort_keys=False)
+          PY
       - name: Build unsigned IPA
         if: ${{ !inputs.signed }}
         shell: bash

@@ -234,7 +234,12 @@ final class API {
         return renewed
     }
 
-    var configuredClientID: String? { UserDefaults.standard.string(forKey: Self.clientIDKey) }
+    var configuredClientID: String? {
+        if let saved = UserDefaults.standard.string(forKey: Self.clientIDKey), !saved.isEmpty { return saved }
+        guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniLedgerMALClientID") as? String,
+              !bundled.isEmpty else { return nil }
+        return bundled
+    }
     var hasSession: Bool { malSession != nil }
 
     func session() async throws -> Account? {
