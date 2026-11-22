@@ -34,13 +34,88 @@ struct CastMember: Identifiable {
 
 struct CastCard: View {
     let member: CastMember
+    var inDirectory = false
 
     var body: some View {
         NavigationLink(value: member.character) {
+            let detail = inDirectory ? (member.role ?? "") :
+                [member.role, member.actor].compactMap { $0 }.joined(separator: " · ")
             PortraitCard(image: member.character.image, name: member.character.name,
-                         detail: [member.role, member.actor].compactMap { $0 }.joined(separator: " · "))
+                         detail: detail, inDirectory: inDirectory)
         }
         .buttonStyle(.plain)
+    }
+}
+
+struct CharactersScreen: View {
+    let members: [CastMember]
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @State private var showingList = false
+
+    private var columns: [GridItem] {
+        if typeSize.isAccessibilitySize {
+            return [GridItem(.adaptive(minimum: 150), spacing: 20, alignment: .top)]
+        }
+        if sizeClass == .compact {
+            return Array(repeating: GridItem(.flexible(minimum: 0), spacing: 22, alignment: .top), count: 3)
+        }
+        return [GridItem(.adaptive(minimum: 135), spacing: 22, alignment: .top)]
+    }
+
+    var body: some View {
+        ScrollView {
+            if showingList {
+                LazyVStack(spacing: 0) {
+                    ForEach(members) { member in listRow(member) }
+                }
+                .padding(.horizontal, LedgerLayout.inset)
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 24) {
+                    ForEach(members) { CastCard(member: $0, inDirectory: true) }
+                }
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.top, 16)
+            }
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Characters")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showingList.toggle()
+                } label: {
+                    Label(showingList ? "Show grid" : "Show list",
+                          systemImage: showingList ? "square.grid.3x3" : "list.bullet")
+                }
+            }
+        }
+    }
+
+    private func listRow(_ member: CastMember) -> some View {
+        NavigationLink(value: member.character) {
+            HStack(spacing: 12) {
+                Art(url: member.character.image, symbol: "person.fill")
+                    .frame(width: 48, height: 68)
+                    .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(member.character.name).foregroundStyle(.primary)
+                    if let role = member.role {
+                        Text(role).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .overlay(alignment: .bottom) { Divider().padding(.leading, 60) }
     }
 }
 
@@ -221,21 +296,24 @@ private struct PortraitCard: View {
     let image: URL?
     let name: String
     let detail: String
+    var inDirectory = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Art(url: image, symbol: "person.fill")
-                .aspectRatio(2 / 3, contentMode: .fit)
+                .aspectRatio(inDirectory ? 0.70 : 2 / 3, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
             Text(name)
-                .font(.subheadline)
+                .font(inDirectory ? .body : .subheadline)
                 .foregroundStyle(.primary)
-                .lineLimit(2, reservesSpace: true)
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(2, reservesSpace: true)
-                .accessibilityHidden(detail.isEmpty)
+                .lineLimit(2, reservesSpace: !inDirectory)
+            if !inDirectory || !detail.isEmpty {
+                Text(detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: !inDirectory)
+                    .accessibilityHidden(detail.isEmpty)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

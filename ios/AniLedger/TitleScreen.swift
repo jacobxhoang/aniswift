@@ -343,20 +343,10 @@ struct TitleScreen: View {
 
     private var cast: some View {
         block(title.kind == .anime ? "Characters & voice actors" : "Characters") {
-            if characters.count > 12 {
-                NavigationLink {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 18) {
-                            ForEach(characters) { CastCard(member: $0) }
-                        }
-                        .padding(LedgerLayout.inset)
-                    }
-                    .background(Palette.background.ignoresSafeArea())
-                    .navigationTitle("Characters")
-                    .navigationBarTitleDisplayMode(.inline)
-                } label: {
-                    Label("View all characters", systemImage: "chevron.right").font(.caption)
-                }
+            NavigationLink {
+                CharactersScreen(members: characters)
+            } label: {
+                Label("View all characters", systemImage: "chevron.right").font(.caption)
             }
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 12) {
@@ -559,7 +549,9 @@ struct TitleScreen: View {
         }
         if let result = try? await castData {
             let items: [Fields] = result.read("data") ?? []
-            characters = unique(items.compactMap(CastMember.init))
+            let cast = unique(items.compactMap(CastMember.init))
+            characters = cast.filter { $0.role?.lowercased() == "main" }
+                + cast.filter { $0.role?.lowercased() != "main" }
         }
         if let result = try? await reviewData {
             let items: [Fields] = result.read("data") ?? []
