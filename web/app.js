@@ -28,7 +28,7 @@ const checkedTitles = new Set();
 const checkedPosterImages = new Set();
 let resolvingTitles = false;
 let browseTicket = 0;
-let detailTicket = 0;
+let detailPage = null;
 let suggestionTicket = 0;
 let toastTimer;
 
@@ -36,6 +36,7 @@ const escape = (value) => String(value ?? '').replace(/[&<>"']/g, (char) => ({ '
 const unit = (kind, n) => kind === 'manga' ? (n === 1 ? 'chapter' : 'chapters') : (n === 1 ? 'episode' : 'episodes');
 const score = (value) => Number(value) > 0 ? Number(value).toFixed(2) : '';
 const key = (entry) => `${entry.kind}-${entry.id}`;
+const entryUrl = (entry) => `/${entry.kind}/${entry.id}`;
 const displayTitle = (entry) => registry.get(key(entry))?.englishTitle || entry.title;
 const safeImage = (url) => typeof url === 'string' && url.startsWith('https://') ? url : '';
 // MAL recommendation thumbnails use a resize path in front of the original cover.
@@ -231,8 +232,11 @@ function updateTitle(id) {
     const action = node.dataset.icon === 'edit' ? 'Edit' : 'Add';
     node.setAttribute('aria-label', `${action} ${title}`);
   }
-  const active = dialogBody.querySelector(`[data-dialog-title="${id}"]`);
-  if (active) active.textContent = title;
+  if (detailPage?.id === id) {
+    const heading = view.querySelector('[data-entry-heading]');
+    if (heading) heading.textContent = title;
+    document.title = `${title} | AniLedger`;
+  }
 }
 
 function needsPosterImage(entry, node) {
@@ -300,19 +304,19 @@ function cover(entry, variant = '', usePosterImage = false) {
 }
 
 function entryButton(entry) {
-  return `<button type="button" class="title-button" data-entry="${key(entry)}" data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</button>`;
+  return `<a class="title-button" href="${entryUrl(entry)}" data-entry="${key(entry)}" data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</a>`;
 }
 
 function itemAction(entry, editable = false) {
   const label = editable ? 'Edit' : 'Add';
-  return `<button type="button" class="icon-button" data-entry="${key(entry)}" data-edit="true" aria-label="${label} ${escape(displayTitle(entry))}" data-icon="${editable ? 'edit' : 'plus'}"></button>`;
+  return `<a class="icon-button" href="${entryUrl(entry)}?edit=1" data-entry="${key(entry)}" data-edit="true" aria-label="${label} ${escape(displayTitle(entry))}" data-icon="${editable ? 'edit' : 'plus'}"></a>`;
 }
 
 function section(title, body, action = '') {
   return `<section class="panel"><div class="panel-heading"><h2>${title}</h2>${action}</div>${body}</section>`;
 }
 
-const actionLink = (href, label) => `<a class="text-button" href="${href}">${label}</a>`;
+const actionLink = (href, label) => `<a class="text-button" href="${href.startsWith('#') ? '/' : ''}${href}">${label}</a>`;
 const button = (label, action, style = '') => `<button type="button" class="button ${style}" data-action="${action}">${label}</button>`;
 const malButton = (style = '') => `<a href="/auth/mal" class="button primary ${style}">Sign in with MyAnimeList</a>`;
 const sessionMessage = () => state.sessionStatus === 'error'
@@ -337,7 +341,7 @@ async function verifySession(message) {
     // The session cannot be checked right now, so the cached lists stay put.
     state.sessionStatus = 'error';
     renderAccount();
-    if (['panel', 'lists', 'friends'].includes(route().page)) render();
+    if (['panel', 'lists', 'friends', 'detail'].includes(route().page)) render();
     return;
   }
   if (session.user) {
@@ -399,7 +403,7 @@ function activityRows(entries, editable) {
 function posters(entries, catalog = false, usePosterImage = false) {
   return `<div class="poster-grid ${catalog ? 'catalog-grid' : ''}">${entries.map((entry) => {
     const genre = entry.genres?.slice(0, 2).join(' · ');
-    return `<button type="button" class="poster" data-entry="${key(entry)}">${cover(registry.get(key(entry)) || entry, '', usePosterImage)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></button>`;
+    return `<a class="poster" href="${entryUrl(entry)}" data-entry="${key(entry)}">${cover(registry.get(key(entry)) || entry, '', usePosterImage)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></a>`;
   }).join('')}</div>`;
 }
 
@@ -624,6 +628,8 @@ const defaultSeason = seasonNames[Math.floor(today.getMonth() / 3)].toLowerCase(
 let seasonFilter = { year: today.getFullYear(), season: defaultSeason };
 
 function route() {
+  const detail = /^\/(anime|manga)\/([1-9]\d{0,10})\/?$/.exec(location.pathname);
+  if (detail) return { page: 'detail', kind: detail[1], id: Number(detail[2]) };
   const [page, params = ''] = location.hash.slice(1).split('?');
   return { page: ['anime', 'manga', 'season', 'airing', 'upcoming', 'lists', 'friends', 'search'].includes(page) ? page : 'panel', params: new URLSearchParams(params) };
 }
@@ -654,10 +660,16 @@ function renderCatalog(page, params) {
 }
 
 function render() {
-  const { page, params } = route();
+  const current = route();
+  const { page, params } = current;
   for (const link of document.querySelectorAll('[data-nav]')) {
-    if (link.dataset.nav === page) link.setAttribute('aria-current', 'page');
+    if (link.dataset.nav === (page === 'detail' ? current.kind : page)) link.setAttribute('aria-current', 'page');
     else link.removeAttribute('aria-current');
+  }
+  if (page === 'detail') {
+    if (!detailPage) void showEntry(current.kind, current.id);
+    else detailPage.refreshAccount?.();
+    return;
   }
   if (page === 'panel') renderPanel();
   else if (page === 'lists') renderLists();
@@ -672,7 +684,7 @@ function render() {
 
 async function browse(reset = true) {
   const { page, params } = route();
-  if (['panel', 'lists', 'friends'].includes(page)) return;
+  if (['panel', 'lists', 'friends', 'detail'].includes(page)) return;
   const ticket = ++browseTicket;
   const q = params.get('q') || '';
   const type = kinds.includes(params.get('kind')) ? params.get('kind') : 'all';
@@ -742,14 +754,13 @@ function toast(message) {
   toastTimer = setTimeout(() => { node.hidden = true; }, 5000);
 }
 
-function open(title, body, entryId = '') {
-  dialogBody.innerHTML = `<div class="dialog-content"><div class="dialog-heading"><h2 id="dialog-title" data-dialog-title="${entryId}">${escape(title)}</h2><button type="button" class="icon-button" data-action="close" data-icon="close" aria-label="Close"></button></div>${body}</div>`;
+function open(title, body) {
+  dialogBody.innerHTML = `<div class="dialog-content"><div class="dialog-heading"><h2 id="dialog-title">${escape(title)}</h2><button type="button" class="icon-button" data-action="close" data-icon="close" aria-label="Close"></button></div>${body}</div>`;
   mountIcons(dialog);
   if (!dialog.open) dialog.showModal();
 }
 
 function showAccount(setup = false) {
-  detailTicket++;
   if (state.user) {
     open('Your account', `<p>Signed in to MyAnimeList as <strong>${escape(state.user.name)}</strong>.</p><div class="dialog-actions"><a class="button" href="https://myanimelist.net/profile/${encodeURIComponent(state.user.name)}" target="_blank" rel="noopener">View profile</a>${button('Sign out', 'logout')}</div>`);
   } else if (setup || state.configured === false) {
@@ -923,38 +934,90 @@ async function loadEntryFriends(entry, region, active) {
 function entryActions(entry, edit, saved) {
   const mal = `<a class="button" href="https://myanimelist.net/${entry.kind}/${entry.id}" target="_blank" rel="noopener">View on MyAnimeList</a>`;
   if (!state.user || !edit) {
-    const cta = state.user ? `<button type="button" class="button primary" data-entry="${key(entry)}" data-edit="true">${saved ? 'Edit list entry' : 'Add to my list'}</button>` : state.sessionStatus === 'ready' ? malButton() : '';
+    const cta = state.user ? `<button type="button" class="button primary" data-action="edit-entry">${saved ? 'Edit list entry' : 'Add to my list'}</button>` : state.sessionStatus === 'ready' ? malButton() : '';
     return `<div class="entry-actions"><div class="dialog-actions">${cta}${mal}</div></div>`;
   }
   const statuses = listStatus(entry.kind);
   const selected = saved?.status || statuses.at(-1);
   const rating = `<option value="0">Unscored</option>${Array.from({ length: 10 }, (_, i) => `<option value="${i + 1}" ${saved?.rating === i + 1 ? 'selected' : ''}>${i + 1}</option>`).join('')}`;
-  return `<form id="edit-form" class="entry-actions" data-id="${key(entry)}"><div class="edit-fields"><label class="field">Status<select name="status">${statuses.map((status) => `<option value="${status}" ${status === selected ? 'selected' : ''}>${labels[status]}</option>`).join('')}</select></label><label class="field">${entry.kind === 'anime' ? 'Episodes' : 'Chapters'}<input name="progress" type="number" min="0" max="${Math.max(entry.total || 100000, saved?.progress || 0)}" value="${saved?.progress || 0}" required></label><label class="field">Score<select name="rating">${rating}</select></label></div><p class="form-error" hidden role="alert"></p><div class="dialog-actions"><button type="submit" class="button primary">Save to MyAnimeList</button>${saved ? button('Remove', 'remove', 'danger') : ''}${mal}</div></form>`;
+  return `<form id="edit-form" class="entry-actions" data-id="${key(entry)}"><div class="edit-fields"><label class="field">Status<select name="status">${statuses.map((status) => `<option value="${status}" ${status === selected ? 'selected' : ''}>${labels[status]}</option>`).join('')}</select></label><label class="field">${entry.kind === 'anime' ? 'Episodes' : 'Chapters'}<input name="progress" type="number" min="0" max="${Math.max(entry.total || 100000, saved?.progress || 0)}" value="${saved?.progress || 0}" required></label><label class="field">Score<select name="rating">${rating}</select></label></div><p class="form-error" hidden role="alert"></p><div class="dialog-actions"><button type="submit" class="button primary">Save to MyAnimeList</button>${saved ? button('Remove', 'remove', 'danger') : ''}${button('Cancel', 'cancel-edit')}${mal}</div></form>`;
 }
 
-async function showEntry(id, edit) {
+function setEntryEditing(edit) {
+  if (!detailPage?.refreshAccount) return;
+  const url = new URL(location.href);
+  if (edit) url.searchParams.set('edit', '1');
+  else url.searchParams.delete('edit');
+  history.replaceState(history.state, '', url);
+  detailPage.edit = edit;
+  detailPage.refreshAccount();
+  const selector = edit ? '#edit-form select' : '[data-action="edit-entry"]';
+  view.querySelector(selector)?.focus();
+}
+
+async function showEntry(kind, number) {
+  const id = `${kind}-${number}`;
+  const page = { id, edit: new URLSearchParams(location.search).get('edit') === '1' };
+  detailPage = page;
+  const label = kind === 'anime' ? 'Anime' : 'Manga';
+  const active = () => detailPage === page;
+  const known = registry.get(id);
+  const path = `/${kind}/${number}`;
+  document.title = known ? `${displayTitle(known)} | AniLedger` : `${label} | AniLedger`;
+  view.innerHTML = `<div class="page-heading"><h1>${known ? escape(displayTitle(known)) : label}</h1></div><p class="empty" role="status">Loading title details…</p>`;
+  try {
+    const { data } = await catalog(path);
+    if (!data || Array.isArray(data)) throw new Error('Invalid title details.');
+    const details = adapt(data, kind);
+    if (details.id !== number || !details.title) throw new Error('Invalid title details.');
+    remember([details]);
+  } catch {
+    if (!active()) return;
+    if (!known) {
+      view.innerHTML = `${heading(label)}<div class="panel empty">Could not load this title. ${button('Retry', 'retry-entry')} ${actionLink(`#${kind}`, `Browse ${kind}`)}</div>`;
+      return;
+    }
+  }
+  if (!active()) return;
   const entry = registry.get(id);
-  if (!entry) return;
-  const ticket = ++detailTicket;
-  const saved = state.entries[entry.kind].find((item) => item.id === entry.id);
-  const extra = { characters: [], links: [], streaming: [], detailFailed: false };
-  const active = () => dialog.open && ticket === detailTicket;
+  const extra = { characters: [], links: [], streaming: [], detailFailed: true };
   const paint = () => {
     if (!active()) return;
-    const summary = dialogBody.querySelector('[data-summary]');
-    const sections = dialogBody.querySelector('[data-sections]');
-    if (summary) summary.innerHTML = summaryHtml(registry.get(id) || entry);
-    if (sections) sections.innerHTML = sectionsHtml(registry.get(id) || entry, extra);
+    view.querySelector('[data-sections]').innerHTML = sectionsHtml(entry, extra);
   };
-  open(displayTitle(entry), `<div data-summary>${summaryHtml(entry)}</div><div data-actions>${entryActions(entry, edit, saved)}</div><div data-sections>${sectionsHtml(entry, extra)}</div><section class="entry-section entry-extra"><h3>Friends’ List Activity</h3><div data-entry-friends></div></section>${entry.kind === 'anime' ? `<div data-entry-themes class="entry-extra">${themeSections()}</div>` : ''}<div data-entry-relations class="entry-extra"></div>`, id);
-  void loadEntryFriends(entry, dialogBody.querySelector('[data-entry-friends]'), active);
+  document.title = `${displayTitle(entry)} | AniLedger`;
+  view.innerHTML = `<div class="entry-breadcrumb"><a href="/#${kind}">${label}</a><span aria-hidden="true"> / </span><span>Details</span></div>
+    <header class="page-heading entry-heading"><h1 data-entry-heading>${escape(displayTitle(entry))}</h1></header>
+    <article class="panel entry-page"><div data-summary>${summaryHtml(entry)}</div><div data-actions></div><div data-sections>${sectionsHtml(entry, extra)}</div>
+    <section class="entry-section entry-extra"><h3>Friends’ List Activity</h3><div data-entry-friends></div></section>
+    ${kind === 'anime' ? `<div data-entry-themes class="entry-extra">${themeSections()}</div>` : ''}
+    <div data-entry-relations class="entry-extra"></div></article>`;
+  let friendOwner;
+  let actionState;
+  page.refreshAccount = () => {
+    const owner = state.user?.id ?? state.sessionStatus;
+    const saved = state.entries[kind].find((item) => item.id === number);
+    const actions = view.querySelector('[data-actions]');
+    const waiting = page.edit && state.user && state.listLoading;
+    const nextState = JSON.stringify([owner, page.edit, Boolean(waiting), saved?.status, saved?.rating, saved?.progress]);
+    if (actionState !== nextState) {
+      actions.innerHTML = waiting ? '<p class="row-meta" role="status">Loading your list entry…</p>' : entryActions(entry, page.edit, saved);
+      actionState = nextState;
+    }
+    if (friendOwner !== owner) {
+      friendOwner = owner;
+      const region = view.querySelector('[data-entry-friends]');
+      void loadEntryFriends(entry, region, active);
+    }
+  };
+  page.refreshAccount();
   const loadRelations = async () => {
     const { data } = await catalog(`/${entry.kind}/${entry.id}/relations`);
     if (!active()) return;
     const items = related(data);
     if (!items.length) return;
     remember(items);
-    const region = dialogBody.querySelector('[data-entry-relations]');
+    const region = view.querySelector('[data-entry-relations]');
     region.innerHTML = `<section class="entry-section"><h3>Related Entries</h3><div data-related-main class="related-grid"></div>${items.length > 6 ? '<details><summary>More related entries</summary><div data-related-more class="related-grid"></div></details>' : ''}</section>`;
     const fillCovers = async (slot, cards) => {
       slot.innerHTML = relatedCards(cards);
@@ -991,7 +1054,7 @@ async function showEntry(id, edit) {
       const full = await catalog(`${path}/full`).catch(() => null);
       themes = normalize(full?.data);
     }
-    if (active()) dialogBody.querySelector('[data-entry-themes]').innerHTML = themeSections(themes, !themes);
+    if (active()) view.querySelector('[data-entry-themes]').innerHTML = themeSections(themes, !themes);
   };
   const load = async (path, apply) => {
     try {
@@ -1003,13 +1066,12 @@ async function showEntry(id, edit) {
     }
   };
   await Promise.allSettled([
-    load(`/${entry.kind}/${entry.id}`, (data) => { remember([adapt(data, entry.kind)]); updateTitle(id); }),
     load(`/${entry.kind}/${entry.id}/characters`, (data) => { extra.characters = cast(data); }),
     loadRelations(),
     loadThemes(),
     load(`/${entry.kind}/${entry.id}/external`, (data) => { extra.links = externalLinks(data); }),
     entry.kind === 'anime' ? load(`/anime/${entry.id}/streaming`, (data) => { extra.streaming = externalLinks(data); }) : Promise.resolve(),
-  ]).then(() => { extra.detailFailed = !registry.get(id)?.synopsis; paint(); });
+  ]);
 }
 
 async function saveEntry(form, remove = false) {
@@ -1025,7 +1087,7 @@ async function saveEntry(form, remove = false) {
     const saved = await siteApi(`lists/${entry.kind}/${entry.id}`, remove ? { method: 'DELETE' } : { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(values) });
     const rest = state.entries[entry.kind].filter((item) => item.id !== entry.id);
     state.entries[entry.kind] = remove ? rest : [{ ...entry, ...values, ...saved, updated: saved.updated || new Date().toISOString() }, ...rest];
-    dialog.close();
+    setEntryEditing(false);
     render();
     toast(remove ? 'Removed from MyAnimeList.' : 'Saved to MyAnimeList.');
   } catch (failure) {
@@ -1056,9 +1118,8 @@ async function moreList(control) {
 }
 
 document.addEventListener('click', async (event) => {
-  const control = event.target.closest('[data-entry], [data-action], [data-list-kind]');
+  const control = event.target.closest('[data-action], [data-list-kind]');
   if (!control) return;
-  if (control.dataset.entry) { showEntry(control.dataset.entry, control.dataset.edit === 'true'); return; }
   if (control.dataset.listKind) {
     state.listKind = control.dataset.listKind;
     state.status = 'all';
@@ -1083,7 +1144,14 @@ document.addEventListener('click', async (event) => {
     case 'more-list': moreList(control); break;
     case 'more-friends': loadFriends(); break;
     case 'refresh-friends': loadFriends(true); break;
-    case 'remove': saveEntry(dialog.querySelector('#edit-form'), true); break;
+    case 'retry-entry': {
+      const { kind, id } = route();
+      if (kind) void showEntry(kind, id);
+      break;
+    }
+    case 'edit-entry': setEntryEditing(true); break;
+    case 'cancel-edit': setEntryEditing(false); break;
+    case 'remove': saveEntry(view.querySelector('#edit-form'), true); break;
     case 'logout':
       try {
         await siteApi('logout', { method: 'POST' });
@@ -1117,7 +1185,8 @@ document.addEventListener('submit', (event) => {
     const q = data.get('q').trim();
     if (!q) return;
     const hash = `#search?${new URLSearchParams({ q, kind: data.get('kind') })}`;
-    if (location.hash === hash) browse();
+    if (route().page === 'detail') location.assign(`/${hash}`);
+    else if (location.hash === hash) browse();
     else location.hash = hash;
   }
 });
@@ -1142,8 +1211,8 @@ document.addEventListener('error', (event) => {
   container.setAttribute('data-failed', '');
   event.target.remove();
 }, true);
-dialog.addEventListener('close', () => { detailTicket++; });
 window.addEventListener('hashchange', () => {
+  if (route().page === 'detail') return;
   browseTicket++;
   state.browse = null;
   render();
@@ -1157,7 +1226,11 @@ render();
 browse();
 
 let pendingAuth = new URLSearchParams(location.search).get('auth') || '';
-if (pendingAuth) history.replaceState(null, '', `/${location.hash}`);
+if (pendingAuth) {
+  const url = new URL(location.href);
+  url.searchParams.delete('auth');
+  history.replaceState(history.state, '', url);
+}
 function authFeedback(authResult) {
   if (authResult === 'setup') return showAccount(true);
   if (authResult === 'connected') {
@@ -1171,14 +1244,14 @@ function authFeedback(authResult) {
 async function checkSession(authResult = pendingAuth) {
   state.sessionStatus = 'loading';
   renderAccount();
-  if (['panel', 'lists', 'friends'].includes(route().page)) render();
+  if (['panel', 'lists', 'friends', 'detail'].includes(route().page)) render();
   let session;
   try {
     session = await siteApi('session', { signal: AbortSignal.timeout(10000) });
   } catch {
     state.sessionStatus = 'error';
     renderAccount();
-    if (['panel', 'lists', 'friends'].includes(route().page)) render();
+    if (['panel', 'lists', 'friends', 'detail'].includes(route().page)) render();
     if (authResult) authFeedback(authResult);
     return;
   }
@@ -1199,7 +1272,7 @@ async function checkSession(authResult = pendingAuth) {
     loadLists();
     if (!state.malSuggestions || state.malSuggestions.error) loadMalSuggestions();
   } else loadSuggestions();
-  if (!state.user && ['panel', 'lists', 'friends'].includes(route().page)) render();
+  if (!state.user && ['panel', 'lists', 'friends', 'detail'].includes(route().page)) render();
   loadVisibleFriends();
   if (authResult) {
     pendingAuth = '';

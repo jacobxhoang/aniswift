@@ -163,7 +163,6 @@ nav a:focus-visible { outline-offset: -3px; }
 .footer-brand { color: var(--text); font-size: 19px; font-weight: 700; letter-spacing: -.04em; }
 .footer > a:last-child { margin-left: auto; }
 dialog { width: min(520px, calc(100% - 24px)); max-height: calc(100% - 24px); padding: 0; overflow: auto; border: 1px solid var(--strong-edge); border-radius: var(--radius); background: var(--panel); color: var(--text); box-shadow: 0 24px 80px #02070c9e; }
-dialog:has(.entry-top) { width: min(880px, calc(100% - 24px)); }
 dialog::backdrop { background: #060c14bc; }
 .dialog-content { padding: 20px; }
 .dialog-heading { display: flex; justify-content: space-between; gap: 8px; align-items: start; margin-bottom: 12px; }
@@ -302,3 +301,10 @@ dialog::backdrop { background: #060c14bc; }
   .related-grid { grid-template-columns: minmax(0, 1fr); }
 }
 .suggestion-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }
+
+.entry-breadcrumb { padding-top: 18px; color: var(--muted); font-size: 14px; }
+.entry-heading { padding-top: 8px; }
+.entry-page { padding: clamp(14px, 3vw, 28px); }
+.entry-page [data-actions]:empty { display: none; }
+.entry-page .entry-actions { margin-bottom: 0; }
+a.poster { display: block; }

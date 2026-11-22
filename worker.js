@@ -276,7 +276,9 @@ export default {
       }
       return json({ error: 'Route not found.' }, 404);
     }
-    const asset = Object.hasOwn(ASSETS, pathname) ? ASSETS[pathname] : null;
+    const entryPage = /^\/(?:anime|manga)\/[1-9]\d{0,10}\/?$/.test(pathname);
+    const assetPath = entryPage ? '/' : pathname;
+    const asset = Object.hasOwn(ASSETS, assetPath) ? ASSETS[assetPath] : null;
     if (!asset || (method !== 'GET' && method !== 'HEAD')) return new Response('Page not found', { status: 404 });
     return new Response(method === 'HEAD' ? null : asset.body, { headers: {
       'Content-Type': asset.type,
