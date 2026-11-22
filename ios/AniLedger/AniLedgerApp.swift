@@ -71,6 +71,26 @@ enum Palette {
     }
 }
 
+enum LedgerLayout {
+    static let inset: CGFloat = 20
+    static let gap: CGFloat = 12
+    static let sectionGap: CGFloat = 28
+    static let posterWidth: CGFloat = 116
+    static let posterRadius: CGFloat = 8
+}
+
+struct LedgerSectionTitle: View {
+    let title: String
+
+    init(_ title: String) { self.title = title }
+
+    var body: some View {
+        Text(title)
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
 extension View {
     @ViewBuilder
     func ledgerProminentButton() -> some View {
@@ -110,12 +130,13 @@ extension View {
 }
 
 struct Art: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let url: URL?
     var symbol = "film"
 
     var body: some View {
         GeometryReader { proxy in
-            AsyncImage(url: url, transaction: Transaction(animation: .easeInOut(duration: 0.2))) { phase in
+            AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : .easeInOut(duration: 0.18))) { phase in
                 if let image = phase.image {
                     image.resizable().scaledToFill()
                 } else {
@@ -134,22 +155,28 @@ struct Art: View {
 
 struct CoverTile: View {
     let title: Title
+    var showsScore = true
 
     var body: some View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
                 Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
                     .aspectRatio(2 / 3, contentMode: .fit)
-                    .clipShape(.rect(cornerRadius: 10))
+                    .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
+                            .strokeBorder(.white.opacity(0.10)).allowsHitTesting(false)
+                    }
                     .overlay(alignment: .topTrailing) {
-                        if let score = title.score, score > 0 {
+                        if showsScore, let score = title.score, score > 0 {
                             Text(score.formatted(.number.precision(.fractionLength(2))))
                                 .font(.caption2.monospacedDigit().weight(.semibold))
                                 .padding(.horizontal, 7).padding(.vertical, 5)
                                 .ledgerGlassBadge().padding(6)
                         }
                     }
-                Text(title.name).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true)
+                Text(title.name).font(.subheadline.weight(.medium)).lineLimit(2, reservesSpace: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
         .buttonStyle(.plain)
@@ -163,16 +190,18 @@ struct Rail: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(name).font(.headline).padding(.horizontal)
+            LedgerSectionTitle(name).padding(.horizontal, LedgerLayout.inset)
             if titles.isEmpty {
-                Text(empty).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal)
+                Text(empty).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
             } else {
                 ScrollView(.horizontal) {
                     LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(unique(titles)) { title in CoverTile(title: title).frame(width: 114) }
+                        ForEach(unique(titles)) { title in CoverTile(title: title, showsScore: false).frame(width: LedgerLayout.posterWidth) }
                     }
-                    .padding(.horizontal)
+                    .scrollTargetLayout()
                 }
+                .contentMargins(.horizontal, LedgerLayout.inset, for: .scrollContent)
+                .scrollTargetBehavior(.viewAligned)
                 .scrollIndicators(.hidden)
             }
         }
@@ -227,13 +256,13 @@ struct AccountScreen: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 26) {
+            VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 if let account = store.account {
                     profileHeader(account)
-                    if loadingProfile { ProgressView("Loading public profile").padding(.horizontal, 18) }
+                    if loadingProfile { ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset) }
                     else if favoritesUnavailable {
                         Button("Retry loading favorites") { Task { await loadProfile(refresh: true) } }
-                            .padding(.horizontal, 18)
+                            .padding(.horizontal, LedgerLayout.inset)
                     }
                     ForEach(Kind.allCases) { kind in favoriteShelf(kind) }
                 } else {
@@ -243,13 +272,13 @@ struct AccountScreen: View {
                             Text("Connect MyAnimeList to show your stats and favorites.").foregroundStyle(.secondary)
                             SignInButton()
                         }
-                    }.padding(.horizontal, 18)
+                    }.padding(.horizontal, LedgerLayout.inset)
                 }
                 NavigationLink { HomeScreen() } label: {
                     Label("Dashboard", systemImage: "rectangle.grid.2x2")
                 }
                 .ledgerGlassButton()
-                .padding(.horizontal, 18)
+                .padding(.horizontal, LedgerLayout.inset)
             }.padding(.vertical, 18).frame(maxWidth: 800).frame(maxWidth: .infinity)
         }
         .background(Palette.background.ignoresSafeArea())
@@ -303,7 +332,7 @@ struct AccountScreen: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .ledgerPanel()
-        .padding(.horizontal, 18)
+        .padding(.horizontal, LedgerLayout.inset)
     }
 
     private func avatar(_ user: Account) -> some View {
@@ -329,7 +358,7 @@ struct AccountScreen: View {
     private func metric(_ label: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            Text(value).font(.title3.bold().monospacedDigit())
+            Text(value).font(.title3.monospacedDigit().weight(.semibold))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
@@ -340,7 +369,7 @@ struct AccountScreen: View {
         if let titles = favorites[kind] {
             if titles.isEmpty {
                 Text("No public favorite \(kind.rawValue).").font(.subheadline)
-                    .foregroundStyle(.secondary).padding(.horizontal, 18)
+                    .foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
             } else {
                 PosterShelf(heading: "Favorite \(kind.rawValue)", titles: titles) {
                     NavigationLink {

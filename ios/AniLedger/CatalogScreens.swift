@@ -15,7 +15,7 @@ struct HomeScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 24) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("Recent list updates").font(.headline)
+                    LedgerSectionTitle("Recent updates")
                     if store.checking {
                         ProgressView("Checking session")
                     } else if store.account == nil {
@@ -54,7 +54,7 @@ struct HomeScreen: View {
 
     private func ranking(_ label: String, titles: [Title]) -> some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(label).font(.headline)
+            LedgerSectionTitle(label)
             if titles.isEmpty { Text("No rankings available.").foregroundStyle(.secondary) }
             ForEach(Array(unique(titles).prefix(4).enumerated()), id: \.element.id) { rank, title in
                 NavigationLink(value: title) {
@@ -158,7 +158,7 @@ struct ListsScreen: View {
                     let matches = visibleEntries(group)
                     if searchTerm.isEmpty || !matches.isEmpty {
                         groupHeader(status, count: searchTerm.isEmpty ? group.count : matches.count)
-                            .listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 12))
+                            .listRowInsets(EdgeInsets(top: 5, leading: LedgerLayout.inset, bottom: 5, trailing: LedgerLayout.inset))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         if !collapsed.contains(status) || !searchTerm.isEmpty {
@@ -273,7 +273,7 @@ struct ListsScreen: View {
             }
             .padding(.vertical, 3)
         }
-        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+        .listRowInsets(EdgeInsets(top: 3, leading: LedgerLayout.inset, bottom: 3, trailing: LedgerLayout.inset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -362,23 +362,25 @@ struct PosterShelf<Trailing: View>: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text(heading.uppercased()).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
-                    .accessibilityAddTraits(.isHeader)
+                LedgerSectionTitle(heading)
                 Spacer()
                 trailing
-            }.padding(.horizontal, 18)
+            }.padding(.horizontal, LedgerLayout.inset)
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 10) {
                     ForEach(unique(titles)) { title in
                         VStack(alignment: .leading, spacing: 3) {
-                            CoverTile(title: title)
+                            CoverTile(title: title, showsScore: false)
                             if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
                                 Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             }
-                        }.frame(width: 112)
+                        }.frame(width: LedgerLayout.posterWidth)
                     }
-                }.padding(.horizontal, 18)
-            }.scrollIndicators(.hidden)
+                }.scrollTargetLayout()
+            }
+            .contentMargins(.horizontal, LedgerLayout.inset, for: .scrollContent)
+            .scrollTargetBehavior(.viewAligned)
+            .scrollIndicators(.hidden)
         }
     }
 }
@@ -397,19 +399,19 @@ struct DiscoverScreen: View {
                     .safeAreaInset(edge: .top, spacing: 0) {
                         Picker("Search category", selection: $searchKind) {
                             ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                        }.pickerStyle(.segmented).padding(.horizontal, 18).padding(.vertical, 6)
+                        }.pickerStyle(.segmented).padding(.horizontal, LedgerLayout.inset).padding(.vertical, 6)
                             .background(.regularMaterial)
                     }
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 28) {
+                    LazyVStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                         ForEach(DiscoverShelf.allCases) { shelf in
                             if let titles = shelves[shelf], !titles.isEmpty {
                                 PosterShelf(heading: shelf.rawValue, titles: Array(titles.prefix(14))) {
                                     NavigationLink {
                                         PosterResults(name: shelf.rawValue, shelf: shelf, query: "", kind: shelf.kind)
                                             .navigationTitle(shelf.rawValue)
-                                    } label: { Text("View all").font(.caption.weight(.semibold)) }
+                                    } label: { Label("View all", systemImage: "chevron.right").font(.caption.weight(.semibold)).frame(minHeight: 44) }
                                 }
                             }
                         }
@@ -619,7 +621,7 @@ struct FriendsScreen: View {
         List {
             if store.checking { ProgressView("Checking session").listRowBackground(Color.clear) }
             else if store.account == nil {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: LedgerLayout.gap) {
                     Text("See what your MyAnimeList friends are watching and reading.").foregroundStyle(.secondary)
                     SignInButton()
                 }.listRowBackground(Color.clear)
@@ -631,7 +633,7 @@ struct FriendsScreen: View {
                 ForEach(store.activity) { item in
                     NavigationLink(value: item.title) { feedRow(item) }
                         .buttonStyle(.plain)
-                        .listRowInsets(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
+                        .listRowInsets(EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset))
                         .listRowBackground(Color.clear)
                         .listRowSeparatorTint(.white.opacity(0.20))
                 }

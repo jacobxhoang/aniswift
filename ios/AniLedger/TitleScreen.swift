@@ -27,14 +27,14 @@ struct TitleScreen: View {
     var body: some View {
         ScrollView {
             header
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 actions
                 if let failure {
                     Text(failure).foregroundStyle(.secondary)
                     Button("Reload details") { Task { await load() } }
                 }
                 if let description = record?.string("synopsis") {
-                    block("Summary") { Text(description).lineSpacing(3) }
+                    block("Summary") { Text(description).lineSpacing(4).textSelection(.enabled) }
                 }
                 metadata
                 if let background = record?.string("background") { block("Background") { Text(background) } }
@@ -48,7 +48,7 @@ struct TitleScreen: View {
                 reviewRows
                 if !external.isEmpty { externalLinks }
             }
-            .padding(20)
+            .padding(LedgerLayout.inset)
             .frame(maxWidth: 800)
             .frame(maxWidth: .infinity)
         }
@@ -86,7 +86,7 @@ struct TitleScreen: View {
                         Text(review.author).font(.headline)
                         if let rating = review.rating, (1...10).contains(rating) { Text("Reviewer rating: \(rating)/10").foregroundStyle(.secondary) }
                         Text(review.text).textSelection(.enabled)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(20)
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(LedgerLayout.inset)
                 }
                 .background(Palette.background)
                 .navigationTitle("Review")
@@ -144,7 +144,7 @@ struct TitleScreen: View {
             .frame(maxWidth: 480)
             .padding(.top, 8)
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, LedgerLayout.inset)
         .frame(maxWidth: .infinity)
     }
 
@@ -274,12 +274,12 @@ struct TitleScreen: View {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(unique(titles)) { item in
                         VStack(alignment: .leading, spacing: 4) {
-                            CoverTile(title: item)
+                            CoverTile(title: item, showsScore: false)
                             if let note = notes[item.id] {
                                 Text(note).font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        .frame(width: 112)
+                        .frame(width: LedgerLayout.posterWidth)
                     }
                 }
             }.scrollIndicators(.hidden)
@@ -443,8 +443,7 @@ struct TitleScreen: View {
 
     private func block<Content: View>(_ name: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 9) {
-            Text(name.uppercased()).font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary).accessibilityAddTraits(.isHeader)
+            LedgerSectionTitle(name)
             content()
         }
         .padding(.top, 12)
