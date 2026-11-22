@@ -13,6 +13,27 @@ final class Store: ObservableObject {
     @Published var friendMessage: String?
     @Published var loadingFriends = false
     @Published var checkedFriends = 0
+    @Published private(set) var localFavorites: [Title] = {
+        guard let data = UserDefaults.standard.data(forKey: "aniledger.localFavorites.v1") else { return [] }
+        return (try? JSONDecoder().decode([Title].self, from: data)) ?? []
+    }()
+
+    func isFavorite(_ title: Title) -> Bool {
+        localFavorites.contains { $0.id == title.id }
+    }
+
+    func toggleFavorite(_ title: Title) {
+        var updated = localFavorites
+        if let index = updated.firstIndex(where: { $0.id == title.id }) {
+            updated.remove(at: index)
+        } else {
+            updated.insert(title, at: 0)
+        }
+        guard let data = try? JSONEncoder().encode(updated) else { return }
+        UserDefaults.standard.set(data, forKey: "aniledger.localFavorites.v1")
+        localFavorites = updated
+    }
+
     private var accountGeneration = UUID()
     private var listRevisions: [Kind: Int] = [:]
     private var pagingLists: Set<Kind> = []

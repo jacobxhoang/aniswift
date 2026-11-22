@@ -312,6 +312,14 @@ struct AccountScreen: View {
                         }
                     }.padding(.horizontal, LedgerLayout.inset)
                 }
+                ForEach(Kind.allCases) { kind in
+                    let titles = store.localFavorites.filter { $0.kind == kind }
+                    if !titles.isEmpty {
+                        PosterShelf(heading: "Favorite \(kind.rawValue) on this device", titles: titles) {
+                            EmptyView()
+                        }
+                    }
+                }
                 NavigationLink { HomeScreen() } label: {
                     Label("Dashboard", systemImage: "rectangle.grid.2x2")
                 }

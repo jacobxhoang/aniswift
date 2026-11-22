@@ -15,7 +15,9 @@ struct TitleScreen: View {
     @State private var openReview: TitleReview?
     @State private var external: [Fields] = []
     @State private var failure: String?
-    @State private var editor = false
+    @State private var editor: ListEditor.Mode?
+    @State private var confirmRemoval = false
+    @State private var changingList = false
     @State private var friendRows: [FriendUpdate] = []
     @State private var friendOffset = 0
     @State private var checkingFriends = false
@@ -59,19 +61,36 @@ struct TitleScreen: View {
         .navigationTitle(current.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
                 if store.account != nil {
-                    Button { editor = true } label: {
-                        Label(saved == nil ? "Add to My List" : "Edit list entry",
-                              systemImage: saved == nil ? "plus" : "pencil")
+                    Button { editor = .full } label: {
+                        Image(systemName: saved == nil ? "plus" : "pencil")
                     }
+                    .accessibilityLabel(saved == nil ? "Add to My List" : "Edit list entry")
+                    .disabled(changingList)
                 }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
+                Button { store.toggleFavorite(current) } label: {
+                    Image(systemName: store.isFavorite(current) ? "heart.fill" : "heart")
+                }
+                .accessibilityLabel(store.isFavorite(current) ? "Remove favorite" : "Add favorite")
+                .accessibilityHint("Favorites are saved on this device")
                 Menu {
                     ShareLink(item: API.backend.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
                     Link(destination: title.malURL) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
-                } label: { Label("More", systemImage: "ellipsis") }
+                    if store.account != nil, let saved {
+                        if saved.status != "completed" {
+                            Button {
+                                let progress = max(saved.progress, current.total ?? 0)
+                                updateList(ListChange(status: "completed", progress: progress, rating: saved.rating))
+                            } label: { Label("Mark completed", systemImage: "checkmark") }
+                        }
+                        Button(role: .destructive) { confirmRemoval = true } label: {
+                            Label("Remove from My List", systemImage: "trash")
+                        }
+                    }
+                } label: { Image(systemName: "ellipsis") }
+                .accessibilityLabel("More actions")
+                .disabled(changingList)
             }
         }
         .task { await load() }
@@ -97,8 +116,25 @@ struct TitleScreen: View {
                 .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { openReview = nil } } }
             }
         }
-        .sheet(isPresented: $editor) {
-            ListEditor(title: current, original: saved)
+        .sheet(item: $editor) { mode in
+            ListEditor(title: current, original: saved, mode: mode)
+                .presentationDetents(mode == .full ? [.large] : [.medium, .large])
+                .presentationDragIndicator(.visible)
+        }
+        .confirmationDialog("Remove this title from your MyAnimeList list?", isPresented: $confirmRemoval) {
+            Button("Remove", role: .destructive) { updateList(nil) }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func updateList(_ change: ListChange?) {
+        guard !changingList else { return }
+        changingList = true
+        let item = current
+        Task {
+            defer { changingList = false }
+            do { try await store.change(item, change) }
+            catch { store.handle(error) }
         }
     }
 
@@ -181,14 +217,14 @@ struct TitleScreen: View {
     private func listControls(_ item: ListEntry?) -> some View {
         let unit = title.kind == .anime ? "ep" : "ch"
         let total = (current.total ?? item?.title.total).flatMap { $0 > 0 ? String($0) : nil } ?? "?"
-        editControl("Status", item.map { statusLabel($0.status) } ?? "Add to list")
-        editControl("Progress", "\(item.map { String($0.progress) } ?? "—") / \(total) \(unit)")
+        editControl("Status", item.map { statusLabel($0.status) } ?? "Add to list", mode: item == nil ? .full : .status)
+        editControl("Progress", "\(item.map { String($0.progress) } ?? "—") / \(total) \(unit)", mode: .progress)
         let rating = item?.rating ?? 0
-        editControl("My score", rating > 0 ? "\(rating) / 10" : "Unscored")
+        editControl("My score", rating > 0 ? "\(rating) / 10" : "Unscored", mode: .score)
     }
 
-    private func editControl(_ label: String, _ value: String) -> some View {
-        Button { editor = true } label: {
+    private func editControl(_ label: String, _ value: String, mode: ListEditor.Mode) -> some View {
+        Button { editor = mode } label: {
             VStack(spacing: 3) {
                 Text(label).font(.caption2).foregroundStyle(.secondary)
                 Text(value).font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
@@ -197,7 +233,8 @@ struct TitleScreen: View {
             .frame(maxWidth: .infinity)
         }
         .ledgerGlassButton()
-        .accessibilityHint("Opens your list entry")
+        .accessibilityHint("Opens \(label.lowercased()) settings")
+        .disabled(changingList)
     }
 
     private func fieldNames(_ key: String) -> [String] {
@@ -548,18 +585,25 @@ struct TitleScreen: View {
 }
 
 struct ListEditor: View {
+    enum Mode: String, Identifiable {
+        case full, status, progress, score
+        var id: Self { self }
+    }
+
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     let title: Title
     let original: ListEntry?
+    let mode: Mode
     @State private var change: ListChange
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var error: String?
 
-    init(title: Title, original: ListEntry?) {
+    init(title: Title, original: ListEntry?, mode: Mode = .full) {
         self.title = title
         self.original = original
+        self.mode = mode
         _change = State(initialValue: ListChange(
             status: original?.status ?? title.kind.statuses.last!,
             progress: original?.progress ?? 0,
@@ -567,38 +611,138 @@ struct ListEditor: View {
         ))
     }
 
+    private var total: Int? {
+        [title.total, original?.title.total].compactMap { $0 }.first { $0 > 0 }
+    }
+
+    private var maximumProgress: Int { max(total ?? 100_000, original?.progress ?? 0) }
+
+    private var heading: String {
+        switch mode {
+        case .full: original == nil ? "Add to My List" : "Edit list entry"
+        case .status: "Status"
+        case .progress: title.kind.unit
+        case .score: "My score"
+        }
+    }
+
+    private var saveDisabled: Bool {
+        busy || !(0...maximumProgress).contains(change.progress)
+            || (original.map {
+                $0.status == change.status && $0.progress == change.progress && $0.rating == change.rating
+            } ?? false)
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                Section(title.name) {
-                    Picker("Status", selection: $change.status) {
-                        ForEach(title.kind.statuses, id: \.self) { Text(statusLabel($0)).tag($0) }
+            Group {
+                if mode == .full {
+                    Form {
+                        Section(title.name) {
+                            statusPicker
+                            Stepper(value: $change.progress, in: 0...maximumProgress) {
+                                LabeledContent(title.kind.unit) {
+                                    TextField("Progress", value: $change.progress, format: .number)
+                                        .keyboardType(.numberPad)
+                                        .multilineTextAlignment(.trailing)
+                                        .frame(minWidth: 54)
+                                }
+                            }
+                            Stepper(value: $change.rating, in: 0...10) {
+                                LabeledContent("Score", value: change.rating == 0 ? "Unscored" : "\(change.rating)/10")
+                            }
+                        }
+                        if let error { Label(error, systemImage: "exclamationmark.circle") }
+                        if original != nil {
+                            Button("Remove from My List", role: .destructive) { confirmRemoval = true }
+                        }
                     }
-                    LabeledContent(title.kind.unit) {
-                        TextField("Progress", value: $change.progress, format: .number)
-                            .keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                    }
-                    Picker("Rating", selection: $change.rating) {
-                        Text("Unscored").tag(0)
-                        ForEach(1...10, id: \.self) { Text("\($0)/10").tag($0) }
-                    }
+                } else {
+                    quickEditor
                 }
-                if let error { Label(error, systemImage: "exclamationmark.circle").foregroundStyle(.primary) }
-                if original != nil { Button("Remove from My List") { confirmRemoval = true } }
             }
-            .navigationTitle("List entry")
+            .navigationTitle(heading)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() }.disabled(busy) }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { submit(change) }.disabled(busy || change.progress < 0 || change.progress > max(title.total ?? 100_000, original?.progress ?? 0))
+                ToolbarItem(placement: .cancellationAction) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Cancel")
+                        .disabled(busy)
+                }
+                if mode == .full {
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("Save") { submit(change) }.disabled(saveDisabled)
+                    }
                 }
             }
             .confirmationDialog("Remove this title from your MyAnimeList list?", isPresented: $confirmRemoval) {
-                Button("Remove") { submit(nil) }
+                Button("Remove", role: .destructive) { submit(nil) }
                 Button("Cancel", role: .cancel) {}
             }
             .interactiveDismissDisabled(busy)
+        }
+    }
+
+    private var statusPicker: some View {
+        Picker("Status", selection: $change.status) {
+            ForEach(title.kind.statuses, id: \.self) { Text(statusLabel($0)).tag($0) }
+        }
+    }
+
+    private var quickEditor: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                switch mode {
+                case .status:
+                    statusPicker.pickerStyle(.wheel).frame(height: 145)
+                case .progress:
+                    if let total { Text("Total \(title.kind.unit.lowercased()) · \(total)").foregroundStyle(.secondary) }
+                    counter($change.progress, maximum: maximumProgress, label: title.kind.unit)
+                case .score:
+                    counter($change.rating, maximum: 10, label: "Score", zeroLabel: "—")
+                case .full:
+                    EmptyView()
+                }
+                if let error {
+                    Text(error).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
+                }
+                Button {
+                    submit(change)
+                } label: {
+                    Text(busy ? "Updating…" : "Update").frame(maxWidth: .infinity, minHeight: 38)
+                }
+                .ledgerProminentButton()
+                .disabled(saveDisabled)
+            }
+            .frame(maxWidth: 420)
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+    }
+
+    private func counter(_ value: Binding<Int>, maximum: Int, label: String, zeroLabel: String = "0") -> some View {
+        HStack(spacing: 14) {
+            Button { value.wrappedValue -= 1 } label: {
+                Image(systemName: "minus").frame(width: 36, height: 44)
+            }
+            .ledgerGlassButton()
+            .accessibilityLabel("Decrease \(label.lowercased())")
+            .disabled(value.wrappedValue <= 0 || busy)
+
+            Text(value.wrappedValue == 0 ? zeroLabel : value.wrappedValue.formatted())
+                .font(.largeTitle.weight(.semibold).monospacedDigit())
+                .frame(maxWidth: .infinity, minHeight: 60)
+                .ledgerPanel(radius: 14)
+                .accessibilityLabel(label)
+                .accessibilityValue(zeroLabel == "—" && value.wrappedValue == 0 ? "Unscored" : value.wrappedValue.formatted())
+
+            Button { value.wrappedValue += 1 } label: {
+                Image(systemName: "plus").frame(width: 36, height: 44)
+            }
+            .ledgerGlassButton()
+            .accessibilityLabel("Increase \(label.lowercased())")
+            .disabled(value.wrappedValue >= maximum || busy)
         }
     }
 
