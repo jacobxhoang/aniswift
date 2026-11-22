@@ -13,7 +13,7 @@ struct TitleScreen: View {
     @State private var suggested: [Title] = []
     @State private var episodes: [Fields] = []
     @State private var relationNames: [String: String] = [:]
-    @State private var characters: [Fields] = []
+    @State private var characters: [CastMember] = []
     @State private var themes: Fields?
     @State private var reviews: [TitleReview] = []
     @State private var reviewFailed = false
@@ -354,39 +354,29 @@ struct TitleScreen: View {
 
     private var cast: some View {
         block(title.kind == .anime ? "Characters & voice actors" : "Characters") {
+            if characters.count > 12 {
+                NavigationLink {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 18) {
+                            ForEach(characters) { CastCard(member: $0) }
+                        }
+                        .padding(LedgerLayout.inset)
+                    }
+                    .background(Palette.background.ignoresSafeArea())
+                    .navigationTitle("Characters")
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: {
+                    Label("View all characters", systemImage: "chevron.right").font(.caption)
+                }
+            }
             ScrollView(.horizontal) {
                 LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(Array(characters.enumerated()), id: \.offset) { _, item in
-                        let character: Fields = item.read("character") ?? item
-                        let voices: [Fields] = item.read("voice_actors", "voiceActors") ?? []
-                        let voice = voices.first { $0.string("language") == "Japanese" } ?? voices.first
-                        let actor: Fields? = voice?.read("person")
-                        VStack(alignment: .leading, spacing: 4) {
-                            Art(url: character.image, symbol: "person.fill").frame(width: 104, height: 145)
-                                .clipShape(.rect(cornerRadius: 8))
-                            Text(character.string("name") ?? "Character").font(.subheadline.weight(.medium)).lineLimit(2)
-                            if let role = item.string("role") { Text(role).font(.caption).foregroundStyle(.secondary) }
-                            if let name = actor?.string("name") ?? voice?.string("name") {
-                                Text(name).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                            }
-                        }.frame(width: 104, alignment: .leading)
+                    ForEach(characters.prefix(12)) { member in
+                        CastCard(member: member).frame(width: 104)
                     }
                 }
-            }.scrollIndicators(.hidden)
-        }
-    }
-
-    private func trailerCard(_ url: URL) -> some View {
-        block("Trailer") {
-            Link(destination: url) {
-                Art(url: trailerImage ?? current.image)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                   .overlay {
-                        Image(systemName: "play.fill").font(.title2)
-                            .padding(16).ledgerGlassBadge()
-                    }
-                    .clipShape(.rect(cornerRadius: 12))
-            }.accessibilityLabel("Play trailer")
+            }
+            .scrollIndicators(.hidden)
         }
     }
 
@@ -553,7 +543,7 @@ struct TitleScreen: View {
         }
         if let result = try? await castData {
             let items: [Fields] = result.read("data") ?? []
-            characters = Array(items.prefix(12))
+            characters = unique(items.compactMap(CastMember.init))
         }
         if let result = try? await reviewData {
             let items: [Fields] = result.read("data") ?? []

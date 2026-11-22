@@ -52,6 +52,7 @@ struct AniLedgerApp: App {
         NavigationStack {
             content()
                 .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
+                .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
         }
     }
 }

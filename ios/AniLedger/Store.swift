@@ -14,6 +14,7 @@ final class Store: ObservableObject {
     @Published var loadingFriends = false
     @Published var checkedFriends = 0
     @Published private(set) var malFavorites: [Kind: [Title]] = [:]
+    @Published private(set) var malCharacterFavorites: Set<Int> = []
     @Published private(set) var favoritesUnavailable = false
     let previousLocalFavorites: [Title] = {
         guard let data = UserDefaults.standard.data(forKey: "aniledger.localFavorites.v1") else { return [] }
@@ -42,6 +43,8 @@ final class Store: ObservableObject {
                 let entries: [Fields] = data.read(kind.rawValue) ?? []
                 return (kind, entries.compactMap { Title($0, kind: kind) })
             })
+            let characters: [Fields] = data.read("characters") ?? []
+            malCharacterFavorites = Set(characters.compactMap { $0.read("mal_id", "malId", "id") as Int? })
             favoritesUnavailable = false
         } catch {
             if account?.id == user.id, favoritesRequest == request, !Task.isCancelled {
@@ -106,6 +109,7 @@ final class Store: ObservableObject {
             checkedFriends = 0
             friendMessage = nil
             malFavorites = [:]
+            malCharacterFavorites = []
             favoritesUnavailable = false
             favoritesRequest = nil
             ListCache.remove()
