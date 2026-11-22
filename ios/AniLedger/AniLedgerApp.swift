@@ -334,7 +334,9 @@ struct AccountScreen: View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 if let account = store.account {
-                    profileHeader(account)
+                    ProfileStatsHeader(image: account.image, stats: stats,
+                                       loadedAnime: store.lists[.anime, default: []].count,
+                                       loadedManga: store.lists[.manga, default: []].count)
                     if loadingProfile { ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset) }
                     else if store.favoritesUnavailable {
                         Button("Retry loading favorites") { Task { await loadProfile(refresh: true) } }
@@ -422,58 +424,6 @@ struct AccountScreen: View {
         }
     }
 
-    private func profileHeader(_ user: Account) -> some View {
-        let anime: Fields? = stats?.read("anime")
-        let manga: Fields? = stats?.read("manga")
-        let animeCount: Int? = anime?.read("totalEntries", "total_entries")
-        let mangaCount: Int? = manga?.read("totalEntries", "total_entries")
-        let days: Double? = anime?.read("daysWatched", "days_watched")
-        let chapters: Int? = manga?.read("chaptersRead", "chapters_read", "chapters")
-        return ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) {
-                avatar(user)
-                profileMetrics(animeCount, mangaCount, days, chapters)
-            }
-            VStack(alignment: .leading, spacing: 16) {
-                avatar(user)
-                profileMetrics(animeCount, mangaCount, days, chapters)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .ledgerPanel()
-        .padding(.horizontal, LedgerLayout.inset)
-    }
-
-    private func avatar(_ user: Account) -> some View {
-        Art(url: user.image, symbol: "person.fill").frame(width: 88, height: 88)
-            .clipShape(.rect(cornerRadius: 12))
-    }
-
-    private func profileMetrics(_ anime: Int?, _ manga: Int?, _ days: Double?, _ chapters: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                metric(anime == nil ? "Anime loaded" : "Total anime",
-                       (anime ?? store.lists[.anime, default: []].count).formatted())
-                metric(manga == nil ? "Manga loaded" : "Total manga",
-                       (manga ?? store.lists[.manga, default: []].count).formatted())
-            }
-            HStack(alignment: .top, spacing: 12) {
-                metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
-                metric("Chapters read", chapters?.formatted() ?? "—")
-            }
-        }
-    }
-
-    private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            Text(value).font(.title3.monospacedDigit().weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
     @ViewBuilder
     private func favoriteShelf(_ kind: Kind) -> some View {
         if let titles = store.malFavorites[kind] {
@@ -506,6 +456,125 @@ struct AccountScreen: View {
         guard !Task.isCancelled, store.account == user else { return }
         stats = result?.read("data")
         loadingProfile = false
+    }
+}
+
+struct FriendProfileScreen: View {
+    @EnvironmentObject private var store: Store
+    let friend: Friend
+
+    @State private var stats: Fields?
+    @State private var favorites: [Kind: [Title]] = [:]
+    @State private var loading = true
+    @State private var unavailable = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
+                ProfileStatsHeader(image: friend.avatar, stats: stats)
+                if loading {
+                    ProgressView("Loading profile").padding(.horizontal, LedgerLayout.inset)
+                } else if unavailable {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Some public profile details are unavailable.").foregroundStyle(.secondary)
+                        Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
+                }
+                ForEach(Kind.allCases) { kind in
+                    if let titles = favorites[kind], !titles.isEmpty {
+                        Rail(name: "Favorite \(kind.rawValue)", titles: titles)
+                    }
+                }
+            }
+            .padding(.vertical, 18)
+            .frame(maxWidth: 800)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle(friend.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+        .refreshable { await load(refresh: true) }
+    }
+
+    private func load(refresh: Bool = false) async {
+        loading = true
+        defer { loading = false }
+        let path = "users/\(friend.name)"
+        async let statsRequest = try? store.api.catalog(path + "/statistics", refresh: refresh)
+        async let favoritesRequest = try? store.api.catalog(path + "/favorites", refresh: refresh)
+        let (statsResult, favoritesResult) = await (statsRequest, favoritesRequest)
+        guard !Task.isCancelled else { return }
+        let statsData: Fields? = statsResult?.read("data")
+        let favoritesData: Fields? = favoritesResult?.read("data")
+        if let statsData { stats = statsData }
+        if let favoritesData {
+            favorites = Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
+                let rows: [Fields] = favoritesData.read(kind.rawValue) ?? []
+                return (kind, rows.compactMap { Title($0, kind: kind) })
+            })
+        }
+        unavailable = statsData == nil || favoritesData == nil
+    }
+}
+
+private struct ProfileStatsHeader: View {
+    let image: URL?
+    let stats: Fields?
+    var loadedAnime: Int? = nil
+    var loadedManga: Int? = nil
+
+    var body: some View {
+        let anime: Fields? = stats?.read("anime")
+        let manga: Fields? = stats?.read("manga")
+        let animeCount: Int? = anime?.read("totalEntries", "total_entries")
+        let mangaCount: Int? = manga?.read("totalEntries", "total_entries")
+        let days: Double? = anime?.read("daysWatched", "days_watched")
+        let chapters: Int? = manga?.read("chaptersRead", "chapters_read", "chapters")
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 16) {
+                avatar
+                profileMetrics(animeCount, mangaCount, days, chapters)
+            }
+            VStack(alignment: .leading, spacing: 16) {
+                avatar
+                profileMetrics(animeCount, mangaCount, days, chapters)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .ledgerPanel()
+        .padding(.horizontal, LedgerLayout.inset)
+    }
+
+    private var avatar: some View {
+        Art(url: image, symbol: "person.fill").frame(width: 88, height: 88)
+            .clipShape(.rect(cornerRadius: 12))
+    }
+
+    private func profileMetrics(_ anime: Int?, _ manga: Int?, _ days: Double?, _ chapters: Int?) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                metric(anime == nil && loadedAnime != nil ? "Anime loaded" : "Total anime",
+                       (anime ?? loadedAnime)?.formatted() ?? "—")
+                metric(manga == nil && loadedManga != nil ? "Manga loaded" : "Total manga",
+                       (manga ?? loadedManga)?.formatted() ?? "—")
+            }
+            HStack(alignment: .top, spacing: 12) {
+                metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
+                metric("Chapters read", chapters?.formatted() ?? "—")
+            }
+        }
+    }
+
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            Text(value).font(.title3.monospacedDigit().weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }
 

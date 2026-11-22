@@ -213,7 +213,7 @@ struct Account: Codable, Equatable {
     let image: URL?
 }
 
-struct Friend: Identifiable {
+struct Friend: Identifiable, Hashable {
     let name: String
     let avatar: URL?
     var id: String { name.lowercased() }

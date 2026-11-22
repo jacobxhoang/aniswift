@@ -646,6 +646,8 @@ struct CatalogBrowser: View {
 
 struct FriendsScreen: View {
     @EnvironmentObject private var store: Store
+    @State private var selectedFriend: Friend?
+    @State private var selectedTitle: Title?
 
     var body: some View {
         List {
@@ -678,6 +680,8 @@ struct FriendsScreen: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
+        .navigationDestination(item: $selectedFriend) { FriendProfileScreen(friend: $0) }
+        .navigationDestination(item: $selectedTitle) { TitleScreen(title: $0) }
         .navigationTitle("Friends Feed")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -694,28 +698,30 @@ struct FriendsScreen: View {
     }
 
     private func feedRow(_ item: FriendUpdate, title: Title) -> some View {
-        let profile = URL(string: "https://myanimelist.net/profile/\(item.friend.name)")!
-        return HStack(alignment: .top, spacing: 10) {
-            Link(destination: profile) {
+        HStack(alignment: .top, spacing: 10) {
+            Button { selectedFriend = item.friend } label: {
                 Art(url: item.friend.avatar, symbol: "person.fill")
                     .frame(width: 46, height: 46)
                     .clipShape(.rect(cornerRadius: 7))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Open \(item.friend.name)’s MyAnimeList profile")
+            .accessibilityLabel("Open \(item.friend.name)’s profile")
 
-            VStack(alignment: .leading, spacing: 4) {
-                Link(destination: profile) {
+            VStack(alignment: .leading, spacing: 5) {
+                Button { selectedFriend = item.friend } label: {
                     Text(item.friend.name).font(.subheadline.weight(.semibold))
                 }
                 .buttonStyle(.plain)
-                .accessibilityHint("Opens their MyAnimeList profile")
+                .accessibilityHint("Opens their profile")
 
-                NavigationLink(value: title) {
+                Button { selectedTitle = title } label: {
                     Text("\(activityPhrase(item)) \(Text(title.name).bold())")
                         .font(.subheadline)
                         .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
 
@@ -725,7 +731,7 @@ struct FriendsScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            NavigationLink(value: title) {
+            Button { selectedTitle = title } label: {
                 Art(url: title.image).frame(width: 48, height: 68)
                     .clipShape(.rect(cornerRadius: 5))
                     .contentShape(Rectangle())
