@@ -17,14 +17,31 @@ xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-## Features
+## Using AniLedger
 
-- Home dashboard with recent list changes, seasonal anime, top airing and upcoming anime, and separate suggestion rows.
-- MyAnimeList anime suggestions in the order returned for the authenticated user. Manga suggestions use catalog recommendations because MyAnimeList does not expose a comparable personalized manga endpoint.
-- Anime and manga lists with status filters, paging, progress swipe actions, and editing for status, progress, and rating.
-- Discover with native search and paged anime, manga, and seasonal browsing.
-- Full title pages with related entries, cast, themes for anime, public friend activity, and spoiler-aware reviews with reviewer ratings.
-- Public friends feed, profile access, and sign-out.
+| Tab | What you can do |
+| --- | --- |
+| Anime and Manga | Expand status groups, sort and search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
+| Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
+| Feed | Browse public friend updates. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
+| Profile | View account statistics and public favorites, open custom lists, and manage sign-in. |
+
+Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to refresh the profile.
+
+Title pages prefer English titles with a romaji fallback. Genres, themes, producers and serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing, compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked appearances. Reviews and friends’ title activity appear when entries exist. Anime details can also include trailers, themes, episodes and streaming links.
+
+Use **Status**, **Progress** or **My Score** for a quick edit. The pencil opens the full editor for repeat counts, start and finish dates, and notes. These fields sync to MyAnimeList. Custom lists and visibility preferences stay on this device for the signed-in account. Hidden status entries remain searchable. Status controls use interactive Liquid Glass on iOS 26 and translucent material on earlier versions.
+
+## Data and caching
+
+| Source | Used for |
+| --- | --- |
+| MyAnimeList | Direct OAuth, private lists, list edits and personalized anime suggestions |
+| Tenrai | Preferred catalog source for search, rankings and details |
+| Jikan Edge | Catalog fallback and public friends, favorites, statistics and activity |
+| Device storage | Keychain tokens, list snapshots, cached artwork and custom list organization |
+
+AniLedger can restore already downloaded list pages while it syncs with MyAnimeList. Kingfisher caches posters and avatars. Signing out clears the active session and its downloaded list snapshot. Public profile sections depend on what the provider can retrieve.
 
 ## Direct MyAnimeList connection
 
@@ -55,3 +72,12 @@ For an installable Ad Hoc IPA, use an Apple Distribution certificate with its pr
 | `IOS_PROFILE_BASE64` | Base64-encoded Ad Hoc `.mobileprovision` |
 
 In **Actions → Build AniLedger IPA → Run workflow**, enable **signed**. Download the `AniLedger-Signed` artifact. The workflow uses the App ID and team from the provisioning profile and exports for its registered devices.
+
+
+## Verification checklist
+
+- Build in Xcode and exercise search in Anime, Manga and Discover.
+- Open a title with several genres or producers. Check wrapping at standard and large text sizes.
+- Swipe the Relations, Characters and Recommended shelves. Open **View All** and select an item.
+- From the Feed, open a friend’s profile and select a favorite. Confirm the title takes over the page and Back returns to the same profile. Repeat for a recent list update and for a title opened directly from the Feed.
+- Use a signed device build and a registered iOS Client ID to verify account sync and Liquid Glass on iPhone.

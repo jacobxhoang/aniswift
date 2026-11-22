@@ -52,6 +52,7 @@ struct AniLedgerApp: App {
         NavigationStack {
             content()
                 .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
+                .navigationDestination(for: Friend.self) { FriendProfileScreen(friend: $0) }
                 .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
         }
     }
@@ -80,6 +81,26 @@ enum LedgerLayout {
     static let sectionGap: CGFloat = 28
     static let posterWidth: CGFloat = 116
     static let posterRadius: CGFloat = 8
+}
+
+/// One horizontal shelf for every carousel, so card width, gutters and snapping
+/// stay consistent instead of each screen rolling its own scroll view.
+struct LedgerShelf<Content: View>: View {
+    var spacing: CGFloat = LedgerLayout.gap
+    var inset: CGFloat = 0
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        ScrollView(.horizontal) {
+            LazyHStack(alignment: .top, spacing: spacing) {
+                content
+            }
+            .scrollTargetLayout()
+        }
+        .contentMargins(.horizontal, inset, for: .scrollContent)
+        .scrollTargetBehavior(.viewAligned)
+        .scrollIndicators(.hidden)
+    }
 }
 
 struct LedgerSectionTitle: View {
@@ -199,6 +220,7 @@ struct CoverTile: View {
     let title: Title
     var showsScore = true
     var loadMissingImage = false
+    var reservesCaptionSpace = true
 
     var body: some View {
         PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item in
@@ -224,7 +246,7 @@ struct CoverTile: View {
                                 .ledgerGlassBadge().padding(6)
                         }
                     }
-                Text(title.name).font(.subheadline.weight(.medium)).lineLimit(2, reservesSpace: true)
+                Text(title.name).font(.subheadline.weight(.medium)).lineLimit(2, reservesSpace: reservesCaptionSpace)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
@@ -243,15 +265,11 @@ struct Rail: View {
             if titles.isEmpty {
                 Text(empty).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
             } else {
-                ScrollView(.horizontal) {
-                    LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(unique(titles)) { title in CoverTile(title: title, showsScore: false).frame(width: LedgerLayout.posterWidth) }
+                LedgerShelf(inset: LedgerLayout.inset) {
+                    ForEach(unique(titles)) { title in
+                        CoverTile(title: title, showsScore: false).frame(width: LedgerLayout.posterWidth)
                     }
-                    .scrollTargetLayout()
                 }
-                .contentMargins(.horizontal, LedgerLayout.inset, for: .scrollContent)
-                .scrollTargetBehavior(.viewAligned)
-                .scrollIndicators(.hidden)
             }
         }
     }

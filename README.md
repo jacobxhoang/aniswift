@@ -2,7 +2,14 @@
 
 AniLedger is a responsive anime and manga tracker with a MyAnimeList-inspired dashboard. It uses Tenrai for catalog data, Jikan Edge when Tenrai is unavailable, and the official MyAnimeList API for account sign-in and personal list changes.
 
-## What it does
+## Choose a client
+
+| Client | Getting started | Account connection |
+| --- | --- | --- |
+| Web | [Live dashboard](https://ani-ledger.onrender.com/) or the local setup below | Hosted Web OAuth through AniLedger |
+| iOS | [iOS setup and release guide](ios/README.md) | Direct MyAnimeList OAuth with a separate iOS Client ID |
+
+## Web features
 
 - Shows recent anime and manga list updates at the top of the dashboard, followed by this season's anime, catalog picks, statistics, and friends' public list activity.
 - Browses anime and manga, searches the catalog, and opens title details without requiring an account.
@@ -69,10 +76,12 @@ The app serves its browser client, OAuth routes, and JSON API from one origin.
 | `POST /api/logout` | Clear the local session | No |
 | `GET /api/lists/anime?page=1` | Read a page of the user's anime list | Yes |
 | `GET /api/lists/manga?page=1` | Read a page of the user's manga list | Yes |
-| `PUT /api/lists/{anime\|manga}/{id}` | Add or update an entry's status, progress, and score | Yes |
+| `GET /api/suggestions/anime` | Read personalized anime suggestions | Yes |
+| `GET /api/lists/{anime\|manga}/{id}` | Read an individual list entry | Yes |
+| `PUT /api/lists/{anime\|manga}/{id}` | Update status, progress, score, and any supplied repeat count, dates, or notes | Yes |
 | `DELETE /api/lists/{anime\|manga}/{id}` | Remove an entry from the list | Yes |
 
-List writes are sent directly to MyAnimeList by the server. Non-GET API requests must come from the app's own origin.
+Web list writes go to MyAnimeList through the server. Browser writes must pass the same-origin check. Current iOS builds authenticate and write directly to MyAnimeList.
 
 ## Deploy on Render
 
@@ -85,3 +94,22 @@ This repository is configured for a Render Node web service:
 - Environment variables: set `MAL_CLIENT_ID`, `MAL_CLIENT_SECRET`, `MAL_REDIRECT_URI`, and optionally `MAL_SESSION_SECRET` in the service's private environment settings. The production redirect URI must match the callback registered in MyAnimeList exactly.
 
 When using another production host, set `APP_ORIGIN` to the public HTTPS origin with no path, and configure that same origin's `/auth/mal/callback` as the OAuth redirect URI. The service listens on the host-provided `PORT`.
+
+
+## Repository layout
+
+| Path | Purpose |
+| --- | --- |
+| `web/` | Browser dashboard, search, title pages, and styles |
+| `worker.js` | Web authentication, sessions, and MyAnimeList API routes |
+| `scripts/build.mjs` | Packages the web assets and server |
+| `scripts/preview.mjs` | Runs the web build on Node |
+| `ios/AniLedger/` | Native SwiftUI app, API client, and local cache |
+| `.github/workflows/ios.yml` | Builds iOS IPAs and publishes prereleases |
+
+## Troubleshooting
+
+- **Web sign-in fails.** Check your Web OAuth registration, environment variables, and exact callback. The iOS app uses a separate registration.
+- **A friend’s activity is missing.** The feed depends on public updates that Jikan Edge can retrieve.
+- **A title appears in romaji.** AniLedger prefers English when the data source supplies an English title.
+- **An IPA will not install.** The published IPA requires signing. See the [iOS build instructions](ios/README.md#github-actions-ipa).

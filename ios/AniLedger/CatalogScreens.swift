@@ -405,21 +405,16 @@ struct PosterShelf<Trailing: View>: View {
                 Spacer()
                 trailing
             }.padding(.horizontal, LedgerLayout.inset)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 10) {
-                    ForEach(unique(titles)) { title in
-                        VStack(alignment: .leading, spacing: 3) {
-                            CoverTile(title: title, showsScore: false)
-                            if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
-                                Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                            }
-                        }.frame(width: LedgerLayout.posterWidth)
-                    }
-                }.scrollTargetLayout()
+            LedgerShelf(inset: LedgerLayout.inset) {
+                ForEach(unique(titles)) { title in
+                    VStack(alignment: .leading, spacing: 3) {
+                        CoverTile(title: title, showsScore: false)
+                        if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
+                            Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }.frame(width: LedgerLayout.posterWidth)
+                }
             }
-            .contentMargins(.horizontal, LedgerLayout.inset, for: .scrollContent)
-            .scrollTargetBehavior(.viewAligned)
-            .scrollIndicators(.hidden)
         }
     }
 }
@@ -661,42 +656,49 @@ struct CatalogBrowser: View {
 
 struct FriendsScreen: View {
     @EnvironmentObject private var store: Store
-    @State private var selectedFriend: Friend?
-    @State private var selectedTitle: Title?
 
     var body: some View {
-        List {
-            if store.checking { ProgressView("Checking session").listRowBackground(Color.clear) }
-            else if store.account == nil {
-                VStack(alignment: .leading, spacing: LedgerLayout.gap) {
-                    Text("See what your MyAnimeList friends are watching and reading.").foregroundStyle(.secondary)
-                    SignInButton()
-                }.listRowBackground(Color.clear)
-            } else {
-                if let message = store.friendMessage {
-                    Text(message).foregroundStyle(.secondary).listRowBackground(Color.clear)
-                    Button("Retry") { Task { await store.loadFriends(reset: true) } }.listRowBackground(Color.clear)
-                }
-                ForEach(store.activity) { item in
-                    PreferredTitle(title: item.title) { title in
-                        feedRow(item, title: title)
+        // A ScrollView, not a List: List resolves a row that contains links as a
+        // single tap target, so tapping the poster could open the friend profile
+        // instead of the title. Plain links own their hit areas here.
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                if store.checking {
+                    ProgressView("Checking session").padding(rowInsets)
+                } else if store.account == nil {
+                    VStack(alignment: .leading, spacing: LedgerLayout.gap) {
+                        Text("See what your MyAnimeList friends are watching and reading.").foregroundStyle(.secondary)
+                        SignInButton()
+                    }.padding(rowInsets)
+                } else {
+                    if let message = store.friendMessage {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(message).foregroundStyle(.secondary)
+                            Button("Retry") { Task { await store.loadFriends(reset: true) } }
+                        }.padding(rowInsets)
                     }
-                        .listRowInsets(EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset))
-                        .listRowBackground(Color.clear)
-                        .listRowSeparatorTint(.white.opacity(0.20))
-                }
-                if store.loadingFriends { ProgressView("Loading friend activity").listRowBackground(Color.clear) }
-                else if store.activity.isEmpty { Text("No public friend updates loaded.").foregroundStyle(.secondary).listRowBackground(Color.clear) }
-                if store.checkedFriends < store.friends.count && !store.loadingFriends {
-                    Button("Check more friends") { Task { await store.loadFriends() } }.listRowBackground(Color.clear)
+                    ForEach(Array(store.activity.enumerated()), id: \.element.id) { index, item in
+                        PreferredTitle(title: item.title) { title in
+                            feedRow(item, title: title)
+                        }
+                        .padding(rowInsets)
+                        if index < store.activity.count - 1 {
+                            Divider().overlay(Color.white.opacity(0.20))
+                                .padding(.horizontal, LedgerLayout.inset)
+                        }
+                    }
+                    if store.loadingFriends {
+                        ProgressView("Loading friend activity").padding(rowInsets)
+                    } else if store.activity.isEmpty {
+                        Text("No public friend updates loaded.").foregroundStyle(.secondary).padding(rowInsets)
+                    }
+                    if store.checkedFriends < store.friends.count && !store.loadingFriends {
+                        Button("Check more friends") { Task { await store.loadFriends() } }.padding(rowInsets)
+                    }
                 }
             }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
-        .navigationDestination(item: $selectedFriend) { FriendProfileScreen(friend: $0) }
-        .navigationDestination(item: $selectedTitle) { TitleScreen(title: $0) }
         .navigationTitle("Friends Feed")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -712,9 +714,13 @@ struct FriendsScreen: View {
         .refreshable { await store.loadFriends(reset: true) }
     }
 
+    private var rowInsets: EdgeInsets {
+        EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset)
+    }
+
     private func feedRow(_ item: FriendUpdate, title: Title) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Button { selectedFriend = item.friend } label: {
+            NavigationLink(value: item.friend) {
                 Art(url: item.friend.avatar, symbol: "person.fill")
                     .frame(width: 46, height: 46)
                     .clipShape(.rect(cornerRadius: 7))
@@ -724,13 +730,13 @@ struct FriendsScreen: View {
             .accessibilityLabel("Open \(item.friend.name)’s profile")
 
             VStack(alignment: .leading, spacing: 5) {
-                Button { selectedFriend = item.friend } label: {
+                NavigationLink(value: item.friend) {
                     Text(item.friend.name).font(.subheadline.weight(.semibold))
                 }
                 .buttonStyle(.plain)
                 .accessibilityHint("Opens their profile")
 
-                Button { selectedTitle = title } label: {
+                NavigationLink(value: title) {
                     Text("\(item.activityPhrase) \(Text(title.name).bold())")
                         .font(.subheadline)
                         .multilineTextAlignment(.leading)
@@ -746,7 +752,7 @@ struct FriendsScreen: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            Button { selectedTitle = title } label: {
+            NavigationLink(value: title) {
                 Art(url: title.image).frame(width: 48, height: 68)
                     .clipShape(.rect(cornerRadius: 5))
                     .contentShape(Rectangle())

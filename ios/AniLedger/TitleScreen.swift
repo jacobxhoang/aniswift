@@ -307,56 +307,90 @@ struct TitleScreen: View {
     private func chips(_ label: String, _ values: [String]) -> some View {
         if !values.isEmpty {
             block(label) {
-                ScrollView(.horizontal) {
-                    HStack(spacing: 7) {
-                        ForEach(Array(Set(values)).sorted(), id: \.self) { value in
-                            Text(value).font(.subheadline)
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Palette.surface, in: .capsule)
-                        }
+                FlowLayout {
+                    ForEach(Array(Set(values)).sorted(), id: \.self) { value in
+                        Text(value).font(.subheadline)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(Palette.surface, in: .capsule)
                     }
                 }
-                .scrollIndicators(.hidden)
             }
         }
     }
 
-    private var relations: some View { mediaRail("Related entries", titles: related, notes: relationNames) }
+    private var relations: some View { mediaRail("Relations", titles: related, notes: relationNames) }
 
     private func mediaRail(_ label: String, titles: [Title], notes: [String: String] = [:]) -> some View {
-        block(label) {
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(unique(titles)) { item in
-                        VStack(alignment: .leading, spacing: 4) {
-                            CoverTile(title: item, showsScore: false, loadMissingImage: notes[item.id] != nil)
-                            if let note = notes[item.id] {
-                                Text(note).font(.caption).foregroundStyle(.secondary)
-                            }
+        let items = unique(titles)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                shelfHeading(label)
+                Spacer(minLength: 8)
+                NavigationLink {
+                    ScrollView {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 18) {
+                            ForEach(items) { item in shelfCover(item, note: notes[item.id]) }
                         }
-                        .frame(width: LedgerLayout.posterWidth)
+                        .padding(LedgerLayout.inset)
                     }
+                    .background(Palette.background.ignoresSafeArea())
+                    .navigationTitle(label)
+                    .navigationBarTitleDisplayMode(.inline)
+                } label: { viewAllLabel(label) }
+                .buttonStyle(.plain)
+            }
+            LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
+                ForEach(items.prefix(12)) { item in
+                    shelfCover(item, note: notes[item.id]).frame(width: LedgerLayout.posterWidth)
                 }
-            }.scrollIndicators(.hidden)
+            }
+            .padding(.horizontal, -LedgerLayout.inset)
+        }
+    }
+
+    private func shelfCover(_ title: Title, note: String?) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            CoverTile(title: title, showsScore: false, loadMissingImage: note != nil, reservesCaptionSpace: false)
+            if let note {
+                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+            }
         }
     }
 
     private var cast: some View {
-        block(title.kind == .anime ? "Characters & voice actors" : "Characters") {
-            NavigationLink {
-                CharactersScreen(members: characters)
-            } label: {
-                Label("View all characters", systemImage: "chevron.right").font(.caption)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                shelfHeading("Characters")
+                Spacer(minLength: 8)
+                NavigationLink {
+                    CharactersScreen(members: characters)
+                } label: { viewAllLabel("characters") }
+                .buttonStyle(.plain)
             }
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(characters.prefix(12)) { member in
-                        CastCard(member: member).frame(width: 104)
-                    }
+            LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
+                ForEach(characters.prefix(12)) { member in
+                    CastCard(member: member, showsRoleOnly: true).frame(width: LedgerLayout.posterWidth)
                 }
             }
-            .scrollIndicators(.hidden)
+            .padding(.horizontal, -LedgerLayout.inset)
         }
+    }
+
+    private func shelfHeading(_ label: String) -> some View {
+        Text(label.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+            .accessibilityAddTraits(.isHeader)
+    }
+
+    private func viewAllLabel(_ section: String) -> some View {
+        Text("View All")
+            .font(.subheadline)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Palette.surface, in: .rect(cornerRadius: 7))
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+            .accessibilityLabel("View all \(section.lowercased())")
     }
 
     private func trailerCard(_ url: URL) -> some View {
@@ -375,28 +409,26 @@ struct TitleScreen: View {
 
     private var episodeRail: some View {
         block("Episodes") {
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(Array(episodes.enumerated()), id: \.offset) { index, item in
-                        let number: Int = item.read("mal_id", "malId", "episode", "number") ?? index + 1
-                        let name = item.englishTitle ?? item.string("title") ?? item.romajiTitle ?? "Episode \(number)"
-                        let url = publicURL(item.string("url")) ?? title.malURL.appending(path: "episode/\(number)")
-                        Link(destination: url) {
-                            VStack(alignment: .leading, spacing: 7) {
-                                if let image = item.image {
-                                    Art(url: image).frame(width: 150, height: 84)
-                                        .clipShape(.rect(cornerRadius: 8))
-                                }
-                                Text("Episode \(number)").font(.caption).foregroundStyle(.secondary)
-                                Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
+            LedgerShelf {
+                ForEach(Array(episodes.enumerated()), id: \.offset) { index, item in
+                    let number: Int = item.read("mal_id", "malId", "episode", "number") ?? index + 1
+                    let name = item.englishTitle ?? item.string("title") ?? item.romajiTitle ?? "Episode \(number)"
+                    let url = publicURL(item.string("url")) ?? title.malURL.appending(path: "episode/\(number)")
+                    Link(destination: url) {
+                        VStack(alignment: .leading, spacing: 7) {
+                            if let image = item.image {
+                                Art(url: image).frame(width: 150, height: 84)
+                                    .clipShape(.rect(cornerRadius: 8))
                             }
-                            .frame(width: 150, alignment: .leading)
-                            .padding(10)
-                            .background(Palette.surface, in: .rect(cornerRadius: 10))
-                        }.buttonStyle(.plain)
-                    }
+                            Text("Episode \(number)").font(.caption).foregroundStyle(.secondary)
+                            Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
+                        }
+                        .frame(width: 150, alignment: .leading)
+                        .padding(10)
+                        .background(Palette.surface, in: .rect(cornerRadius: 10))
+                    }.buttonStyle(.plain)
                 }
-            }.scrollIndicators(.hidden)
+            }
         }
     }
 
@@ -443,36 +475,34 @@ struct TitleScreen: View {
         block("Reviews") {
             Link("All reviews on MyAnimeList", destination: title.malURL.appending(path: "_/reviews"))
                 .font(.subheadline)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: 12) {
-                    ForEach(reviews) { review in
-                        Button { openReview = review } label: {
-                            VStack(alignment: .leading, spacing: 10) {
-                                HStack(spacing: 8) {
-                                    Art(url: review.avatar, symbol: "person.fill")
-                                        .frame(width: 28, height: 28).clipShape(.circle)
-                                    Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                }
-                                Text(review.spoiler ? "Show review with spoilers" : review.text)
-                                    .font(.subheadline).lineLimit(4)
-                                if let tag = review.tag { Text(tag).font(.caption).foregroundStyle(.secondary) }
-                                if let rating = review.rating, (1...10).contains(rating) {
-                                    Text("Reviewer rating: \(rating)/10").font(.caption).foregroundStyle(.secondary)
-                                }
+            LedgerShelf {
+                ForEach(reviews) { review in
+                    Button { openReview = review } label: {
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack(spacing: 8) {
+                                Art(url: review.avatar, symbol: "person.fill")
+                                    .frame(width: 28, height: 28).clipShape(.circle)
+                                Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
                             }
-                            .frame(width: 220, alignment: .leading)
-                            .padding(12)
-                            .ledgerPanel(radius: 14)
-                        }.buttonStyle(.plain)
-                    }
+                            Text(review.spoiler ? "Show review with spoilers" : review.text)
+                                .font(.subheadline).lineLimit(4)
+                            if let tag = review.tag { Text(tag).font(.caption).foregroundStyle(.secondary) }
+                            if let rating = review.rating, (1...10).contains(rating) {
+                                Text("Reviewer rating: \(rating)/10").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        .frame(width: 220, alignment: .leading)
+                        .padding(12)
+                        .ledgerPanel(radius: 14)
+                    }.buttonStyle(.plain)
                 }
-            }.scrollIndicators(.hidden)
+            }
         }
     }
 
     private var externalLinks: some View {
         block("External links") {
-            TitleLinkFlow {
+            FlowLayout {
                 ForEach(external) { item in
                     Link(destination: item.url) {
                         HStack(spacing: 7) {
@@ -545,7 +575,7 @@ struct TitleScreen: View {
                 }
             }
             relationNames = names
-            related = Array(unique(items).prefix(16))
+            related = unique(items)
         }
         if let result = try? await castData {
             let items: [Fields] = result.read("data") ?? []
@@ -559,7 +589,7 @@ struct TitleScreen: View {
         }
         external = await links
         if let result = try? await recs {
-            suggested = Array(unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }.prefix(12))
+            suggested = unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }
         }
         episodes = await episodeData
         themes = await songs
@@ -663,7 +693,7 @@ private struct TitleExternalLink: Identifiable {
     }
 }
 
-private struct TitleLinkFlow: Layout {
+private struct FlowLayout: Layout {
     private let spacing: CGFloat = 7
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {

@@ -35,10 +35,11 @@ struct CastMember: Identifiable {
 struct CastCard: View {
     let member: CastMember
     var inDirectory = false
+    var showsRoleOnly = false
 
     var body: some View {
         NavigationLink(value: member.character) {
-            let detail = inDirectory ? (member.role ?? "") :
+            let detail = inDirectory || showsRoleOnly ? (member.role ?? "") :
                 [member.role, member.actor].compactMap { $0 }.joined(separator: " · ")
             PortraitCard(image: member.character.image, name: member.character.name,
                          detail: detail, inDirectory: inDirectory)
@@ -227,19 +228,15 @@ struct CharacterScreen: View {
     private var voiceShelf: some View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerSectionTitle("Voice actors").padding(.horizontal, LedgerLayout.inset)
-            ScrollView(.horizontal) {
-                LazyHStack(alignment: .top, spacing: LedgerLayout.gap) {
-                    ForEach(voices) { voice in
-                        if let url = voice.url {
-                            Link(destination: url) { voiceCard(voice) }.buttonStyle(.plain)
-                        } else {
-                            voiceCard(voice)
-                        }
+            LedgerShelf(inset: LedgerLayout.inset) {
+                ForEach(voices) { voice in
+                    if let url = voice.url {
+                        Link(destination: url) { voiceCard(voice) }.buttonStyle(.plain)
+                    } else {
+                        voiceCard(voice)
                     }
                 }
             }
-            .contentMargins(.horizontal, LedgerLayout.inset, for: .scrollContent)
-            .scrollIndicators(.hidden)
         }
     }
 
