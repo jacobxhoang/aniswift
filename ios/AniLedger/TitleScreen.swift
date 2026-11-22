@@ -14,7 +14,7 @@ struct TitleScreen: View {
     @State private var themes: Fields?
     @State private var reviews: [TitleReview] = []
     @State private var openReview: TitleReview?
-    @State private var external: [Fields] = []
+    @State private var external: [TitleExternalLink] = []
     @State private var failure: String?
     @State private var editor: ListEditor.Mode?
     @State private var confirmRemoval = false
@@ -236,10 +236,18 @@ struct TitleScreen: View {
                 Text(label).font(.caption2).foregroundStyle(.secondary)
                 Text(value).font(.subheadline.weight(.semibold)).fixedSize(horizontal: true, vertical: false)
             }
-            .padding(.vertical, 4)
-            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 46)
+            .background(Palette.surface, in: .rect(cornerRadius: 9))
+            .overlay {
+                RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.14))
+                    .allowsHitTesting(false)
+            }
+            .contentShape(.rect(cornerRadius: 9))
         }
-        .ledgerGlassButton()
+        .buttonStyle(.plain)
+        .opacity(changingList ? 0.55 : 1)
         .accessibilityHint("Opens \(label.lowercased()) settings")
         .disabled(changingList)
     }
@@ -474,9 +482,32 @@ struct TitleScreen: View {
 
     private var externalLinks: some View {
         block("External links") {
-            ForEach(Array(external.enumerated()), id: \.offset) { _, item in
-                if let name = item.string("name"), let url = publicURL(item.string("url")) {
-                    Link(name, destination: url)
+            TitleLinkFlow {
+                ForEach(external) { item in
+                    Link(destination: item.url) {
+                        HStack(spacing: 7) {
+                            switch item.style {
+                            case .social:
+                                Text("𝕏").font(.body)
+                                    .accessibilityHidden(true)
+                            case .crunchyroll:
+                                Image(systemName: "play.circle.fill").accessibilityHidden(true)
+                            case .netflix:
+                                Text("N").font(.subheadline.weight(.black)).accessibilityHidden(true)
+                            case .standard:
+                                EmptyView()
+                            }
+                            Text(item.name).fixedSize(horizontal: false, vertical: true)
+                        }
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 11)
+                        .padding(.vertical, 6)
+                        .background(item.style.fill, in: .capsule)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -499,7 +530,7 @@ struct TitleScreen: View {
         async let relatedData = store.api.catalog(path + "/relations")
         async let castData = store.api.catalog(path + "/characters")
         async let reviewData = store.api.catalog(path + "/reviews")
-        async let links = store.api.catalog(path + "/external")
+        async let links = loadExternalLinks(path)
         async let songs = loadThemes(path)
         async let recs = store.api.catalog(path + "/recommendations")
         async let episodeData = loadEpisodes(path)
@@ -534,15 +565,28 @@ struct TitleScreen: View {
             let items: [Fields] = result.read("data") ?? []
             reviews = Array(items.compactMap(TitleReview.init).prefix(3))
         }
-        if let result = try? await links {
-            let data: Fields? = result.read("data")
-            external = result.read("data") ?? data?.read("externalLinks") ?? []
-        }
+        external = await links
         if let result = try? await recs {
             suggested = Array(unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }.prefix(12))
         }
         episodes = await episodeData
         themes = await songs
+    }
+
+    private func loadExternalLinks(_ path: String) async -> [TitleExternalLink] {
+        async let websites = loadLinkRows(path + "/external", key: "externalLinks")
+        async let services = title.kind == .anime
+            ? loadLinkRows(path + "/streaming", key: "streaming") : []
+        let rows = await (websites, services)
+        let allRows = rows.0 + rows.1
+        let links = unique(allRows.compactMap(TitleExternalLink.init))
+        return links.sorted { $0.priority < $1.priority }
+    }
+
+    private func loadLinkRows(_ path: String, key: String) async -> [Fields] {
+        guard let response = try? await store.api.catalog(path) else { return [] }
+        let data: Fields? = response.read("data")
+        return response.read("data") ?? data?.read(key) ?? []
     }
 
     private func loadEpisodes(_ path: String) async -> [Fields] {
@@ -583,6 +627,85 @@ struct TitleScreen: View {
                 }
             } while friendRows.isEmpty && friendOffset < store.friends.count
         } catch { if !Task.isCancelled { friendsUnavailable = true } }
+    }
+}
+
+private struct TitleExternalLink: Identifiable {
+    enum Style {
+        case standard, social, crunchyroll, netflix
+
+        var fill: Color {
+            switch self {
+            case .standard: Palette.surface
+            case .social: .clear
+            case .crunchyroll: Color(red: 0.53, green: 0.27, blue: 0.07)
+            case .netflix: Color(red: 0.55, green: 0.04, blue: 0.07)
+            }
+        }
+    }
+
+    let name: String
+    let url: URL
+    let style: Style
+    var id: URL { url }
+
+    var priority: Int {
+        if name.localizedCaseInsensitiveContains("official") { return 0 }
+        switch style {
+        case .social: return 1
+        case .crunchyroll, .netflix: return 2
+        case .standard: return 3
+        }
+    }
+
+    init?(_ fields: Fields) {
+        guard let name = fields.string("name"), let url = publicURL(fields.string("url")),
+              let host = url.host()?.lowercased() else { return nil }
+        self.name = name
+        self.url = url
+        func isDomain(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
+        if isDomain("x.com") || isDomain("twitter.com") { style = .social }
+        else if isDomain("crunchyroll.com") { style = .crunchyroll }
+        else if isDomain("netflix.com") { style = .netflix }
+        else { style = .standard }
+    }
+}
+
+private struct TitleLinkFlow: Layout {
+    private let spacing: CGFloat = 7
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        arrange(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let rows = arrange(subviews, width: bounds.width)
+        for (view, item) in zip(subviews, rows.items) {
+            view.place(at: CGPoint(x: bounds.minX + item.origin.x, y: bounds.minY + item.origin.y),
+                       anchor: .topLeading, proposal: ProposedViewSize(item.size))
+        }
+    }
+
+    private func arrange(_ subviews: Subviews, width: CGFloat) -> (size: CGSize, items: [CGRect]) {
+        var items: [CGRect] = []
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var rowHeight: CGFloat = 0
+        var usedWidth: CGFloat = 0
+        for view in subviews {
+            let ideal = view.sizeThatFits(.unspecified)
+            let size = ideal.width <= width ? ideal : view.sizeThatFits(ProposedViewSize(width: width, height: nil))
+            if x > 0, x + size.width > width {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            items.append(CGRect(origin: CGPoint(x: x, y: y), size: size))
+            usedWidth = max(usedWidth, x + size.width)
+            rowHeight = max(rowHeight, size.height)
+            x += size.width + spacing
+        }
+        return (CGSize(width: usedWidth, height: y + rowHeight), items)
     }
 }
 
