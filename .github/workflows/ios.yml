@@ -19,6 +19,20 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          for xcode in /Applications/Xcode_26*.app; do
+            if [[ -d "$xcode/Contents/Developer" ]]; then
+              sudo xcode-select -s "$xcode/Contents/Developer"
+              xcodebuild -version
+              xcrun --sdk iphoneos --show-sdk-version
+              exit 0
+            fi
+          done
+          echo "::error::Xcode 26 is required for the Liquid Glass build."
+          exit 1
       - name: Build unsigned IPA
         if: ${{ !inputs.signed }}
         shell: bash

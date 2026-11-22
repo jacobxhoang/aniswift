@@ -4,7 +4,7 @@ AniLedger is a native SwiftUI companion to the AniLedger website for iPhone and 
 
 ## Run on a Mac
 
-1. Open `AniLedger.xcodeproj` in Xcode with an iOS SDK installed.
+1. Open `AniLedger.xcodeproj` in Xcode 26 with the iOS 26 SDK installed.
 2. Select the **AniLedger** scheme and an iPhone or iPad simulator. Press Run.
 3. For a physical device, select your team under **Signing & Capabilities**, choose a bundle ID available to that team if needed, and run on the device.
 
