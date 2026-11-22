@@ -31,7 +31,7 @@ struct AniLedgerApp: App {
                 Tab("Feed", systemImage: "person.2") { stack { FriendsScreen() } }
                 Tab("Profile", systemImage: "person.crop.circle") { stack { AccountScreen() } }
             }
-            .tabBarMinimizeBehavior(.onScrollDown)
+            .tabBarMinimizeBehavior(.never)
         } else {
             TabView {
                 stack { ListsScreen(kind: .anime) }
@@ -59,6 +59,7 @@ struct AniLedgerApp: App {
 enum Palette {
     static let background: Color = .black
     static let surface = Color(white: 0.12)
+    static let sheet = Color(white: 0.08)
     static let accent: Color = .white
     static let glow = Color(white: 0.16)
 
@@ -93,13 +94,8 @@ struct LedgerSectionTitle: View {
 }
 
 extension View {
-    @ViewBuilder
     func ledgerProminentButton() -> some View {
-        if #available(iOS 26.0, *) {
-            buttonStyle(.glassProminent)
-        } else {
-            buttonStyle(.borderedProminent)
-        }
+        buttonStyle(LedgerPrimaryButtonStyle())
     }
 
     @ViewBuilder
@@ -126,6 +122,24 @@ extension View {
                 RoundedRectangle(cornerRadius: radius)
                     .strokeBorder(.white.opacity(0.08))
                     .allowsHitTesting(false)
+            }
+    }
+}
+
+private struct LedgerPrimaryButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let fill = isEnabled ? (configuration.isPressed ? 0.32 : 0.22) : 0.15
+        return configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color.white.opacity(isEnabled ? 1 : 0.56))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 6)
+            .frame(minHeight: 44)
+            .background(Color(white: fill), in: .capsule)
+            .overlay {
+                Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
             }
     }
 }

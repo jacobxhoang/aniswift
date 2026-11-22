@@ -2,6 +2,8 @@ import SwiftUI
 
 struct TitleScreen: View {
     @EnvironmentObject private var store: Store
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var quickSheetExtra: CGFloat = 32
     let title: Title
     @State private var record: Fields?
     @State private var related: [Title] = []
@@ -118,13 +120,24 @@ struct TitleScreen: View {
         }
         .sheet(item: $editor) { mode in
             ListEditor(title: current, original: saved, mode: mode)
-                .presentationDetents(mode == .full ? [.large] : [.medium, .large])
+                .presentationDetents(editorDetents(mode))
+                .presentationBackground(Palette.sheet)
                 .presentationDragIndicator(.visible)
         }
         .confirmationDialog("Remove this title from your MyAnimeList list?", isPresented: $confirmRemoval) {
             Button("Remove", role: .destructive) { updateList(nil) }
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private func editorDetents(_ mode: ListEditor.Mode) -> Set<PresentationDetent> {
+        guard mode != .full, !typeSize.isAccessibilitySize else { return [.large] }
+        let baseHeight: CGFloat = switch mode {
+        case .status: 250
+        case .progress: 196
+        case .score, .full: 166
+        }
+        return [.height(baseHeight + quickSheetExtra), .large]
     }
 
     private func updateList(_ change: ListChange?) {
@@ -657,6 +670,7 @@ struct ListEditor: View {
                             Button("Remove from My List", role: .destructive) { confirmRemoval = true }
                         }
                     }
+                    .scrollContentBackground(.hidden)
                 } else {
                     quickEditor
                 }
@@ -691,10 +705,10 @@ struct ListEditor: View {
 
     private var quickEditor: some View {
         ScrollView {
-            VStack(spacing: 18) {
+            VStack(spacing: 10) {
                 switch mode {
                 case .status:
-                    statusPicker.pickerStyle(.wheel).frame(height: 145)
+                    statusPicker.pickerStyle(.wheel).frame(height: 132)
                 case .progress:
                     if let total { Text("Total \(title.kind.unit.lowercased()) · \(total)").foregroundStyle(.secondary) }
                     counter($change.progress, maximum: maximumProgress, label: title.kind.unit)
@@ -703,22 +717,34 @@ struct ListEditor: View {
                 case .full:
                     EmptyView()
                 }
-                if let error {
-                    Text(error).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading)
-                }
-                Button {
-                    submit(change)
-                } label: {
-                    Text(busy ? "Updating…" : "Update").frame(maxWidth: .infinity, minHeight: 38)
-                }
-                .ledgerProminentButton()
-                .disabled(saveDisabled)
             }
             .frame(maxWidth: 420)
-            .padding(LedgerLayout.inset)
+            .padding(.horizontal, LedgerLayout.inset)
+            .padding(.vertical, 6)
             .frame(maxWidth: .infinity)
         }
-        .background(Palette.background.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button {
+                submit(change)
+            } label: {
+                Text(busy ? "Updating…" : "Update").frame(maxWidth: .infinity, minHeight: 32)
+            }
+            .ledgerProminentButton()
+            .disabled(saveDisabled)
+            .frame(maxWidth: 420)
+            .padding(.horizontal, LedgerLayout.inset)
+            .padding(.top, 6)
+            .padding(.bottom, 8)
+            .frame(maxWidth: .infinity)
+            .background(Palette.sheet)
+        }
+        .alert("Couldn’t update your list", isPresented: Binding(
+            get: { error != nil }, set: { if !$0 { error = nil } }
+        )) {
+            Button("OK", role: .cancel) { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
     }
 
     private func counter(_ value: Binding<Int>, maximum: Int, label: String, zeroLabel: String = "0") -> some View {
