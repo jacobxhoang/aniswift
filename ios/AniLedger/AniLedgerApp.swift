@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Kingfisher
 import SwiftUI
 
 @main
@@ -136,20 +137,24 @@ struct Art: View {
 
     var body: some View {
         GeometryReader { proxy in
-            AsyncImage(url: url, transaction: Transaction(animation: reduceMotion ? nil : .easeInOut(duration: 0.18))) { phase in
-                if let image = phase.image {
-                    image.resizable().scaledToFill()
-                } else {
-                    ZStack {
-                        Palette.surface
-                        Image(systemName: symbol).foregroundStyle(.secondary)
-                    }
-                }
-            }
+            KFImage.url(url)
+                .placeholder { placeholder }
+                .onFailureView { placeholder }
+                .cancelOnDisappear(true)
+                .fade(duration: reduceMotion ? 0 : 0.18)
+                .resizable()
+                .scaledToFill()
             .frame(width: proxy.size.width, height: proxy.size.height)
             .clipped()
         }
         .accessibilityHidden(true)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Palette.surface
+            Image(systemName: symbol).foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -437,6 +442,12 @@ private struct AboutScreen: View {
                     }
                     .listRowBackground(Color.clear)
                 }
+            }
+            Section("Open-source libraries") {
+                Link(destination: URL(string: "https://github.com/onevcat/Kingfisher")!) {
+                    row("Kingfisher", detail: "Image loading and caching · MIT License", symbol: "arrow.up.right")
+                }
+                .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)

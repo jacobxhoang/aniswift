@@ -2,6 +2,8 @@
 
 AniLedger is a native SwiftUI companion to the AniLedger website for iPhone and iPad running iOS 17 or newer. It uses MyAnimeList for accounts and personal lists, Tenrai for catalog data, and Jikan Edge for catalog fallback and public friend activity.
 
+Cover art and avatars use [Kingfisher](https://github.com/onevcat/Kingfisher) for image loading and memory and disk caching. Xcode resolves the package on the first build.
+
 ## Run on a Mac
 
 1. Open `AniLedger.xcodeproj` in Xcode 26 with the iOS 26 SDK installed.
