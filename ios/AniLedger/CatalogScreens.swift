@@ -110,6 +110,22 @@ struct HomeScreen: View {
     }
 }
 
+private struct ListStatusGlass: ViewModifier {
+    let isInteractive: Bool
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(isInteractive), in: .capsule)
+        } else {
+            content
+                .background(.thinMaterial, in: .capsule)
+                .overlay {
+                    Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                }
+        }
+    }
+}
+
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
     let kind: Kind
@@ -222,20 +238,23 @@ struct ListsScreen: View {
         } label: {
             HStack(spacing: 12) {
                 Text(statusLabel(status)).foregroundStyle(.secondary)
-                Spacer()
+                Spacer(minLength: 8)
                 Text("\(count)\(partial ? "+" : "")").monospacedDigit()
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold))
+                    .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
+                    .frame(width: 18)
                     .accessibilityHidden(true)
             }
             .font(.subheadline)
             .padding(.horizontal, 16)
-            .frame(minHeight: 44)
-            .contentShape(.capsule)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .ledgerGlassBadge()
+        .modifier(ListStatusGlass(isInteractive: searchTerm.isEmpty))
+        .accessibilityAddTraits(.isHeader)
         .accessibilityValue(expanded ? "Expanded" : "Collapsed")
         .disabled(!searchTerm.isEmpty)
     }
