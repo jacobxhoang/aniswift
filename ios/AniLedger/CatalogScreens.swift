@@ -110,91 +110,11 @@ struct HomeScreen: View {
     }
 }
 
-private struct LedgerSearchBar: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Binding var query: String
-    @Binding var isPresented: Bool
-    @FocusState private var focused: Bool
-    @ScaledMetric(relativeTo: .body) private var controlHeight: CGFloat = 44
-    @State private var didFocus = false
-
-    static func animation(reduceMotion: Bool) -> Animation? {
-        reduceMotion ? nil : .easeInOut(duration: 0.24)
-    }
-
-    static func transition(reduceMotion: Bool) -> AnyTransition {
-        guard !reduceMotion else { return .identity }
-        return .asymmetric(
-            insertion: .scale(scale: 0.88, anchor: .trailing).combined(with: .opacity)
-                .combined(with: .offset(y: -8)),
-            removal: .scale(scale: 0.92, anchor: .trailing).combined(with: .opacity)
-                .combined(with: .offset(y: -6))
-        )
-    }
-
-    var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 9) {
-                Image(systemName: "magnifyingglass").accessibilityHidden(true)
-                TextField("Search", text: $query)
-                    .focused($focused)
-                    .autocorrectionDisabled()
-                    .textInputAutocapitalization(.never)
-                    .submitLabel(.search)
-                    .onSubmit { focused = false }
-            }
-            .font(.body)
-            .padding(.horizontal, 14)
-            .frame(minHeight: controlHeight)
-            .background(Palette.surface, in: .capsule)
-            .overlay {
-                Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
-            }
-
-            Button {
-                focused = false
-                withAnimation(Self.animation(reduceMotion: reduceMotion)) {
-                    query = ""
-                    isPresented = false
-                }
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
-                    .frame(width: controlHeight, height: controlHeight)
-                    .background(Palette.surface, in: .circle)
-                    .overlay {
-                        Circle().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
-                    }
-                    .contentShape(Circle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Close search")
-        }
-        .padding(.horizontal, LedgerLayout.inset)
-        .padding(.vertical, 6)
-        .background(Palette.background)
-        .task {
-            guard !didFocus else { return }
-            if !reduceMotion {
-                // Let the header expand before the keyboard changes the safe area.
-                try? await Task.sleep(for: .milliseconds(240))
-            } else {
-                await Task.yield()
-            }
-            guard !Task.isCancelled, isPresented else { return }
-            focused = true
-            didFocus = true
-        }
-    }
-}
-
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
-    @State private var searchPresented = false
     @State private var sort = ListSort.recent
     @State private var paging = false
     @State private var pendingRemoval: ListEntry?
@@ -221,9 +141,15 @@ struct ListsScreen: View {
         Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
     }
 
-    private var isSearching: Bool { searchPresented && store.account != nil }
-
     var body: some View {
+        if store.account != nil {
+            list.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        } else {
+            list
+        }
+    }
+
+    private var list: some View {
         List {
             if store.checking {
                 ProgressView("Checking session").listRowBackground(Color.clear)
@@ -263,13 +189,6 @@ struct ListsScreen: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if isSearching {
-                LedgerSearchBar(query: $query, isPresented: $searchPresented)
-                    .transition(LedgerSearchBar.transition(reduceMotion: reduceMotion))
-            }
-        }
-        .toolbar(isSearching ? .hidden : .visible, for: .navigationBar)
         .navigationTitle(kind.label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -281,22 +200,10 @@ struct ListsScreen: View {
                         }
                     } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
                 }
-                if !searchPresented {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            withAnimation(LedgerSearchBar.animation(reduceMotion: reduceMotion)) {
-                                searchPresented = true
-                            }
-                        } label: {
-                            Label("Search list", systemImage: "magnifyingglass")
-                        }
-                    }
-                }
             }
         }
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: store.account?.id) { _, _ in
-            searchPresented = false
             query = ""
         }
         .refreshable { await store.loadLists(force: true) }
@@ -500,10 +407,8 @@ struct PosterShelf<Trailing: View>: View {
 
 struct DiscoverScreen: View {
     @EnvironmentObject private var store: Store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
-    @State private var searchPresented = false
     @State private var loading = true
     @State private var searchKind: Kind = .anime
 
@@ -511,7 +416,7 @@ struct DiscoverScreen: View {
 
     var body: some View {
         Group {
-            if searchPresented && !searchTerm.isEmpty {
+            if !searchTerm.isEmpty {
                 PosterResults(name: "Search results", shelf: nil, query: searchTerm, kind: searchKind)
             } else {
                 ScrollView {
@@ -542,36 +447,21 @@ struct DiscoverScreen: View {
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if searchPresented {
-                VStack(spacing: 0) {
-                    LedgerSearchBar(query: $search, isPresented: $searchPresented)
-                    if !searchTerm.isEmpty {
-                        Picker("Search category", selection: $searchKind) {
-                            ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                        }
-                        .pickerStyle(.segmented)
-                        .padding(.horizontal, LedgerLayout.inset)
-                        .padding(.bottom, 8)
-                    }
+            if !searchTerm.isEmpty {
+                Picker("Search category", selection: $searchKind) {
+                    ForEach(Kind.allCases) { Text($0.label).tag($0) }
                 }
+                .pickerStyle(.segmented)
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.vertical, 6)
                 .background(Palette.background)
-                .transition(LedgerSearchBar.transition(reduceMotion: reduceMotion))
             }
         }
         .scrollDismissesKeyboard(.interactively)
-        .toolbar(searchPresented ? .hidden : .visible, for: .navigationBar)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    withAnimation(LedgerSearchBar.animation(reduceMotion: reduceMotion)) {
-                        searchPresented = true
-                    }
-                } label: {
-                    Label("Search catalog", systemImage: "magnifyingglass")
-                }
             }
         }
         .task { if shelves.isEmpty { await loadShelves() } }
