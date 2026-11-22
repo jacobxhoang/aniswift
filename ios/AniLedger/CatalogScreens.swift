@@ -631,8 +631,10 @@ struct FriendsScreen: View {
                     Button("Retry") { Task { await store.loadFriends(reset: true) } }.listRowBackground(Color.clear)
                 }
                 ForEach(store.activity) { item in
-                    NavigationLink(value: item.title) { feedRow(item) }
-                        .buttonStyle(.plain)
+                    PreferredTitle(title: item.title) { title in
+                        NavigationLink(value: title) { feedRow(item, title: title) }
+                            .buttonStyle(.plain)
+                    }
                         .listRowInsets(EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset))
                         .listRowBackground(Color.clear)
                         .listRowSeparatorTint(.white.opacity(0.20))
@@ -662,19 +664,19 @@ struct FriendsScreen: View {
         .refreshable { await store.loadFriends(reset: true) }
     }
 
-    private func feedRow(_ item: FriendUpdate) -> some View {
+    private func feedRow(_ item: FriendUpdate, title: Title) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Art(url: item.friend.avatar, symbol: "person.fill").frame(width: 46, height: 46)
                 .clipShape(.rect(cornerRadius: 7))
             VStack(alignment: .leading, spacing: 6) {
-                Text("\(Text(item.friend.name).bold()) \(activityPhrase(item)) \(Text(item.title.name).bold())")
+                Text("\(Text(item.friend.name).bold()) \(activityPhrase(item)) \(Text(title.name).bold())")
                     .font(.subheadline)
                 let details = [item.score.flatMap { $0 > 0 ? "\($0)/10" : nil }, item.date.map { displayDate($0) }]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 if !details.isEmpty { Text(details).font(.caption).foregroundStyle(.secondary) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Art(url: item.title.image).frame(width: 48, height: 68).clipShape(.rect(cornerRadius: 5))
+            Art(url: title.image).frame(width: 48, height: 68).clipShape(.rect(cornerRadius: 5))
         }
         .accessibilityElement(children: .combine)
     }

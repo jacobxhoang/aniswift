@@ -158,11 +158,40 @@ struct Art: View {
     }
 }
 
+struct PreferredTitle<Content: View>: View {
+    @EnvironmentObject private var store: Store
+    let title: Title
+    var loadMissingImage = false
+    @ViewBuilder var content: (Title) -> Content
+    @State private var resolved: Title?
+
+    private var current: Title {
+        let saved = store.lists[title.kind]?.first { $0.id == title.id }?.title
+        return title.fillingTitleAndImage(from: saved).fillingTitleAndImage(from: resolved)
+    }
+
+    var body: some View {
+        content(current)
+            .task(id: title) {
+                guard current.needsTitleLookup || (loadMissingImage && current.image == nil) else { return }
+                let result = await store.api.resolveTitle(title)
+                if !Task.isCancelled { resolved = result }
+            }
+    }
+}
+
 struct CoverTile: View {
     let title: Title
     var showsScore = true
+    var loadMissingImage = false
 
     var body: some View {
+        PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item in
+            tile(item)
+        }
+    }
+
+    private func tile(_ title: Title) -> some View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
                 Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
@@ -218,6 +247,10 @@ struct TitleRow: View {
     let note: String
 
     var body: some View {
+        PreferredTitle(title: title) { item in row(item) }
+    }
+
+    private func row(_ title: Title) -> some View {
         HStack(spacing: 12) {
             Art(url: title.image).frame(width: 40, height: 56).clipShape(.rect(cornerRadius: 5))
             VStack(alignment: .leading, spacing: 4) {

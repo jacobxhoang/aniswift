@@ -21,7 +21,10 @@ struct TitleScreen: View {
     @State private var checkingFriends = false
     @State private var friendsUnavailable = false
 
-    private var current: Title { record.flatMap { Title($0, kind: title.kind) } ?? title }
+    private var current: Title {
+        let detail = record.flatMap { Title($0, kind: title.kind) } ?? title
+        return detail.fillingTitleAndImage(from: title).fillingTitleAndImage(from: saved?.title)
+    }
     private var saved: ListEntry? { store.lists[title.kind, default: []].first { $0.id == title.id } }
 
     var body: some View {
@@ -227,7 +230,7 @@ struct TitleScreen: View {
                     }
                 }
                 block("Alternative titles") {
-                    if current.original != current.name { infoCell("English", current.name) }
+                    if let english = current.englishName { infoCell("English", english) }
                     infoCell("Romaji", current.original)
                     if let japanese = record.string("title_japanese", "titleJapanese") { infoCell("Japanese", japanese) }
                     let aliases: [String] = record.read("title_synonyms", "titleSynonyms") ?? []
@@ -274,7 +277,7 @@ struct TitleScreen: View {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(unique(titles)) { item in
                         VStack(alignment: .leading, spacing: 4) {
-                            CoverTile(title: item, showsScore: false)
+                            CoverTile(title: item, showsScore: false, loadMissingImage: notes[item.id] != nil)
                             if let note = notes[item.id] {
                                 Text(note).font(.caption).foregroundStyle(.secondary)
                             }
@@ -330,7 +333,7 @@ struct TitleScreen: View {
                 LazyHStack(alignment: .top, spacing: 12) {
                     ForEach(Array(episodes.enumerated()), id: \.offset) { index, item in
                         let number: Int = item.read("mal_id", "malId", "episode", "number") ?? index + 1
-                        let name = item.string("title", "name") ?? "Episode \(number)"
+                        let name = item.englishTitle ?? item.string("title") ?? item.romajiTitle ?? "Episode \(number)"
                         let url = publicURL(item.string("url")) ?? title.malURL.appending(path: "episode/\(number)")
                         Link(destination: url) {
                             VStack(alignment: .leading, spacing: 7) {
@@ -503,19 +506,6 @@ struct TitleScreen: View {
         }
         episodes = await episodeData
         themes = await songs
-        await enrichRelated()
-    }
-
-    private func enrichRelated() async {
-        for item in related where item.image == nil {
-            if Task.isCancelled { return }
-            let path = "\(item.kind.rawValue)/\(item.malID)"
-            guard let response = try? await store.api.catalog(path),
-                  let fields: Fields = response.read("data"),
-                  let full = Title(fields, kind: item.kind),
-                  let index = related.firstIndex(where: { $0.id == item.id }) else { continue }
-            related[index] = full
-        }
     }
 
     private func loadEpisodes(_ path: String) async -> [Fields] {

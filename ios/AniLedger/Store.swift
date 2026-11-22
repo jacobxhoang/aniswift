@@ -155,7 +155,8 @@ final class Store: ObservableObject {
         let previous = snapshot.items.first { $0.id == title.id }
         snapshot.items.removeAll { $0.id == title.id }
         if let change {
-            snapshot.items.insert(ListEntry(title: previous?.title ?? title, change: change), at: 0)
+            let savedTitle = previous?.title.fillingTitleAndImage(from: title) ?? title
+            snapshot.items.insert(ListEntry(title: savedTitle, change: change), at: 0)
         }
         updateList(kind, snapshot)
     }

@@ -46,6 +46,31 @@ struct Fields: Decodable {
         return nil
     }
 
+    var englishTitle: String? {
+        let titles: [Fields]? = read("titles")
+        let alternatives: Fields? = read("alternative_titles", "alternativeTitles")
+        let localized: Fields? = read("title", "titles")
+        return string("title_english", "titleEnglish", "englishTitle", "english_title")
+            ?? alternatives?.string("en", "english")
+            ?? localized?.string("en", "english")
+            ?? titles?.first(where: { $0.string("type")?.lowercased() == "english" })?.string("title", "name")
+    }
+
+    var romajiTitle: String? {
+        let titles: [Fields]? = read("titles")
+        let localized: Fields? = read("title", "titles")
+        return string("title_romaji", "titleRomaji", "romajiTitle", "romaji")
+            ?? localized?.string("romaji")
+            ?? titles?.first(where: { $0.string("type")?.lowercased() == "romaji" })?.string("title", "name")
+            ?? string("title", "name")
+            ?? titles?.first(where: { $0.string("type")?.lowercased() == "default" })?.string("title", "name")
+    }
+
+    var includesEnglishTitleField: Bool {
+        ["title_english", "titleEnglish", "englishTitle", "english_title", "alternative_titles", "alternativeTitles"]
+            .contains { values.contains(Key(stringValue: $0)) }
+    }
+
     var image: URL? {
         let images: Fields? = read("images")
         let jpg: Fields? = images?.read("jpg")
@@ -65,9 +90,13 @@ func publicURL(_ raw: String?) -> URL? {
 struct Title: Identifiable, Hashable, Codable {
     let malID: Int
     let kind: Kind
-    let name: String
+    private(set) var name: String
     let original: String
-    let image: URL?
+    private(set) var image: URL?
+    private var english: String?
+    private var sparseTitle: Bool?
+    var englishName: String? { english ?? (name == original ? nil : name) }
+    var needsTitleLookup: Bool { sparseTitle == true && englishName == nil }
     let score: Double?
     let format: String?
     let total: Int?
@@ -76,22 +105,31 @@ struct Title: Identifiable, Hashable, Codable {
     var malURL: URL { URL(string: "https://myanimelist.net/\(kind.rawValue)/\(malID)")! }
 
     init?(_ fields: Fields, kind: Kind) {
+        let english = fields.englishTitle
         guard let id: Int = fields.read("mal_id", "malId", "id"), id > 0,
-              let name = fields.string("title", "name") else { return nil }
-        let titles: [Fields]? = fields.read("titles")
-        let alternatives: Fields? = fields.read("alternative_titles")
-        let english = fields.string("title_english", "titleEnglish", "englishTitle")
-            ?? alternatives?.string("en")
-            ?? titles?.first(where: { $0.string("type") == "English" })?.string("title")
+              let original = fields.romajiTitle ?? english else { return nil }
         malID = id
         self.kind = kind
-        original = name
-        self.name = english ?? name
+        self.original = original
+        self.english = english
+        name = english ?? original
+        sparseTitle = !fields.includesEnglishTitleField
         image = fields.image
         score = fields.read("score", "mean")
         format = fields.string("type", "mediaType", "media_type")
         total = fields.read("episodes", "chapters", "total")
         members = fields.read("members")
+    }
+
+    func fillingTitleAndImage(from other: Title?) -> Title {
+        guard let other, id == other.id else { return self }
+        var result = self
+        if let preferred = englishName ?? other.englishName {
+            result.english = preferred
+            result.name = preferred
+        }
+        result.image = image ?? other.image
+        return result
     }
 }
 
