@@ -294,7 +294,6 @@ struct FriendUpdate: Identifiable {
 struct TitleReview: Identifiable {
     let id: String
     let url: URL?
-    let reactions: Int?
     let author: String
     let avatar: URL?
     let date: String?
@@ -323,8 +322,6 @@ struct TitleReview: Identifiable {
         url = publicURL(fields.string("url"))
         let malID: Int? = fields.read("mal_id", "malId", "id")
         id = malID.map(String.init) ?? url?.absoluteString ?? "\(author)|\(date ?? "")|\(text)"
-        let reactionCounts: Fields? = fields.read("reactions")
-        reactions = reactionCounts?.read("overall")
         tag = tags.first { ["Recommended", "Mixed Feelings", "Not Recommended"].contains($0) }
         rating = fields.read("score")
         spoiler = (fields.read("is_spoiler", "isSpoiler") ?? false) || tags.contains { $0.localizedCaseInsensitiveContains("spoiler") }

@@ -75,7 +75,7 @@ struct TitleScreen: View {
                     .disabled(changingList)
                 }
                 Menu {
-                    ShareLink(item: API.website.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
+                    ShareLink(item: title.malURL)
                     Link(destination: title.malURL) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
                     if store.account != nil, let saved {
                         if saved.status != "completed" {
@@ -869,11 +869,6 @@ private struct TitleReviewReader: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
-                if let count = review.reactions, count > 0 {
-                    Label(count.formatted(), systemImage: "hand.thumbsup")
-                        .font(.subheadline)
-                        .accessibilityLabel("\(count) reactions")
-                }
                 if let url = review.url {
                     Menu {
                         ShareLink(item: url)

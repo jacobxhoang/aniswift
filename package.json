@@ -1,12 +1,9 @@
 {
-  "name": "ani-ledger",
-  "version": "1.0.0",
+  "name": "ani-ledger-retired-web-endpoint",
   "private": true,
   "type": "module",
   "scripts": {
-    "build": "node scripts/build.mjs",
-    "dev": "node --env-file-if-exists=.env scripts/preview.mjs",
-    "start": "node scripts/preview.mjs --production",
-    "check": "node --check web/app.js && node --check worker.js && node --check scripts/preview.mjs"
+    "build": "node --check scripts/preview.mjs",
+    "start": "node scripts/preview.mjs"
   }
 }

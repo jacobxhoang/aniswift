@@ -67,7 +67,6 @@ private enum SessionKeychain {
 
 @MainActor
 final class API {
-    static let website = URL(string: "https://ani-ledger.onrender.com")!
     static let callbackScheme = "org.aniledger.ios"
     static let redirectURI = "\(callbackScheme)://oauth"
     private static let mal = URL(string: "https://api.myanimelist.net/v2")!

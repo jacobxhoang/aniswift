@@ -1,6 +1,6 @@
 # AniLedger for iOS
 
-AniLedger is a native SwiftUI companion to the AniLedger website for iPhone and iPad running iOS 17 or newer. It uses MyAnimeList for accounts and personal lists, Tenrai for catalog data, and Jikan Edge for catalog fallback and public friend activity.
+AniLedger is a native SwiftUI anime and manga tracker for iPhone and iPad running iOS 17 or newer. It uses MyAnimeList for accounts and personal lists, Tenrai for catalog data, and Jikan Edge for catalog fallback and public friend activity.
 
 Cover art and avatars use [Kingfisher](https://github.com/onevcat/Kingfisher) for image loading and memory and disk caching. Xcode resolves the package on the first build.
 
@@ -28,7 +28,7 @@ xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
 
 Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to refresh the profile.
 
-Title pages prefer English titles with a romaji fallback. Genres, themes, producers and serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing, compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked appearances. Reviews and friends’ title activity appear when entries exist. Anime details can also include trailers, themes, episodes and streaming links.
+Title pages prefer English titles with a romaji fallback. Genres, themes, producers and serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing, compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked appearances. Reviews and friends’ title activity appear when entries exist. Open **View All** in Reviews to browse and read reviews inside the app. Anime details can also include trailers, themes, episodes and streaming links.
 
 Use **Status**, **Progress** or **My Score** for a quick edit. The pencil opens the full editor for repeat counts, start and finish dates, and notes. These fields sync to MyAnimeList. Custom lists and visibility preferences stay on this device for the signed-in account. Hidden status entries remain searchable. Status controls use interactive Liquid Glass on iOS 26 and translucent material on earlier versions.
 
@@ -45,13 +45,13 @@ AniLedger can restore already downloaded list pages while it syncs with MyAnimeL
 
 ## Direct MyAnimeList connection
 
-The iOS app calls MyAnimeList directly for authentication, personal lists, list edits, and personalized anime suggestions. Tenrai and Jikan Edge provide catalog data and public activity. List snapshots, artwork caches, and custom lists are stored on the device. The hosted AniLedger website uses its own web backend.
+The iOS app calls MyAnimeList directly for authentication, personal lists, list edits, and personalized anime suggestions. Tenrai and Jikan Edge provide catalog data and public activity. List snapshots, artwork caches, and custom lists are stored on the device.
 
-1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create a separate application with App Type `iOS`.
+1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create an application with App Type `iOS`.
 2. Register the exact redirect URL `org.aniledger.ios://oauth`.
 3. In AniLedger, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser sign-in. To change it later, sign out and long-press the sign-in button.
 
-The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in the device-only Keychain. Existing hosted iOS sessions require one new sign-in. Never enter the website's client secret in the app. Sign-in, live list sync, and catalog updates require an internet connection.
+The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in the device-only Keychain. Sign-in, live list sync, and catalog updates require an internet connection.
 
 An unsigned simulator build can run on a Mac simulator. Installing on an iPhone or distributing through TestFlight requires signing with an Apple developer team.
 

@@ -1,6 +1,5 @@
 dist/
 .env
 .env.*
-!.env.example
 .sites-runtime/
 artifacts/

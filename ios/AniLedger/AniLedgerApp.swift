@@ -677,8 +677,8 @@ private struct AboutScreen: View {
         List {
             Section("App") {
                 LabeledContent("Version", value: version).listRowBackground(Color.clear)
-                Link(destination: API.website) {
-                    row("AniLedger website", detail: API.website.host() ?? "", symbol: "arrow.up.right")
+                Link(destination: URL(string: "https://github.com/jacobxhoang/ani-ledger")!) {
+                    row("AniLedger on GitHub", detail: "Source code and iOS releases", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)
             }
