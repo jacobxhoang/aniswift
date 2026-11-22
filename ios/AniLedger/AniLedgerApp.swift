@@ -51,7 +51,7 @@ struct AniLedgerApp: App {
     private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         NavigationStack {
             content()
-                .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
+                .navigationDestination(for: Title.self) { TitleScreen(title: $0).toolbar(.visible, for: .navigationBar) }
                 .navigationDestination(for: Friend.self) { FriendProfileScreen(friend: $0) }
                 .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
                 .navigationDestination(for: CatalogFacet.self) { CatalogFacetScreen(facet: $0) }

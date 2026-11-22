@@ -364,7 +364,7 @@ struct ListsScreen: View {
 }
 
 private enum DiscoverShelf: String, CaseIterable, Identifiable {
-    case airing = "Airing anime"
+    case airing = "Currently airing anime"
     case current = "Current season"
     case upcoming = "Upcoming season"
     case animeRank = "Top ranked anime"
@@ -376,6 +376,17 @@ private enum DiscoverShelf: String, CaseIterable, Identifiable {
     case manhwa = "Popular manhwa"
 
     var id: Self { self }
+    var heading: String {
+        guard self == .current || self == .upcoming else { return rawValue }
+        let calendar = Calendar(identifier: .gregorian)
+        let today = Date()
+        let date = self == .upcoming ? (calendar.date(byAdding: .month, value: 3, to: today) ?? today) : today
+        let names = ["Winter", "Spring", "Summer", "Fall"]
+        let name = names[(calendar.component(.month, from: date) - 1) / 3]
+        let year = calendar.component(.year, from: date)
+        return "\(rawValue) – \(name) \(year)"
+    }
+
     var kind: Kind {
         switch self {
         case .mangaPublishing, .mangaRank, .mangaPopular, .manhwa: .manga
@@ -419,23 +430,31 @@ struct PosterShelf<Trailing: View>: View {
     @EnvironmentObject private var store: Store
     let heading: String
     let titles: [Title]
+    var isDiscoverShelf = false
     @ViewBuilder var trailing: Trailing
 
+    private var posterWidth: CGFloat { isDiscoverShelf ? LedgerLayout.detailPosterWidth : LedgerLayout.posterWidth }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: isDiscoverShelf ? 6 : 12) {
             HStack {
-                LedgerSectionTitle(heading)
+                if isDiscoverShelf {
+                    Text(heading.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                        .accessibilityAddTraits(.isHeader)
+                } else {
+                    LedgerSectionTitle(heading)
+                }
                 Spacer()
                 trailing
             }.padding(.horizontal, LedgerLayout.inset)
-            LedgerShelf(inset: LedgerLayout.inset) {
+            LedgerShelf(spacing: isDiscoverShelf ? 8 : LedgerLayout.gap, inset: LedgerLayout.inset) {
                 ForEach(unique(titles)) { title in
                     VStack(alignment: .leading, spacing: 3) {
-                        CoverTile(title: title, showsScore: false, reservesCaptionSpace: false, posterWidth: LedgerLayout.posterWidth)
+                        CoverTile(title: title, showsScore: false, reservesCaptionSpace: false, posterWidth: posterWidth)
                         if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
                             Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
-                    }.frame(width: LedgerLayout.posterWidth)
+                    }.frame(width: posterWidth)
                 }
             }
         }
@@ -444,75 +463,126 @@ struct PosterShelf<Trailing: View>: View {
 
 struct DiscoverScreen: View {
     @EnvironmentObject private var store: Store
+    @FocusState private var searchFocused: Bool
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
     @State private var loading = true
+    @State private var finishedLoadingShelves = false
     @State private var searchKind: Kind = .anime
 
     private var searchTerm: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         Group {
-            if !searchTerm.isEmpty {
-                PosterResults(name: "Search results", shelf: nil, query: searchTerm, kind: searchKind)
+            if searchTerm.isEmpty {
+                browse
             } else {
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
-                        ForEach(DiscoverShelf.allCases) { shelf in
-                            if let titles = shelves[shelf], !titles.isEmpty {
-                                PosterShelf(heading: shelf.rawValue, titles: Array(titles.prefix(14))) {
-                                    NavigationLink {
-                                        PosterResults(name: shelf.rawValue, shelf: shelf, query: "", kind: shelf.kind)
-                                            .navigationTitle(shelf.rawValue)
-                                    } label: { Label("View all", systemImage: "chevron.right").font(.caption.weight(.semibold)).frame(minHeight: 44) }
-                                }
-                            }
-                        }
-                        if loading { ProgressView("Loading Discover").frame(maxWidth: .infinity) }
-                        else if shelves.values.allSatisfy(\.isEmpty) {
-                            VStack(spacing: 12) {
-                                Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
-                                Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
-                            }.frame(maxWidth: .infinity)
-                        }
-                    }.padding(.vertical, 18)
-                }
-                .refreshable { await loadShelves(refresh: true) }
+                PosterResults(name: "Search results", shelf: nil, query: searchTerm, kind: searchKind)
             }
         }
         .background(Palette.background.ignoresSafeArea())
-        .navigationTitle("Discover")
-        .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaInset(edge: .top, spacing: 0) { header }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar(.hidden, for: .navigationBar)
+        .onDisappear { searchFocused = false }
+        .task { if !finishedLoadingShelves { await loadShelves() } }
+    }
+
+    private var header: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 16) {
+                Text("Discover").font(.headline).accessibilityAddTraits(.isHeader)
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").accessibilityHidden(true)
+                    TextField("Search", text: $search)
+                        .focused($searchFocused)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .onSubmit { searchFocused = false }
+                    if !search.isEmpty {
+                        Button {
+                            search = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.leading, 14)
+                .padding(.trailing, search.isEmpty ? 14 : 0)
+                .frame(minHeight: 44)
+                .modifier(ListStatusGlass(isInteractive: false))
+            }
             if !searchTerm.isEmpty {
                 Picker("Search category", selection: $searchKind) {
                     ForEach(Kind.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
-                .padding(.horizontal, LedgerLayout.inset)
-                .padding(.vertical, 6)
-                .background(Palette.background)
             }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
+        .padding(.horizontal, 16)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
+        .background(.ultraThinMaterial)
+    }
+
+    private var browse: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 32) {
+                ForEach(DiscoverShelf.allCases) { shelf in
+                    if let titles = shelves[shelf], !titles.isEmpty {
+                        PosterShelf(heading: shelf.heading, titles: Array(titles.prefix(14)), isDiscoverShelf: true) {
+                            NavigationLink {
+                                PosterResults(name: shelf.heading, shelf: shelf, query: "", kind: shelf.kind)
+                                    .navigationTitle(shelf.heading)
+                                    .toolbar(.visible, for: .navigationBar)
+                            } label: {
+                                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 44, height: 36, alignment: .trailing)
+                                    .contentShape(Rectangle())
+                            }
+                            .accessibilityLabel("View all \(shelf.rawValue.lowercased())")
+                        }
+                    }
+                }
+                if loading {
+                    ProgressView("Loading Discover").frame(maxWidth: .infinity)
+                } else {
+                    if shelves.values.allSatisfy(\.isEmpty) {
+                        VStack(spacing: 12) {
+                            Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
+                            Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    NavigationLink {
+                        CatalogBrowser().toolbar(.visible, for: .navigationBar)
+                    } label: {
+                        Label("Browse catalog", systemImage: "line.3.horizontal.decrease")
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
+                }
             }
+            .padding(.vertical, 10)
         }
-        .task { if shelves.isEmpty { await loadShelves() } }
+        .refreshable { await loadShelves(refresh: true) }
     }
 
     private func loadShelves(refresh: Bool = false) async {
         loading = true
         defer { loading = false }
-        for shelf in DiscoverShelf.allCases {
+        for shelf in DiscoverShelf.allCases where refresh || shelves[shelf] == nil {
             if Task.isCancelled { return }
             if let page = try? await shelf.page(1, api: store.api, refresh: refresh), !Task.isCancelled {
                 shelves[shelf] = page.items
             }
         }
+        if !Task.isCancelled { finishedLoadingShelves = true }
     }
 }
 
@@ -813,7 +883,10 @@ private struct PosterResults: View {
     @State private var loading = true
     @State private var failed = false
     @State private var generation = UUID()
+    @State private var activeRequest: String?
+    @State private var visibleResult: String?
 
+    private var requestKey: String { "\(kind.rawValue)-\(sort.rawValue)-\(query)" }
     private var showsProducerRows: Bool { facet?.category.usesGenreIndex == false }
 
     var body: some View {
@@ -841,17 +914,24 @@ private struct PosterResults: View {
                     Text("No titles found.").foregroundStyle(.secondary)
                 }
             }
+            .scrollTargetLayout(isEnabled: !query.isEmpty && !showsProducerRows)
             .padding(.horizontal, showsProducerRows ? 8 : 18)
             .padding(.vertical, showsProducerRows ? 4 : 18)
             .frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
+        .scrollPosition(id: $visibleResult)
         .background(Palette.background)
-        .task(id: "\(kind.rawValue)-\(sort.rawValue)-\(query)") {
-            generation = UUID()
-            titles = []
-            page = 1
-            more = false
-            await load()
+        .task(id: requestKey) {
+            if activeRequest != requestKey {
+                generation = UUID()
+                activeRequest = requestKey
+                titles = []
+                visibleResult = nil
+                page = 1
+                more = false
+                failed = false
+            }
+            if page == 1 && !failed { await load() }
         }
     }
 
@@ -923,6 +1003,9 @@ struct CatalogBrowser: View {
     @State private var next = false
     @State private var activeQuery = UUID()
     @State private var reload = 0
+    @State private var loadedRequest: String?
+
+    private var requestKey: String { "\(kind)-\(mode)-\(search)-\(year)-\(season)-\(reload)" }
 
     var body: some View {
         ScrollView {
@@ -974,13 +1057,15 @@ struct CatalogBrowser: View {
         .navigationTitle("Browse catalog")
         .searchable(text: $search, prompt: "Search anime or manga")
         .background(Palette.canvas)
-        .task(id: "\(kind)-\(mode)-\(search)-\(year)-\(season)-\(reload)") {
+        .task(id: requestKey) {
+            guard loadedRequest != requestKey else { return }
             await load(reset: true)
         }
     }
 
     private func load(reset: Bool) async {
         let request = UUID()
+        let key = requestKey
         activeQuery = request
         loading = true
         message = nil
@@ -1012,6 +1097,7 @@ struct CatalogBrowser: View {
             guard !Task.isCancelled, activeQuery == request else { return }
             let result = catalogPage(response, kind: selected)
             titles = unique(titles + result.items)
+            loadedRequest = key
             next = result.more
             page += 1
         } catch {
