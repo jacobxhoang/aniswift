@@ -1,7 +1,7 @@
 name: Build AniLedger IPA
 on:
   push:
-    paths: ['ios/**', '.github/workflows/ios.yml']
+    branches: [main]
   pull_request:
     paths: ['ios/**', '.github/workflows/ios.yml']
   workflow_dispatch:
@@ -15,10 +15,42 @@ permissions:
   contents: read
 
 jobs:
+  commits:
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.select.outputs.shas }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Select commits to build
+        id: select
+        shell: bash
+        env:
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" == push ]] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
+            shas=$(git rev-list --first-parent --reverse "$BEFORE..$GITHUB_SHA" | jq -nRc '[inputs | select(length > 0)]')
+            if [[ "$shas" == '[]' ]]; then shas=$(jq -nc --arg sha "$GITHUB_SHA" '[$sha]'); fi
+          else
+            shas=$(jq -nc --arg sha "$GITHUB_SHA" '[$sha]')
+          fi
+          printf 'shas=%s\n' "$shas" >> "$GITHUB_OUTPUT"
+
   ipa:
+    needs: commits
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: ${{ fromJSON(needs.commits.outputs.shas) }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
       - name: Select Xcode 26
         shell: bash
         run: |
@@ -56,6 +88,49 @@ jobs:
         run: bash ios/build-signed.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.signed && 'AniLedger-Signed' || 'AniLedger-Unsigned' }}
+          name: ${{ inputs.signed && 'AniLedger-Signed' || format('AniLedger-Unsigned-{0}', matrix.sha) }}
           path: ${{ runner.temp }}/AniLedger-*.ipa
           if-no-files-found: error
+          overwrite: true
+
+  release:
+    needs: [commits, ipa]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.commits.result == 'success' && !cancelled()
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        sha: ${{ fromJSON(needs.commits.outputs.shas) }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: AniLedger-Unsigned-${{ matrix.sha }}
+          merge-multiple: true
+          path: ${{ runner.temp }}/release-ipa
+      - name: Publish commit release
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          BUILD_SHA: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          ipa="$RUNNER_TEMP/release-ipa/AniLedger-Unsigned.ipa"
+          if [[ ! -f "$ipa" ]]; then
+            echo "No successful IPA build for $BUILD_SHA. Skipping its release."
+            exit 0
+          fi
+          tag="ios-$BUILD_SHA"
+          if gh release view "$tag" --json assets > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+            if jq -e 'any(.assets[]; .name == "AniLedger-Unsigned.ipa")' "$RUNNER_TEMP/release.json" >/dev/null; then
+              echo "The IPA for $BUILD_SHA is already published."
+            else
+              gh release upload "$tag" "$ipa"
+            fi
+          else
+            gh release create "$tag" "$ipa" \
+              --target "$BUILD_SHA" --title "AniLedger iOS ${BUILD_SHA:0:7}" \
+              --prerelease --latest=false \
+              --notes "Unsigned iOS device build for commit $BUILD_SHA. Sign the IPA before installing it on an iPhone or iPad."
+          fi

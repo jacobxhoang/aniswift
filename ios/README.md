@@ -34,7 +34,7 @@ An unsigned simulator build can run on a Mac simulator. Installing on an iPhone 
 
 ## GitHub Actions IPA
 
-The **Build AniLedger IPA** workflow archives the app for iPhone and iPad and uploads `AniLedger-Unsigned.ipa` on iOS source changes. The unsigned file is a device build and requires signing before iOS can install it.
+The **Build AniLedger IPA** workflow builds each new commit on the first-parent history of `main`. Each successful build publishes a [GitHub prerelease](https://github.com/jacobxhoang/ani-ledger/releases) tagged `ios-<full commit SHA>` with `AniLedger-Unsigned.ipa` attached. Pull requests can build artifacts without publishing releases. The unsigned file is a device build and requires signing before iOS can install it.
 
 For an installable Ad Hoc IPA, use an Apple Distribution certificate with its private key in a password-protected `.p12`, and an Ad Hoc provisioning profile for an explicit App ID that includes the devices you want to install on. Add these repository Actions secrets:
 
