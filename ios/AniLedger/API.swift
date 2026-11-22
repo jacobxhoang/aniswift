@@ -81,6 +81,8 @@ final class API {
     private let transport = URLSession(configuration: .ephemeral, delegate: MALTransport(), delegateQueue: nil)
     private var privateQueue: Task<Void, Never>?
     private var cached: [URL: (Date, Fields)] = [:]
+    private var catalogRequests: [URL: Task<Fields, Error>] = [:]
+    private let catalogCacheLimit = 160
     private var nextTitleLookup = ContinuousClock().now
 
     static func url(_ base: URL, _ path: String, _ query: [URLQueryItem] = []) -> URL {
@@ -103,15 +105,38 @@ final class API {
     }
 
     func catalog(_ path: String, _ query: [URLQueryItem] = [], refresh: Bool = false) async throws -> Fields {
+        try Task.checkCancellation()
         let publicUserData = path.hasPrefix("users/")
         let cacheKey = Self.url(publicUserData ? jikan : tenrai, path, query)
         if !refresh, let (date, result) = cached[cacheKey], Date().timeIntervalSince(date) < 60 { return result }
+        if let pending = catalogRequests[cacheKey] {
+            let result = try await pending.value
+            try Task.checkCancellation()
+            return result
+        }
+
+        let request = Task {
+            try await fetchCatalog(path, query, publicUserData: publicUserData)
+        }
+        catalogRequests[cacheKey] = request
+        defer { catalogRequests[cacheKey] = nil }
+        let result = try await request.value
+        cached[cacheKey] = (.now, result)
+        if cached.count > catalogCacheLimit {
+            let oldest = cached.sorted { $0.value.0 < $1.value.0 }
+            for entry in oldest.prefix(cached.count - catalogCacheLimit) {
+                cached.removeValue(forKey: entry.key)
+            }
+        }
+        try Task.checkCancellation()
+        return result
+    }
+
+    private func fetchCatalog(_ path: String, _ query: [URLQueryItem], publicUserData: Bool) async throws -> Fields {
         for base in publicUserData ? [jikan] : [tenrai, jikan] {
             do {
                 let url = Self.url(base, path, query)
-                let response = try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 5 : 10)).0
-                cached[cacheKey] = (Date(), response)
-                return response
+                return try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 5 : 10)).0
             } catch {
                 try Task.checkCancellation()
                 if base == jikan { throw error }

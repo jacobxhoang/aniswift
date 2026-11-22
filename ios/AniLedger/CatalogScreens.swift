@@ -467,6 +467,7 @@ struct DiscoverScreen: View {
     @State private var search = ""
     @State private var loading = true
     @State private var finishedLoadingShelves = false
+    @State private var failedShelves: Set<DiscoverShelf> = []
     @State private var searchKind: Kind = .anime
 
     private var searchTerm: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -533,6 +534,10 @@ struct DiscoverScreen: View {
                             Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
                         }
                         .frame(maxWidth: .infinity)
+                    } else if !failedShelves.isEmpty {
+                        Button("Retry unavailable sections") { Task { await loadShelves() } }
+                            .ledgerGlassButton()
+                            .frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -544,10 +549,28 @@ struct DiscoverScreen: View {
     private func loadShelves(refresh: Bool = false) async {
         loading = true
         defer { loading = false }
-        for shelf in DiscoverShelf.allCases where refresh || shelves[shelf] == nil {
-            if Task.isCancelled { return }
-            if let page = try? await shelf.page(1, api: store.api, refresh: refresh), !Task.isCancelled {
-                shelves[shelf] = page.items
+        let pending = DiscoverShelf.allCases.filter { refresh || shelves[$0] == nil || failedShelves.contains($0) }
+        let api = store.api
+        let batchSize = 3
+        for start in stride(from: 0, to: pending.count, by: batchSize) {
+            guard !Task.isCancelled else { return }
+            let batch = pending[start..<min(start + batchSize, pending.count)]
+            await withTaskGroup(of: (DiscoverShelf, [Title]?).self) { group in
+                for shelf in batch {
+                    group.addTask {
+                        let page = try? await shelf.page(1, api: api, refresh: refresh)
+                        return (shelf, page?.items)
+                    }
+                }
+                for await (shelf, titles) in group {
+                    guard !Task.isCancelled else { break }
+                    if let titles {
+                        shelves[shelf] = titles
+                        failedShelves.remove(shelf)
+                    } else {
+                        failedShelves.insert(shelf)
+                    }
+                }
             }
         }
         if !Task.isCancelled { finishedLoadingShelves = true }

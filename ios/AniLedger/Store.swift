@@ -138,6 +138,7 @@ final class Store: ObservableObject {
             activity = []
             friends = []
             checkedFriends = 0
+            loadingFriends = false
             friendMessage = nil
             ListCache.remove()
         }
@@ -266,36 +267,55 @@ final class Store: ObservableObject {
 
     func loadFriends(reset: Bool = false) async {
         guard let user = account, !loadingFriends else { return }
+        let generation = accountGeneration
         loadingFriends = true
-        defer { loadingFriends = false }
-        if reset {
-            checkedFriends = 0
-            activity = []
-        }
+        defer { if accountGeneration == generation { loadingFriends = false } }
         friendMessage = nil
+
         do {
-            if reset || friends.isEmpty { try await fetchFriends(user, refresh: reset) }
-            let batch = Array(friends.dropFirst(checkedFriends).prefix(6))
+            let refreshedFriends = reset || friends.isEmpty
+                ? try await friendList(user, refresh: reset)
+                : friends
+            guard !Task.isCancelled, accountGeneration == generation else { return }
+            let start = reset ? 0 : checkedFriends
+            let batch = Array(refreshedFriends.dropFirst(start).prefix(6))
             var updates: [FriendUpdate] = []
+            var receivedUpdates = batch.isEmpty
             for friend in batch {
-                guard !Task.isCancelled, account == user else { return }
+                guard !Task.isCancelled, accountGeneration == generation else { return }
                 if let items = try? await publicUpdates(friend, refresh: reset) {
                     updates += items
+                    receivedUpdates = true
                 }
             }
-            guard !Task.isCancelled, account == user else { return }
-            checkedFriends += batch.count
-            activity = unique(activity + updates).sorted { activityDate($0.date) > activityDate($1.date) }
+            guard !Task.isCancelled, accountGeneration == generation else { return }
+            if reset && !receivedUpdates && !activity.isEmpty {
+                friendMessage = "Could not refresh the feed."
+                return
+            }
+            friends = refreshedFriends
+            checkedFriends = start + batch.count
+            let combined = reset ? updates : activity + updates
+            activity = unique(combined).map { (item: $0, date: activityDate($0.date)) }
+                .sorted { $0.date > $1.date }.map(\.item)
         } catch {
-            if !Task.isCancelled, account == user { friendMessage = error.localizedDescription }
+            if !Task.isCancelled, accountGeneration == generation { friendMessage = error.localizedDescription }
         }
     }
 
     func fetchFriends(_ user: Account, refresh: Bool = false) async throws {
+        let generation = accountGeneration
+        let loaded = try await friendList(user, refresh: refresh)
+        guard !Task.isCancelled, accountGeneration == generation, account == user else { return }
+        friends = loaded
+    }
+
+    private func friendList(_ user: Account, refresh: Bool) async throws -> [Friend] {
         let response = try await api.catalog("users/\(user.name)/friends", refresh: refresh)
-        let entries: [Fields] = response.read("data") ?? []
-        guard account == user else { return }
-        friends = unique(entries.compactMap(Friend.init).filter { $0.id != user.name.lowercased() })
+        guard let entries: [Fields] = response.read("data") else {
+            throw APIError(status: 0, message: "Could not load friends.")
+        }
+        return unique(entries.compactMap(Friend.init).filter { $0.id != user.name.lowercased() })
     }
 
     func publicUpdates(_ friend: Friend, refresh: Bool = false) async throws -> [FriendUpdate] {
