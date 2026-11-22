@@ -743,7 +743,7 @@ private struct TitleExternalLink: Identifiable {
     }
 }
 
-private struct FlowLayout: Layout {
+struct FlowLayout: Layout {
     private let spacing: CGFloat = 7
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
