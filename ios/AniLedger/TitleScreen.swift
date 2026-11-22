@@ -380,6 +380,20 @@ struct TitleScreen: View {
         }
     }
 
+    private func trailerCard(_ url: URL) -> some View {
+        block("Trailer") {
+            Link(destination: url) {
+                Art(url: trailerImage ?? current.image)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                   .overlay {
+                        Image(systemName: "play.fill").font(.title2)
+                            .padding(16).ledgerGlassBadge()
+                    }
+                    .clipShape(.rect(cornerRadius: 12))
+            }.accessibilityLabel("Play trailer")
+        }
+    }
+
     private var episodeRail: some View {
         block("Episodes") {
             ScrollView(.horizontal) {
