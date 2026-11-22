@@ -58,7 +58,10 @@ struct TitleScreen: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 if store.account != nil {
-                    Button { editor = true } label: { Label("Edit list entry", systemImage: "pencil") }
+                    Button { editor = true } label: {
+                        Label(saved == nil ? "Add to My List" : "Edit list entry",
+                              systemImage: saved == nil ? "plus" : "pencil")
+                    }
                 }
             }
             ToolbarItem(placement: .topBarTrailing) {
@@ -111,10 +114,14 @@ struct TitleScreen: View {
     private var header: some View {
         VStack(spacing: 12) {
             Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
-                .frame(width: 136, height: 198)
+                .frame(width: 144, height: 208)
                 .clipShape(.rect(cornerRadius: 10))
-                .shadow(color: .black.opacity(0.6), radius: 18, y: 8)
-                .padding(.top, 146)
+                .overlay {
+                    RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.14))
+                        .allowsHitTesting(false)
+                }
+                .padding(.top, 12)
+                .padding(.bottom, 4)
             Text(current.name)
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
@@ -122,19 +129,16 @@ struct TitleScreen: View {
                 .accessibilityAddTraits(.isHeader)
             let credit = fieldNames(title.kind == .anime ? "studios" : "authors").joined(separator: " · ")
             if !credit.isEmpty {
-                Text(credit).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Text(credit.uppercased()).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             } else if current.original != current.name {
                 Text(current.original).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
-            if let format = current.format {
-                Text(format.uppercased()).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            }
             HStack(alignment: .top, spacing: 6) {
-                let score = current.score.flatMap { $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) + " / 10" : nil }
+                let score = current.score.flatMap { $0 > 0 ? ($0 / 10).formatted(.percent.precision(.fractionLength(0))) : nil }
                 let rank: Int? = record?.read("rank")
                 let popularity: Int? = record?.read("popularity")
-                statistic("MAL score", score)
-                statistic("Rank", rank.flatMap { $0 > 0 ? "#\($0)" : nil })
+                statistic("Average score", score)
+                statistic("MAL rank", rank.flatMap { $0 > 0 ? "#\($0)" : nil })
                 statistic("Popularity", popularity.flatMap { $0 > 0 ? "#\($0)" : nil })
             }
             .frame(maxWidth: 480)
@@ -142,26 +146,12 @@ struct TitleScreen: View {
         }
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity)
-        .background(alignment: .top) {
-            ZStack {
-                Palette.surface
-                Art(url: trailerImage ?? current.image ?? title.image)
-                    .blur(radius: trailerImage == nil ? 15 : 0)
-                LinearGradient(stops: [.init(color: .black.opacity(0.22), location: 0),
-                                       .init(color: .black.opacity(0.20), location: 0.42),
-                                       .init(color: .black, location: 1)],
-                               startPoint: .top, endPoint: .bottom)
-            }
-            .frame(height: 358)
-            .clipped()
-            .ignoresSafeArea(.container, edges: .top)
-        }
     }
 
     private func statistic(_ label: String, _ value: String?) -> some View {
         VStack(spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
-            Text(value ?? "—").font(.headline.monospacedDigit())
+            Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
+            Text(value ?? "—").font(.title3.bold().monospacedDigit())
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
@@ -174,26 +164,24 @@ struct TitleScreen: View {
                 ProgressView("Checking session")
             } else if store.account == nil {
                 SignInButton()
-            } else if let saved {
+            } else {
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) { listControls(saved) }
                     VStack(spacing: 8) { listControls(saved) }
                 }
-            } else {
-                Button { editor = true } label: { Label("Add to My List", systemImage: "plus") }
-                    .ledgerProminentButton()
             }
         }
         .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
-    private func listControls(_ item: ListEntry) -> some View {
+    private func listControls(_ item: ListEntry?) -> some View {
         let unit = title.kind == .anime ? "ep" : "ch"
-        let total = (current.total ?? item.title.total).flatMap { $0 > 0 ? String($0) : nil } ?? "?"
-        editControl("Status", statusLabel(item.status))
-        editControl("Progress", "\(item.progress) / \(total) \(unit)")
-        editControl("My score", item.rating > 0 ? "\(item.rating) / 10" : "Unscored")
+        let total = (current.total ?? item?.title.total).flatMap { $0 > 0 ? String($0) : nil } ?? "?"
+        editControl("Status", item.map { statusLabel($0.status) } ?? "Add to list")
+        editControl("Progress", "\(item.map { String($0.progress) } ?? "—") / \(total) \(unit)")
+        let rating = item?.rating ?? 0
+        editControl("My score", rating > 0 ? "\(rating) / 10" : "Unscored")
     }
 
     private func editControl(_ label: String, _ value: String) -> some View {
@@ -327,7 +315,7 @@ struct TitleScreen: View {
             Link(destination: url) {
                 Art(url: trailerImage ?? current.image)
                     .aspectRatio(16 / 9, contentMode: .fit)
-                    .overlay {
+                   .overlay {
                         Image(systemName: "play.fill").font(.title2)
                             .padding(16).ledgerGlassBadge()
                     }
