@@ -290,9 +290,9 @@ struct AccountScreen: View {
                     if let name = store.account?.name, let profile = publicURL("https://myanimelist.net/profile/\(name)") {
                         Link("View MyAnimeList profile", destination: profile)
                     }
-                    Link("AniLedger website", destination: API.backend)
-                    Link("Tenrai", destination: URL(string: "https://tenrai.org")!)
-                    Link("Jikan Edge", destination: URL(string: "https://jikan.lucashdo.com")!)
+                    NavigationLink { AboutScreen() } label: {
+                        Label("About AniLedger", systemImage: "info.circle")
+                    }
                     if store.account != nil {
                         Button("Sign out") { confirmSignOut = true }
                     }
@@ -404,5 +404,75 @@ struct AccountScreen: View {
             }
         } else { favoritesUnavailable = true }
         loadingProfile = false
+    }
+}
+
+private struct AboutScreen: View {
+    private let credits = [
+        Credit("MyAnimeList", "Account sign-in, lists, and personal anime suggestions", "https://myanimelist.net"),
+        Credit("Tenrai", "Anime and manga catalog", "https://tenrai.org"),
+        Credit("Jikan Edge", "Catalog fallback and public friend activity", "https://jikan.lucashdo.com")
+    ]
+
+    private var version: String {
+        let short = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        if let short, let build { return "\(short) (\(build))" }
+        return short ?? build ?? "Unavailable"
+    }
+
+    var body: some View {
+        List {
+            Section("App") {
+                LabeledContent("Version", value: version).listRowBackground(Color.clear)
+                Link(destination: API.backend) {
+                    row("AniLedger website", detail: API.backend.host() ?? "", symbol: "arrow.up.right")
+                }
+                .listRowBackground(Color.clear)
+            }
+            Section("Data and services") {
+                ForEach(credits) { credit in
+                    Link(destination: credit.url) {
+                        row(credit.name, detail: credit.detail, symbol: "arrow.up.right")
+                    }
+                    .listRowBackground(Color.clear)
+                }
+            }
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("About AniLedger")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func row(_ title: String, detail: String, symbol: String) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title).font(.body.weight(.medium))
+                Text(detail).font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            Image(systemName: symbol)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+        .padding(.vertical, 5)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+
+    private struct Credit: Identifiable {
+        let name: String
+        let detail: String
+        let url: URL
+        var id: String { name }
+
+        init(_ name: String, _ detail: String, _ url: String) {
+            self.name = name
+            self.detail = detail
+            self.url = URL(string: url)!
+        }
     }
 }
