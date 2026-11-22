@@ -292,7 +292,9 @@ struct FriendUpdate: Identifiable {
 }
 
 struct TitleReview: Identifiable {
-    let id = UUID()
+    let id: String
+    let url: URL?
+    let reactions: Int?
     let author: String
     let avatar: URL?
     let date: String?
@@ -300,6 +302,15 @@ struct TitleReview: Identifiable {
     let tag: String?
     let rating: Int?
     let spoiler: Bool
+
+    var ratingLabel: String? {
+        rating.flatMap { (1...10).contains($0) ? "\($0)/10" : nil }
+    }
+
+    var displayedDate: String? {
+        let value = displayDate(date)
+        return value.isEmpty ? nil : value
+    }
 
     init?(_ fields: Fields) {
         guard let text = fields.string("review", "text") else { return nil }
@@ -309,6 +320,11 @@ struct TitleReview: Identifiable {
         author = user?.string("username", "name") ?? fields.string("user", "username") ?? "MyAnimeList member"
         avatar = user?.image ?? fields.image
         date = fields.string("date")
+        url = publicURL(fields.string("url"))
+        let malID: Int? = fields.read("mal_id", "malId", "id")
+        id = malID.map(String.init) ?? url?.absoluteString ?? "\(author)|\(date ?? "")|\(text)"
+        let reactionCounts: Fields? = fields.read("reactions")
+        reactions = reactionCounts?.read("overall")
         tag = tags.first { ["Recommended", "Mixed Feelings", "Not Recommended"].contains($0) }
         rating = fields.read("score")
         spoiler = (fields.read("is_spoiler", "isSpoiler") ?? false) || tags.contains { $0.localizedCaseInsensitiveContains("spoiler") }

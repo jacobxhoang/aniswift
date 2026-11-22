@@ -12,8 +12,8 @@ struct TitleScreen: View {
     @State private var relationNames: [String: String] = [:]
     @State private var characters: [CastMember] = []
     @State private var themes: Fields?
-    @State private var reviews: [TitleReview] = []
-    @State private var openReview: TitleReview?
+    @State private var reviews: Page<TitleReview>?
+    @State private var reviewsUnavailable = false
     @State private var external: [TitleExternalLink] = []
     @State private var failure: String?
     @State private var editor: ListEditor.Mode?
@@ -51,7 +51,11 @@ struct TitleScreen: View {
                 if !episodes.isEmpty { episodeRail }
                 if title.kind == .anime { themeRows }
                 if !friendRows.isEmpty { friends }
-                if !reviews.isEmpty { reviewRows }
+                if let reviews, !reviews.items.isEmpty || reviews.more {
+                    reviewRows(reviews)
+                } else if reviewsUnavailable {
+                    reviewRows(nil)
+                }
                 if !external.isEmpty { externalLinks }
             }
             .padding(LedgerLayout.inset)
@@ -96,21 +100,6 @@ struct TitleScreen: View {
             completedFriendBatches = 0
             checkingFriends = false
             await loadFriendBatch()
-        }
-        .sheet(item: $openReview) { review in
-            NavigationStack {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        Text(review.author).font(.headline)
-                        if let rating = review.rating, (1...10).contains(rating) { Text("Reviewer rating: \(rating)/10").foregroundStyle(.secondary) }
-                        Text(review.text).textSelection(.enabled)
-                    }.frame(maxWidth: .infinity, alignment: .leading).padding(LedgerLayout.inset)
-                }
-                .background(Palette.background)
-                .navigationTitle("Review")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Done") { openReview = nil } } }
-            }
         }
         .sheet(item: $editor) { mode in
             ListEditor(title: current, original: saved, mode: mode)
@@ -519,33 +508,34 @@ struct TitleScreen: View {
         }
     }
 
-    private var reviewRows: some View {
-        block("Reviews") {
-            Link("All reviews on MyAnimeList", destination: title.malURL.appending(path: "_/reviews"))
-                .font(.subheadline)
-            LedgerShelf {
-                ForEach(reviews) { review in
-                    Button { openReview = review } label: {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack(spacing: 8) {
-                                Art(url: review.avatar, symbol: "person.fill")
-                                    .frame(width: 28, height: 28).clipShape(.circle)
-                                Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
-                            }
-                            Text(review.spoiler ? "Show review with spoilers" : review.text)
-                                .font(.subheadline).lineLimit(4)
-                            if let tag = review.tag { Text(tag).font(.caption).foregroundStyle(.secondary) }
-                            if let rating = review.rating, (1...10).contains(rating) {
-                                Text("Reviewer rating: \(rating)/10").font(.caption).foregroundStyle(.secondary)
-                            }
+    private func reviewRows(_ firstPage: Page<TitleReview>?) -> some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                shelfHeading("Reviews")
+                Spacer()
+                NavigationLink {
+                    TitleReviewsScreen(title: current, firstPage: firstPage)
+                } label: { viewAllLabel("reviews") }
+                .buttonStyle(.plain)
+            }
+            if let firstPage, !firstPage.items.isEmpty {
+                LedgerShelf {
+                    ForEach(firstPage.items.prefix(3)) { review in
+                        NavigationLink {
+                            TitleReviewReader(title: current, review: review)
+                        } label: {
+                            TitleReviewPreview(review: review)
+                                .frame(width: 220, alignment: .leading)
+                                .padding(12)
+                                .ledgerPanel(radius: 12)
                         }
-                        .frame(width: 220, alignment: .leading)
-                        .padding(12)
-                        .ledgerPanel(radius: 14)
-                    }.buttonStyle(.plain)
+                        .buttonStyle(.plain)
+                    }
                 }
             }
         }
+        .padding(.top, 12)
+        .overlay(alignment: .top) { Divider() }
     }
 
     private var externalLinks: some View {
@@ -597,7 +587,7 @@ struct TitleScreen: View {
         async let detail = store.api.catalog(path)
         async let relatedData = store.api.catalog(path + "/relations")
         async let castData = store.api.catalog(path + "/characters")
-        async let reviewData = store.api.catalog(path + "/reviews")
+        async let reviewData = store.api.titleReviews(title, page: 1)
         async let links = loadExternalLinks(path)
         async let songs = loadThemes(path)
         async let recs = store.api.catalog(path + "/recommendations")
@@ -631,9 +621,14 @@ struct TitleScreen: View {
             characters = cast.filter { $0.role?.lowercased() == "main" }
                 + cast.filter { $0.role?.lowercased() != "main" }
         }
-        if let result = try? await reviewData {
-            let items: [Fields] = result.read("data") ?? []
-            reviews = Array(items.compactMap(TitleReview.init).prefix(3))
+        do {
+            let result = try await reviewData
+            if !Task.isCancelled {
+                reviews = result
+                reviewsUnavailable = false
+            }
+        } catch {
+            if !Task.isCancelled { reviewsUnavailable = true }
         }
         external = await links
         if let result = try? await recs {
@@ -699,6 +694,194 @@ struct TitleScreen: View {
             }
         } while friendRows.isEmpty && friendOffset < store.friends.count
         completedFriendBatches += 1
+    }
+}
+
+private extension API {
+    func titleReviews(_ title: Title, page: Int) async throws -> Page<TitleReview> {
+        let path = "\(title.kind.rawValue)/\(title.malID)/reviews"
+        let response = try await catalog(path, [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "spoilers", value: "true"),
+            URLQueryItem(name: "preliminary", value: "true")
+        ])
+        let data: Fields? = response.read("data")
+        guard let rows: [Fields] = response.read("data") ?? data?.read("reviews", "items") else {
+            throw APIError(status: 0, message: "Could not load reviews.")
+        }
+        let pagination: Fields? = response.read("pagination")
+        let meta: Fields? = response.read("meta")
+        let metaPagination: Fields? = meta?.read("pagination")
+        let hasMore: Bool = pagination?.read("has_next_page", "hasNextPage")
+            ?? metaPagination?.read("hasNextPage", "has_next_page") ?? false
+        return Page(items: unique(rows.compactMap(TitleReview.init)), more: hasMore)
+    }
+}
+
+private struct TitleReviewsScreen: View {
+    @EnvironmentObject private var store: Store
+    let title: Title
+    @State private var reviews: [TitleReview]
+    @State private var nextPage: Int?
+    @State private var loading = false
+    @State private var failed = false
+
+    init(title: Title, firstPage: Page<TitleReview>?) {
+        self.title = title
+        _reviews = State(initialValue: firstPage?.items ?? [])
+        let nextPage: Int? = firstPage == nil ? 1 : (firstPage?.more == true ? 2 : nil)
+        _nextPage = State(initialValue: nextPage)
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                Text(title.name).font(.title3.weight(.semibold))
+                    .padding(.bottom, 8)
+                    .accessibilityAddTraits(.isHeader)
+                ForEach(reviews) { review in
+                    NavigationLink {
+                        TitleReviewReader(title: title, review: review)
+                    } label: {
+                        HStack(spacing: 12) {
+                            TitleReviewPreview(review: review)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                                .accessibilityHidden(true)
+                        }
+                        .padding(.vertical, 13)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+
+                if failed {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Could not load reviews.").foregroundStyle(.secondary)
+                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
+                    }
+                    .padding(.top, 14)
+                } else if let nextPage {
+                    NextPageIndicator(label: "Loading reviews", page: nextPage) { await load() }
+                } else if reviews.isEmpty {
+                    ContentUnavailableView("No reviews yet", systemImage: "text.alignleft")
+                }
+            }
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: 720)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Reviews")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Link(destination: title.malURL.appending(path: "_/reviews")) {
+                    Label("Reviews on MyAnimeList", systemImage: "arrow.up.right")
+                }
+            }
+        }
+    }
+
+    private func load() async {
+        guard let page = nextPage, !loading else { return }
+        loading = true
+        failed = false
+        defer { loading = false }
+        do {
+            let result = try await store.api.titleReviews(title, page: page)
+            guard !Task.isCancelled else { return }
+            reviews = unique(reviews + result.items)
+            nextPage = result.more ? page + 1 : nil
+        } catch {
+            if !Task.isCancelled { failed = true }
+        }
+    }
+}
+
+private struct TitleReviewPreview: View {
+    let review: TitleReview
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Art(url: review.avatar, symbol: "person.fill")
+                    .frame(width: 28, height: 28).clipShape(.circle)
+                Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
+            }
+            Text(review.spoiler ? "Contains spoilers" : review.text)
+                .font(.subheadline).lineLimit(4)
+            let metadata = [review.tag, review.ratingLabel, review.displayedDate].compactMap { $0 }
+            if !metadata.isEmpty {
+                Text(metadata.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+}
+
+private struct TitleReviewReader: View {
+    let title: Title
+    let review: TitleReview
+    @State private var revealed = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                HStack(alignment: .top, spacing: 14) {
+                    PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book", width: 74)
+                        .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(title.name).font(.title3.weight(.semibold))
+                            .accessibilityAddTraits(.isHeader)
+                        Text("Reviewed by \(Text(review.author).bold())")
+                            .font(.subheadline).foregroundStyle(.secondary)
+                        let metadata = [review.tag, review.ratingLabel, review.displayedDate].compactMap { $0 }
+                        if !metadata.isEmpty {
+                            Text(metadata.joined(separator: " · "))
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                Divider()
+                if review.spoiler && !revealed {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Label("This review contains spoilers.", systemImage: "eye.slash")
+                            .foregroundStyle(.secondary)
+                        Button("Show review") { revealed = true }.ledgerGlassButton()
+                    }
+                } else {
+                    Text(review.text)
+                        .font(.body)
+                        .lineSpacing(4)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: 720, alignment: .leading)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Review")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                if let count = review.reactions, count > 0 {
+                    Label(count.formatted(), systemImage: "hand.thumbsup")
+                        .font(.subheadline)
+                        .accessibilityLabel("\(count) reactions")
+                }
+                if let url = review.url {
+                    Menu {
+                        ShareLink(item: url)
+                        Link(destination: url) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
+                    } label: { Label("Review options", systemImage: "ellipsis") }
+                }
+            }
+        }
     }
 }
 
