@@ -861,6 +861,9 @@ function reviewCards(data, reviewsUrl) {
     const parsed = parseFriendDate(review.date);
     const date = parsed ? new Date(parsed.timestamp) : null;
     const timestamp = date ? `<time datetime="${parsed.calendarDate || date.toISOString()}">${date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric', timeZone: parsed.calendarDate ? 'UTC' : undefined })}</time>` : '';
+    const rating = Number(review.score);
+    const ratingLabel = Number.isFinite(rating) && rating > 0 && rating <= 10
+      ? `<span class="review-tag">Reviewer rating: ${rating}/10</span>` : '';
     const short = text.length > 540;
     const content = spoiler
       ? `<details><summary>Show review with spoilers</summary><p class="entry-prose">${escape(text)}</p></details>`
@@ -871,7 +874,7 @@ function reviewCards(data, reviewsUrl) {
     cards.push(`<article class="entry-review">
       <span class="review-avatar" aria-hidden="true">${image ? `<img alt="" loading="lazy" src="${escape(image)}">` : escape(String(name).slice(0, 1).toUpperCase())}</span>
       <div class="review-body"><div class="review-byline"><strong>${escape(name)}</strong>${timestamp}</div>
-      ${sentiment ? `<span class="review-tag ${sentiments.get(sentiment)}">${sentiment}</span>` : ''}${content}
+      ${sentiment || ratingLabel ? `<div>${sentiment ? `<span class="review-tag ${sentiments.get(sentiment)}">${sentiment}</span> ` : ''}${ratingLabel}</div>` : ''}${content}
       <a class="review-source" href="${escape(url)}" target="_blank" rel="noopener">Open on MyAnimeList</a></div>
     </article>`);
   }
