@@ -13,7 +13,6 @@ struct TitleScreen: View {
     @State private var characters: [CastMember] = []
     @State private var themes: Fields?
     @State private var reviews: [TitleReview] = []
-    @State private var reviewFailed = false
     @State private var openReview: TitleReview?
     @State private var external: [Fields] = []
     @State private var failure: String?
@@ -51,8 +50,8 @@ struct TitleScreen: View {
                 if let trailer = trailerURL { trailerCard(trailer) }
                 if !episodes.isEmpty { episodeRail }
                 if title.kind == .anime { themeRows }
-                friends
-                reviewRows
+                if !friendRows.isEmpty { friends }
+                if !reviews.isEmpty { reviewRows }
                 if !external.isEmpty { externalLinks }
             }
             .padding(LedgerLayout.inset)
@@ -423,27 +422,20 @@ struct TitleScreen: View {
 
     private var friends: some View {
         block("Friends’ list activity") {
-            if store.checking { ProgressView() }
-            else if store.account == nil { Text("Sign in to see friends’ list activity.").foregroundStyle(.secondary) }
-            else {
-                ForEach(friendRows) { row in
-                    VStack(alignment: .leading, spacing: 4) {
-                        FriendCaption(item: row)
-                        Text([row.status.map(statusLabel),
-                              row.progress.map { "\($0)/\(row.total.map { String($0) } ?? "?")" },
-                              row.score.flatMap { $0 > 0 ? "\($0)/10" : nil }].compactMap { $0 }.joined(separator: " · "))
-                            .font(.subheadline).foregroundStyle(.secondary)
-                    }
+            ForEach(friendRows) { row in
+                VStack(alignment: .leading, spacing: 4) {
+                    FriendCaption(item: row)
+                    Text([row.status.map(statusLabel),
+                          row.progress.map { "\($0)/\(row.total.map { String($0) } ?? "?")" },
+                          row.score.flatMap { $0 > 0 ? "\($0)/10" : nil }].compactMap { $0 }.joined(separator: " · "))
+                        .font(.subheadline).foregroundStyle(.secondary)
                 }
-                if checkingFriends { ProgressView("Checking friends") }
-                else {
-                    if friendRows.isEmpty { Text("No matching public entries loaded.").foregroundStyle(.secondary) }
-                    if friendsUnavailable { Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary) }
-                    if friendOffset < store.friends.count {
-                        Button("Check more friends") { Task { await loadFriendBatch() } }
-                    } else if friendsUnavailable && friendOffset == 0 {
-                        Button("Retry") { Task { await loadFriendBatch() } }
-                    }
+            }
+            if checkingFriends { ProgressView("Checking friends") }
+            else {
+                if friendsUnavailable { Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary) }
+                if friendOffset < store.friends.count {
+                    Button("Check more friends") { Task { await loadFriendBatch() } }
                 }
             }
         }
@@ -453,33 +445,30 @@ struct TitleScreen: View {
         block("Reviews") {
             Link("All reviews on MyAnimeList", destination: title.malURL.appending(path: "_/reviews"))
                 .font(.subheadline)
-            if reviews.isEmpty { Text(reviewFailed ? "Reviews are unavailable." : "No reviews loaded.").foregroundStyle(.secondary) }
-            if !reviews.isEmpty {
-                ScrollView(.horizontal) {
-                    LazyHStack(alignment: .top, spacing: 12) {
-                        ForEach(reviews) { review in
-                            Button { openReview = review } label: {
-                                VStack(alignment: .leading, spacing: 10) {
-                                    HStack(spacing: 8) {
-                                        Art(url: review.avatar, symbol: "person.fill")
-                                            .frame(width: 28, height: 28).clipShape(.circle)
-                                        Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    }
-                                    Text(review.spoiler ? "Show review with spoilers" : review.text)
-                                        .font(.subheadline).lineLimit(4)
-                                    if let tag = review.tag { Text(tag).font(.caption).foregroundStyle(.secondary) }
-                                    if let rating = review.rating, (1...10).contains(rating) {
-                                        Text("Reviewer rating: \(rating)/10").font(.caption).foregroundStyle(.secondary)
-                                    }
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 12) {
+                    ForEach(reviews) { review in
+                        Button { openReview = review } label: {
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack(spacing: 8) {
+                                    Art(url: review.avatar, symbol: "person.fill")
+                                        .frame(width: 28, height: 28).clipShape(.circle)
+                                    Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
                                 }
-                                .frame(width: 220, alignment: .leading)
-                                .padding(12)
-                                .ledgerPanel(radius: 14)
-                            }.buttonStyle(.plain)
-                        }
+                                Text(review.spoiler ? "Show review with spoilers" : review.text)
+                                    .font(.subheadline).lineLimit(4)
+                                if let tag = review.tag { Text(tag).font(.caption).foregroundStyle(.secondary) }
+                                if let rating = review.rating, (1...10).contains(rating) {
+                                    Text("Reviewer rating: \(rating)/10").font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                            .frame(width: 220, alignment: .leading)
+                            .padding(12)
+                            .ledgerPanel(radius: 14)
+                        }.buttonStyle(.plain)
                     }
-                }.scrollIndicators(.hidden)
-            }
+                }
+            }.scrollIndicators(.hidden)
         }
     }
 
@@ -544,8 +533,7 @@ struct TitleScreen: View {
         if let result = try? await reviewData {
             let items: [Fields] = result.read("data") ?? []
             reviews = Array(items.compactMap(TitleReview.init).prefix(3))
-            reviewFailed = false
-        } else { reviewFailed = true }
+        }
         if let result = try? await links {
             let data: Fields? = result.read("data")
             external = result.read("data") ?? data?.read("externalLinks") ?? []
@@ -582,16 +570,18 @@ struct TitleScreen: View {
         defer { if user == store.account { checkingFriends = false } }
         do {
             if store.friends.isEmpty { try await store.fetchFriends(user) }
-            let batch = Array(store.friends.dropFirst(friendOffset).prefix(6))
-            for friend in batch {
-                guard !Task.isCancelled, user == store.account else { return }
-                do {
-                    if let row = try await store.friendEntry(friend, current), user == store.account {
-                        friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
-                    }
-                } catch { if !Task.isCancelled { friendsUnavailable = true } }
-                if user == store.account { friendOffset += 1 }
-            }
+            repeat {
+                let batch = Array(store.friends.dropFirst(friendOffset).prefix(6))
+                for friend in batch {
+                    guard !Task.isCancelled, user == store.account else { return }
+                    do {
+                        if let row = try await store.friendEntry(friend, current), !Task.isCancelled, user == store.account {
+                            friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
+                        }
+                    } catch { if !Task.isCancelled { friendsUnavailable = true } }
+                    if user == store.account { friendOffset += 1 }
+                }
+            } while friendRows.isEmpty && friendOffset < store.friends.count
         } catch { if !Task.isCancelled { friendsUnavailable = true } }
     }
 }
