@@ -137,6 +137,14 @@ struct Title: Identifiable, Hashable, Codable {
         catalogStatus = fields.string("status")
     }
 
+    func fillingEnglishName(from cachedName: String?) -> Title {
+        guard englishName == nil, let cachedName else { return self }
+        var result = self
+        result.english = cachedName
+        result.name = cachedName
+        return result
+    }
+
     func fillingTitleAndImage(from other: Title?) -> Title {
         guard let other, id == other.id else { return self }
         var result = self

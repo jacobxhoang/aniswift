@@ -201,6 +201,7 @@ struct PreferredTitle<Content: View>: View {
     @EnvironmentObject private var store: Store
     let title: Title
     var loadMissingImage = false
+    var onEnglishName: ((Title, String) -> Void)? = nil
     @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
     @State private var attemptedID: String?
@@ -215,6 +216,9 @@ struct PreferredTitle<Content: View>: View {
         let item = current
         let waiting = item.needsTitleLookup && attemptedID != title.id && store.api.cachedTitle(title) == nil
         content(item, waiting ? "Loading title…" : item.name)
+            .onChange(of: item.englishName, initial: true) { _, name in
+                if let name { onEnglishName?(item, name) }
+            }
             .task(id: title) {
                 guard attemptedID != title.id,
                       item.needsTitleLookup || (loadMissingImage && item.image == nil) else { return }

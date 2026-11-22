@@ -16,6 +16,7 @@ final class Store: ObservableObject {
     @Published private(set) var friendFeedPage = 0
     @Published private var checkedFriends = 0
     @Published private var historyCursors: [FriendHistoryCursor] = []
+    @Published private var feedEnglishNames: [String: String] = [:]
 
     var hasMoreFriendActivity: Bool { checkedFriends < friends.count || !historyCursors.isEmpty }
     @Published private var profiles = ProfileCache.read()
@@ -145,6 +146,7 @@ final class Store: ObservableObject {
             checkedFriends = 0
             friendFeedPage = 0
             historyCursors = []
+            feedEnglishNames = [:]
             loadingFriends = false
             friendMessage = nil
             ListCache.remove()
@@ -168,13 +170,24 @@ final class Store: ObservableObject {
         checkedFriends = cache.checkedFriends
         historyCursors = cache.historyCursors
         friendFeedPage = cache.page
+        feedEnglishNames = cache.englishNames ?? [:]
+    }
+
+    func friendFeedTitle(_ title: Title) -> Title {
+        title.fillingEnglishName(from: feedEnglishNames[title.id])
+    }
+
+    func rememberFriendFeedEnglishName(_ name: String, for title: Title) {
+        guard account != nil, feedEnglishNames[title.id] != name else { return }
+        feedEnglishNames[title.id] = name
+        saveFriendFeed()
     }
 
     private func saveFriendFeed() {
         guard let account else { return }
         FriendFeedCache(accountID: account.id, friends: friends, activity: activity,
                         checkedFriends: checkedFriends, historyCursors: historyCursors,
-                        page: friendFeedPage).write()
+                        page: friendFeedPage, englishNames: feedEnglishNames).write()
     }
 
     func handle(_ error: Error) {
@@ -474,6 +487,8 @@ private struct FriendFeedCache: Codable {
     let checkedFriends: Int
     let historyCursors: [FriendHistoryCursor]
     let page: Int
+
+    let englishNames: [String: String]?
 
     private static let file = URL.cachesDirectory.appending(path: "AniLedger-friends-feed-v1.json")
 
