@@ -784,15 +784,10 @@ function summaryHtml(entry) {
     [entry.members ? Number(entry.members).toLocaleString() : '', 'Members', ''],
     [entry.favorites ? Number(entry.favorites).toLocaleString() : '', 'Favorites', ''],
   ].filter(([value]) => value).map(([value, label, note]) => `<div class="entry-stat"><b>${escape(String(value))}</b><span>${label}</span>${note ? `<small>${escape(note)}</small>` : ''}</div>`).join('');
-  const subtitle = [entry.alt, entry.japanese].filter(Boolean).join(' · ');
-  return `<div class="entry-top">${cover(entry)}<div class="entry-headline">
-    ${subtitle ? `<p class="entry-alt">${escape(subtitle)}</p>` : ''}
-    ${facts ? `<div class="entry-facts">${facts}</div>` : ''}
-    ${tiles ? `<div class="entry-stats">${tiles}</div>` : ''}
-  </div></div>`;
+  return `${tiles ? `<div class="entry-stats">${tiles}</div>` : ''}${facts ? `<div class="entry-facts">${facts}</div>` : ''}`;
 }
 
-function sectionsHtml(entry, extra = { characters: [], links: [], streaming: [] }) {
+function entryMetadata(entry) {
   const kind = entry.kind;
   const row = (label, value) => value ? `<tr><th scope="row">${label}</th><td>${value}</td></tr>` : '';
   const statistics = [
@@ -828,19 +823,23 @@ function sectionsHtml(entry, extra = { characters: [], links: [], streaming: [] 
     row('Romaji', escape(entry.alt || '')),
     row('Synonyms', escape((entry.synonyms || []).join(', '))),
   ].join('');
-  const linkList = (items) => items.map((link) => `<a href="${escape(link.url)}" target="_blank" rel="noopener">${escape(link.name)}</a>`).join('');
-  const characters = extra.characters.length ? `<section class="entry-section"><h3>Characters</h3><div class="cast-grid">${extra.characters.map((person) => {
+  const table = (label, rows) => rows ? `<section class="entry-section"><h3>${label}</h3><table class="info-table">${rows}</table></section>` : '';
+  return table('Alternative titles', titles) + table('Information', information) + table('Statistics', statistics);
+}
+
+function entryLinks(label, items) {
+  if (!items.length) return '';
+  const links = items.map((link) => `<a href="${escape(link.url)}" target="_blank" rel="noopener">${escape(link.name)}</a>`).join('');
+  return `<section class="entry-section"><h3>${label}</h3><div class="entry-links">${links}</div></section>`;
+}
+
+function entryCharacters(people, kind) {
+  if (!people.length) return '';
+  const cards = people.map((person) => {
     const image = safeImage(person.image);
     return `<a class="cast" href="https://myanimelist.net/character/${person.id}" target="_blank" rel="noopener"><span class="cast-image">${image ? `<img src="${escape(image)}" alt="" loading="lazy" decoding="async">` : ''}</span><span><strong>${escape(person.name)}</strong><small>${escape([person.role, person.voice].filter(Boolean).join(' · '))}</small></span></a>`;
-  }).join('')}</div></section>` : '';
-  const synopsis = entry.synopsis ? escape(entry.synopsis) : extra.detailFailed ? 'Synopsis is unavailable.' : 'Loading details…';
-  return `<section class="entry-section"><h3>Synopsis</h3><p>${synopsis}</p></section>
-    ${entry.background ? `<section class="entry-section"><h3>Background</h3><p>${escape(entry.background)}</p></section>` : ''}
-    ${titles ? `<section class="entry-section"><h3>Alternative Titles</h3><table class="info-table">${titles}</table></section>` : ''}
-    ${information || statistics ? `<div class="entry-columns">${information ? `<section class="entry-section"><h3>Information</h3><table class="info-table">${information}</table></section>` : ''}${statistics ? `<section class="entry-section"><h3>Statistics</h3><table class="info-table">${statistics}</table></section>` : ''}</div>` : ''}
-    ${characters}
-    ${extra.links.length ? `<section class="entry-section"><h3>External Links</h3><p class="entry-links">${linkList(extra.links)}</p></section>` : ''}
-    ${extra.streaming.length ? `<section class="entry-section"><h3>Where to Watch</h3><p class="entry-links">${linkList(extra.streaming)}</p></section>` : ''}`;
+  }).join('');
+  return `<section class="entry-section"><h3>${kind === 'anime' ? 'Characters &amp; voice actors' : 'Characters'}</h3><div class="cast-grid">${cards}</div></section>`;
 }
 
 function relatedCards(items) {
@@ -980,18 +979,36 @@ async function showEntry(kind, number) {
   }
   if (!active()) return;
   const entry = registry.get(id);
-  const extra = { characters: [], links: [], streaming: [], detailFailed: true };
-  const paint = () => {
-    if (!active()) return;
-    view.querySelector('[data-sections]').innerHTML = sectionsHtml(entry, extra);
-  };
+  const subtitle = [entry.alt, entry.title, entry.japanese].find((value) => value && value !== displayTitle(entry));
   document.title = `${displayTitle(entry)} | AniLedger`;
-  view.innerHTML = `<div class="entry-breadcrumb"><a href="/#${kind}">${label}</a><span aria-hidden="true"> / </span><span>Details</span></div>
-    <header class="page-heading entry-heading"><h1 data-entry-heading>${escape(displayTitle(entry))}</h1></header>
-    <article class="panel entry-page"><div data-summary>${summaryHtml(entry)}</div><div data-actions></div><div data-sections>${sectionsHtml(entry, extra)}</div>
-    <section class="entry-section entry-extra"><h3>Friends’ List Activity</h3><div data-entry-friends></div></section>
-    ${kind === 'anime' ? `<div data-entry-themes class="entry-extra">${themeSections()}</div>` : ''}
-    <div data-entry-relations class="entry-extra"></div></article>`;
+  view.innerHTML = `<div class="entry-breadcrumb"><a href="/#${kind}">${label}</a><span aria-hidden="true"> / </span><span>Title details</span></div>
+    <header class="page-heading entry-heading"><div><h1 data-entry-heading>${escape(displayTitle(entry))}</h1>${subtitle ? `<p>${escape(subtitle)}</p>` : ''}</div></header>
+    <article class="panel entry-page" aria-label="Title details">
+      <div class="entry-cover">${cover(entry, '', true)}</div>
+      <aside class="entry-metadata" aria-label="Title information">${entryMetadata(entry)}<div data-entry-links></div><div data-entry-streaming></div></aside>
+      <div class="entry-main"><div class="entry-overview">
+        <nav class="entry-jumps" aria-label="On this page">
+          <a href="#synopsis">Synopsis</a><a href="#related" data-entry-jump hidden>Related entries</a><a href="#characters" data-entry-jump hidden>Characters</a>
+          ${kind === 'anime' ? '<a href="#themes">Themes</a>' : ''}<a href="#friends-activity">Friends</a>
+        </nav>
+        <div class="entry-overview-card"><div data-summary>${summaryHtml(entry)}</div><div data-actions></div></div>
+      </div>
+      <div class="entry-content">
+        <section id="synopsis" class="entry-section"><h3>Synopsis</h3><p class="entry-prose">${escape(entry.synopsis || 'Synopsis is unavailable.')}</p></section>
+        ${entry.background ? `<section class="entry-section"><h3>Background</h3><p class="entry-prose">${escape(entry.background)}</p></section>` : ''}
+        <div id="related" data-entry-relations></div>
+        <div id="characters" data-entry-characters></div>
+        ${kind === 'anime' ? `<div id="themes" data-entry-themes>${themeSections()}</div>` : ''}
+        <section id="friends-activity" class="entry-section"><h3>Friends’ list activity</h3><div data-entry-friends></div></section>
+      </div>
+    </div></article>`;
+  const revealJump = (name) => {
+    view.querySelector(`[href="#${name}"]`).hidden = false;
+    if (location.hash === `#${name}`) document.getElementById(name)?.scrollIntoView();
+  };
+  if (['#synopsis', '#themes', '#friends-activity'].includes(location.hash)) {
+    document.getElementById(location.hash.slice(1))?.scrollIntoView();
+  }
   let friendOwner;
   let actionState;
   page.refreshAccount = () => {
@@ -1039,6 +1056,7 @@ async function showEntry(kind, number) {
       const more = region.querySelector('[data-related-more]');
       if (event.target.open && !more.hasChildNodes()) void fillCovers(more, items.slice(6));
     });
+    revealJump('related');
     await fillCovers(region.querySelector('[data-related-main]'), items.slice(0, 6));
   };
   const loadThemes = async () => {
@@ -1059,18 +1077,26 @@ async function showEntry(kind, number) {
   const load = async (path, apply) => {
     try {
       const { data } = await catalog(path);
-      apply(data);
-      paint();
+      if (active()) apply(data);
     } catch {
       // A section without data stays hidden; the rest of the page still renders.
     }
   };
   await Promise.allSettled([
-    load(`/${entry.kind}/${entry.id}/characters`, (data) => { extra.characters = cast(data); }),
+    load(`/${entry.kind}/${entry.id}/characters`, (data) => {
+      const people = cast(data);
+      if (!people.length) return;
+      view.querySelector('[data-entry-characters]').innerHTML = entryCharacters(people, kind);
+      revealJump('characters');
+    }),
     loadRelations(),
     loadThemes(),
-    load(`/${entry.kind}/${entry.id}/external`, (data) => { extra.links = externalLinks(data); }),
-    entry.kind === 'anime' ? load(`/anime/${entry.id}/streaming`, (data) => { extra.streaming = externalLinks(data); }) : Promise.resolve(),
+    load(`/${entry.kind}/${entry.id}/external`, (data) => {
+      view.querySelector('[data-entry-links]').innerHTML = entryLinks('External links', externalLinks(data));
+    }),
+    kind === 'anime' ? load(`/anime/${entry.id}/streaming`, (data) => {
+      view.querySelector('[data-entry-streaming]').innerHTML = entryLinks('Streaming platforms', externalLinks(data));
+    }) : Promise.resolve(),
   ]);
 }
 
