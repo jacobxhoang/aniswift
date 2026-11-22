@@ -6,6 +6,7 @@ final class Store: ObservableObject {
     @Published var account: Account?
     @Published var checking = true
     @Published var message: String?
+    @Published private(set) var organization = ListOrganization()
     @Published private var savedLists: [Kind: SavedList] = [:]
     @Published private(set) var refreshingLists: Set<Kind> = []
     @Published var friends: [Friend] = []
@@ -64,6 +65,7 @@ final class Store: ObservableObject {
     func restore() async {
         if api.hasSession, let cache = ListCache.read() {
             account = cache.account
+            organization = readOrganization(for: cache.account)
             savedLists = cache.lists
             checking = false
         }
@@ -97,6 +99,7 @@ final class Store: ObservableObject {
     private func setAccount(_ user: Account?) {
         if account?.id != user?.id || user == nil {
             accountGeneration = UUID()
+            organization = user.map { readOrganization(for: $0) } ?? ListOrganization()
             listRevisions = [:]
             pagingLists = []
             refreshingLists = []
@@ -185,8 +188,11 @@ final class Store: ObservableObject {
     func change(_ title: Title, _ change: ListChange?) async throws {
         guard account != nil else { return }
         let generation = accountGeneration
-        try await api.save(title, change: change)
+        let response = try await api.save(title, change: change)
         guard accountGeneration == generation else { return }
+        if change?.details != nil, (response.read("details") as ListDetails?) == nil {
+            throw APIError(status: 0, message: "The server could not confirm the updated list details.")
+        }
 
         let kind = title.kind
         listRevisions[kind, default: 0] += 1
@@ -196,9 +202,36 @@ final class Store: ObservableObject {
         snapshot.items.removeAll { $0.id == title.id }
         if let change {
             let savedTitle = previous?.title.fillingTitleAndImage(from: title) ?? title
-            snapshot.items.insert(ListEntry(title: savedTitle, change: change), at: 0)
+            snapshot.items.insert(ListEntry(title: savedTitle, change: change, previous: previous, response: response), at: 0)
         }
         updateList(kind, snapshot)
+    }
+
+    func organize(_ title: Title, lists selected: Set<UUID>, adding newLists: [CustomTitleList],
+                  hidden: Bool, accountID: Int) {
+        guard account?.id == accountID else { return }
+        var updated = organization
+        updated.lists += newLists
+        for index in updated.lists.indices {
+            let contains = updated.lists[index].titles.contains { $0.id == title.id }
+            if selected.contains(updated.lists[index].id) {
+                if !contains { updated.lists[index].titles.append(title) }
+            } else if contains {
+                updated.lists[index].titles.removeAll { $0.id == title.id }
+            }
+        }
+        if hidden { updated.hidden.insert(title.id) }
+        else { updated.hidden.remove(title.id) }
+        guard let data = try? JSONEncoder().encode(updated) else { return }
+        UserDefaults.standard.set(data, forKey: organizationKey(accountID))
+        organization = updated
+    }
+
+    private func organizationKey(_ accountID: Int) -> String { "aniledger.organization.v1.\(accountID)" }
+
+    private func readOrganization(for user: Account) -> ListOrganization {
+        guard let data = UserDefaults.standard.data(forKey: organizationKey(user.id)) else { return ListOrganization() }
+        return (try? JSONDecoder().decode(ListOrganization.self, from: data)) ?? ListOrganization()
     }
 
     private func updateList(_ kind: Kind, _ snapshot: SavedList) {

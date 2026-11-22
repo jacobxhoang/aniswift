@@ -214,7 +214,7 @@ async function getAnimeSuggestions(call) {
 }
 
 async function getList(call, kind, page) {
-  const fields = `list_status,mean,media_type,alternative_titles,${kind === 'anime' ? 'num_episodes' : 'num_chapters'}`;
+  const fields = `list_status{${listStatusFields(kind)}},mean,media_type,alternative_titles,${kind === 'anime' ? 'num_episodes' : 'num_chapters'}`;
   const params = new URLSearchParams({ fields, limit: '100', offset: String((page - 1) * 100), sort: 'list_updated_at', nsfw: 'true' });
   const response = await call(`/users/@me/${kind}list?${params}`);
   const { data, paging } = await response.json();
@@ -222,11 +222,54 @@ async function getList(call, kind, page) {
     entries: data.map(({ node, list_status: item }) => ({
       id: node.id, kind, title: node.title, englishTitle: node.alternative_titles?.en?.trim() || null, image: node.main_picture?.large || node.main_picture?.medium,
       type: node.media_type?.toUpperCase(), score: node.mean, total: node.num_episodes || node.num_chapters || null,
-      status: item.status, progress: item.num_episodes_watched ?? item.num_chapters_read ?? 0,
-      rating: item.score, updated: item.updated_at,
+      ...listStatus(item),
     })),
     hasNext: Boolean(paging?.next),
   };
+}
+
+function listStatusFields(kind) {
+  const progress = kind === 'anime' ? 'num_episodes_watched,num_times_rewatched' : 'num_chapters_read,num_times_reread';
+  return `status,score,updated_at,start_date,finish_date,comments,${progress}`;
+}
+
+function listStatus(item) {
+  return {
+    status: item.status, progress: item.num_episodes_watched ?? item.num_chapters_read ?? 0,
+    rating: item.score, updated: item.updated_at,
+    details: {
+      repeatCount: item.num_times_rewatched ?? item.num_times_reread ?? 0,
+      startDate: item.start_date || '', finishDate: item.finish_date || '', notes: item.comments || '',
+    },
+  };
+}
+
+async function getListEntry(call, kind, id) {
+  const params = new URLSearchParams({ fields: `my_list_status{${listStatusFields(kind)}}` });
+  const response = await call(`/${kind}/${id}?${params}`);
+  const { my_list_status: item } = await response.json();
+  return { entry: item?.status ? listStatus(item) : null };
+}
+
+function appendListDetails(params, kind, details) {
+  if (details === undefined) return;
+  const validDate = (date) => typeof date === 'string' && (date === '' ||
+    (/^\d{4}-\d{2}-\d{2}$/.test(date) && Number.isFinite(Date.parse(date)) &&
+      new Date(date).toISOString().slice(0, 10) === date));
+  if (!details || typeof details !== 'object' || Array.isArray(details) ||
+      (details.repeatCount !== undefined && !within(details.repeatCount, 100000)) ||
+      (details.startDate !== undefined && !validDate(details.startDate)) ||
+      (details.finishDate !== undefined && !validDate(details.finishDate)) ||
+      (details.notes !== undefined && (typeof details.notes !== 'string' ||
+        new TextEncoder().encode(details.notes).length > 4000))) {
+    throw new MalError('Choose valid dates, repeat count, and notes.', 400);
+  }
+  if (details.repeatCount !== undefined) {
+    params.set(kind === 'anime' ? 'num_times_rewatched' : 'num_times_reread', String(details.repeatCount));
+  }
+  if (details.startDate !== undefined) params.set('start_date', details.startDate);
+  if (details.finishDate !== undefined) params.set('finish_date', details.finishDate);
+  if (details.notes !== undefined) params.set('comments', details.notes);
 }
 
 async function writeList(request, call, kind, id) {
@@ -247,12 +290,11 @@ async function writeList(request, call, kind, id) {
     throw new MalError('Choose a valid status, progress and score.', 400);
   }
   const progress = kind === 'anime' ? 'num_watched_episodes' : 'num_chapters_read';
-  const response = await call(path, {
-    method: 'PUT',
-    body: new URLSearchParams({ status: input.status, score: String(input.rating), [progress]: String(input.progress) }),
-  });
+  const params = new URLSearchParams({ status: input.status, score: String(input.rating), [progress]: String(input.progress) });
+  appendListDetails(params, kind, input.details);
+  const response = await call(path, { method: 'PUT', body: params });
   const saved = await response.json();
-  return { status: saved.status, progress: saved.num_episodes_watched ?? saved.num_chapters_read ?? input.progress, rating: saved.score, updated: saved.updated_at };
+  return listStatus(saved);
 }
 
 async function readListUpdate(request) {
@@ -266,7 +308,7 @@ async function readListUpdate(request) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 4096) {
+      if (size > 32768) {
         await reader.cancel();
         throw new MalError('The list update is too large.', 413);
       }
@@ -308,6 +350,7 @@ export default {
         const [, kind, id] = match;
         const page = Math.min(1000, Math.max(1, Number.parseInt(url.searchParams.get('page'), 10) || 1));
         if (!id && method === 'GET') return withMal(request, env, session, (call) => getList(call, kind, page), mobile);
+        if (id && method === 'GET') return withMal(request, env, session, (call) => getListEntry(call, kind, id), mobile);
         if (id && ['PUT', 'DELETE'].includes(method)) return withMal(request, env, session, (call) => writeList(request, call, kind, id), mobile);
       }
       return json({ error: 'Route not found.' }, 404);

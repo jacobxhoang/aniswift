@@ -133,7 +133,10 @@ struct ListsScreen: View {
         _collapsed = State(initialValue: Set(kind.statuses.dropFirst().dropLast()))
     }
 
-    private var entries: [ListEntry] { store.lists[kind, default: []] }
+    private var entries: [ListEntry] {
+        let entries = store.lists[kind, default: []]
+        return searchTerm.isEmpty ? entries.filter { !store.organization.hidden.contains($0.id) } : entries
+    }
     private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var removalPresented: Binding<Bool> {
         Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })

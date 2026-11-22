@@ -210,9 +210,16 @@ final class API {
         return entries.compactMap { Title($0, kind: .anime) }
     }
 
-    func save(_ title: Title, change: ListChange?) async throws {
+    func listEntry(_ title: Title) async throws -> ListEntry? {
+        let response = try await privateRequest("api/lists/\(title.kind.rawValue)/\(title.malID)")
+        let entry: Fields? = response.read("entry")
+        return entry.map { ListEntry($0, title: title) }
+    }
+
+    func save(_ title: Title, change: ListChange?) async throws -> Fields {
         let body = try change.map { try JSONEncoder().encode($0) }
-        _ = try await privateRequest("api/lists/\(title.kind.rawValue)/\(title.malID)", method: change == nil ? "DELETE" : "PUT", body: body)
+        return try await privateRequest("api/lists/\(title.kind.rawValue)/\(title.malID)",
+                                        method: change == nil ? "DELETE" : "PUT", body: body)
     }
 }
 

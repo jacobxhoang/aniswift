@@ -227,10 +227,15 @@ private struct PortraitCard: View {
             Art(url: image, symbol: "person.fill")
                 .aspectRatio(2 / 3, contentMode: .fit)
                 .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
-            Text(name).font(.subheadline).foregroundStyle(.primary).lineLimit(2)
-            if !detail.isEmpty {
-                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
+            Text(name)
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+                .lineLimit(2, reservesSpace: true)
+            Text(detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2, reservesSpace: true)
+                .accessibilityHidden(detail.isEmpty)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

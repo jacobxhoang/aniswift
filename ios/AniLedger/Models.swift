@@ -133,29 +133,60 @@ struct Title: Identifiable, Hashable, Codable {
     }
 }
 
+struct ListDetails: Codable, Equatable {
+    var repeatCount = 0
+    var startDate = ""
+    var finishDate = ""
+    var notes = ""
+
+    func changes(from original: Self) -> ListDetailPatch? {
+        guard self != original else { return nil }
+        return ListDetailPatch(
+            repeatCount: repeatCount == original.repeatCount ? nil : repeatCount,
+            startDate: startDate == original.startDate ? nil : startDate,
+            finishDate: finishDate == original.finishDate ? nil : finishDate,
+            notes: notes == original.notes ? nil : notes
+        )
+    }
+}
+
+struct ListDetailPatch: Encodable {
+    let repeatCount: Int?
+    let startDate: String?
+    let finishDate: String?
+    let notes: String?
+}
+
 struct ListEntry: Identifiable, Codable, Equatable {
     let title: Title
     let status: String
     let progress: Int
     let rating: Int
     let updated: String
+    let details: ListDetails?
     var id: String { title.id }
 
-    init(title: Title, change: ListChange) {
+    init(title: Title, change: ListChange, previous: ListEntry?, response: Fields) {
         self.title = title
-        status = change.status
-        progress = change.progress
-        rating = change.rating
-        updated = Date().ISO8601Format()
+        status = response.string("status") ?? change.status
+        progress = response.read("progress") ?? change.progress
+        rating = response.read("rating") ?? change.rating
+        updated = response.string("updated") ?? Date().ISO8601Format()
+        details = response.read("details") ?? previous?.details
     }
 
     init?(_ fields: Fields, kind: Kind) {
         guard let title = Title(fields, kind: kind) else { return nil }
+        self.init(fields, title: title)
+    }
+
+    init(_ fields: Fields, title: Title) {
         self.title = title
-        status = fields.string("status") ?? kind.statuses.last!
+        status = fields.string("status") ?? title.kind.statuses.last!
         progress = fields.read("progress") ?? 0
         rating = fields.read("rating") ?? 0
         updated = fields.string("updated") ?? ""
+        details = fields.read("details")
     }
 }
 
@@ -163,6 +194,18 @@ struct ListChange: Encodable {
     var status: String
     var progress: Int
     var rating: Int
+    var details: ListDetailPatch? = nil
+}
+
+struct CustomTitleList: Identifiable, Codable {
+    var id = UUID()
+    let name: String
+    var titles: [Title] = []
+}
+
+struct ListOrganization: Codable {
+    var lists: [CustomTitleList] = []
+    var hidden: Set<String> = []
 }
 
 struct Account: Codable, Equatable {

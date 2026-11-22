@@ -315,6 +315,7 @@ struct AccountScreen: View {
                         Button("Retry loading favorites") { Task { await loadProfile(refresh: true) } }
                             .padding(.horizontal, LedgerLayout.inset)
                     }
+                    customListsLink
                     ForEach(Kind.allCases) { kind in favoriteShelf(kind) }
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
@@ -367,6 +368,38 @@ struct AccountScreen: View {
             await loadProfile()
         }
         .refreshable { await loadProfile(refresh: true) }
+    }
+
+    @ViewBuilder
+    private var customListsLink: some View {
+        if !store.organization.lists.isEmpty {
+            NavigationLink {
+                List(store.organization.lists) { collection in
+                    NavigationLink {
+                        List(collection.titles) { title in
+                            NavigationLink(value: title) { TitleRow(title: title, note: title.kind.label) }
+                                .listRowBackground(Color.clear)
+                        }
+                        .overlay {
+                            if collection.titles.isEmpty {
+                                ContentUnavailableView("No titles in this list", systemImage: "list.bullet")
+                            }
+                        }
+                        .scrollContentBackground(.hidden)
+                        .background(Palette.background)
+                        .navigationTitle(collection.name)
+                    } label: {
+                        LabeledContent(collection.name, value: collection.titles.count.formatted())
+                    }
+                    .listRowBackground(Color.clear)
+                }
+                .scrollContentBackground(.hidden)
+                .background(Palette.background)
+                .navigationTitle("Custom Lists")
+            } label: { Label("Custom Lists", systemImage: "list.bullet.rectangle") }
+            .ledgerGlassButton()
+            .padding(.horizontal, LedgerLayout.inset)
+        }
     }
 
     private func profileHeader(_ user: Account) -> some View {

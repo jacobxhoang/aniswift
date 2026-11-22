@@ -339,7 +339,7 @@ struct TitleScreen: View {
             if characters.count > 12 {
                 NavigationLink {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 12)], spacing: 18) {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 18) {
                             ForEach(characters) { CastCard(member: $0) }
                         }
                         .padding(LedgerLayout.inset)
@@ -605,22 +605,29 @@ struct ListEditor: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dismiss) private var dismiss
     let title: Title
-    let original: ListEntry?
     let mode: Mode
+    @State private var original: ListEntry?
     @State private var change: ListChange
+    @State private var details: ListDetails
+    @State private var ready: Bool
+    @State private var loading = false
+    @State private var selectedLists: Set<UUID> = []
+    @State private var newLists: [CustomTitleList] = []
+    @State private var hidden = false
+    @State private var organizationLoaded = false
+    @State private var creatingList = false
+    @State private var newListName = ""
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var error: String?
 
     init(title: Title, original: ListEntry?, mode: Mode = .full) {
         self.title = title
-        self.original = original
         self.mode = mode
-        _change = State(initialValue: ListChange(
-            status: original?.status ?? title.kind.statuses.last!,
-            progress: original?.progress ?? 0,
-            rating: original?.rating ?? 0
-        ))
+        _original = State(initialValue: original)
+        _change = State(initialValue: Self.listChange(title, original))
+        _details = State(initialValue: original?.details ?? ListDetails())
+        _ready = State(initialValue: original != nil && (mode != .full || original?.details != nil))
     }
 
     private var total: Int? {
@@ -631,48 +638,39 @@ struct ListEditor: View {
 
     private var heading: String {
         switch mode {
-        case .full: original == nil ? "Add to My List" : "Edit list entry"
+        case .full: ready && original == nil ? "Add to My List" : "Edit"
         case .status: "Status"
         case .progress: title.kind.unit
         case .score: "My score"
         }
     }
 
+    private var remoteChanged: Bool {
+        guard let original else { return true }
+        return original.status != change.status || original.progress != change.progress ||
+            original.rating != change.rating || (mode == .full && details != (original.details ?? ListDetails()))
+    }
+
+    private var originalListIDs: Set<UUID> {
+        Set(store.organization.lists.filter { list in list.titles.contains { $0.id == title.id } }.map(\.id))
+    }
+
+    private var organizationChanged: Bool {
+        !newLists.isEmpty || selectedLists != originalListIDs || hidden != store.organization.hidden.contains(title.id)
+    }
+
     private var saveDisabled: Bool {
-        busy || !(0...maximumProgress).contains(change.progress)
-            || (original.map {
-                $0.status == change.status && $0.progress == change.progress && $0.rating == change.rating
-            } ?? false)
+        !ready || busy || !(0...maximumProgress).contains(change.progress) ||
+            (mode == .full && details.notes.utf8.count > 4000) ||
+            (!remoteChanged && (mode != .full || !organizationChanged))
     }
 
     var body: some View {
         NavigationStack {
             Group {
-                if mode == .full {
-                    Form {
-                        Section(title.name) {
-                            statusPicker
-                            Stepper(value: $change.progress, in: 0...maximumProgress) {
-                                LabeledContent(title.kind.unit) {
-                                    TextField("Progress", value: $change.progress, format: .number)
-                                        .keyboardType(.numberPad)
-                                        .multilineTextAlignment(.trailing)
-                                        .frame(minWidth: 54)
-                                }
-                            }
-                            Stepper(value: $change.rating, in: 0...10) {
-                                LabeledContent("Score", value: change.rating == 0 ? "Unscored" : "\(change.rating)/10")
-                            }
-                        }
-                        if let error { Label(error, systemImage: "exclamationmark.circle") }
-                        if original != nil {
-                            Button("Remove from My List", role: .destructive) { confirmRemoval = true }
-                        }
-                    }
-                    .scrollContentBackground(.hidden)
-                } else {
-                    quickEditor
-                }
+                if !ready { preparation }
+                else if mode == .full { fullEditor }
+                else { quickEditor }
             }
             .navigationTitle(heading)
             .navigationBarTitleDisplayMode(.inline)
@@ -692,7 +690,163 @@ struct ListEditor: View {
                 Button("Remove", role: .destructive) { submit(nil) }
                 Button("Cancel", role: .cancel) {}
             }
+            .alert("Create Custom List", isPresented: $creatingList) {
+                TextField("List name", text: $newListName)
+                Button("Create") { createList() }
+                Button("Cancel", role: .cancel) {}
+            }
             .interactiveDismissDisabled(busy)
+            .task {
+                if mode == .full, !organizationLoaded {
+                    selectedLists = originalListIDs
+                    hidden = store.organization.hidden.contains(title.id)
+                    organizationLoaded = true
+                }
+                if !ready { await prepare() }
+            }
+        }
+    }
+
+    private var preparation: some View {
+        VStack(spacing: 12) {
+            if let error, !loading {
+                Text(error).foregroundStyle(.secondary)
+                Button("Retry") { Task { await prepare() } }.ledgerGlassButton()
+            } else {
+                ProgressView("Loading list entry")
+            }
+        }
+        .padding(LedgerLayout.inset)
+    }
+
+    private var fullEditor: some View {
+        Form {
+            Section {
+                statusPicker
+                numberRow("Score", value: $change.rating, range: 0...10)
+                numberRow(title.kind.unit, value: $change.progress, range: 0...maximumProgress)
+                numberRow(title.kind == .anime ? "Total rewatches" : "Total rereads",
+                          value: $details.repeatCount, range: 0...100_000)
+            }
+            Section("Dates") {
+                dateRow("Start Date", value: $details.startDate)
+                dateRow("Finish Date", value: $details.finishDate)
+            }
+            Section("Notes") {
+                TextField("Add notes for \(title.name)", text: $details.notes, axis: .vertical)
+                    .lineLimit(4...10)
+                if details.notes.utf8.count > 4000 {
+                    Text("Notes are too long.").foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                HStack {
+                    Text("Custom Lists")
+                    Spacer()
+                    Button("Create") {
+                        newListName = ""
+                        creatingList = true
+                    }.ledgerGlassButton()
+                }
+                ForEach(store.organization.lists + newLists) { list in
+                    Toggle(list.name, isOn: Binding(
+                        get: { selectedLists.contains(list.id) },
+                        set: { if $0 { selectedLists.insert(list.id) } else { selectedLists.remove(list.id) } }
+                    ))
+                }
+                Toggle("Hide from status lists", isOn: $hidden)
+            } header: {
+                Text("Organization")
+            } footer: {
+                Text("Custom lists and visibility are saved on this device. Hidden entries can still be found through search.")
+            }
+            if let error { Label(error, systemImage: "exclamationmark.circle") }
+            if original != nil {
+                Button("Remove from My List", role: .destructive) { confirmRemoval = true }
+            }
+        }
+        .scrollContentBackground(.hidden)
+        .disabled(busy)
+    }
+
+    private func numberRow(_ label: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
+        Stepper(value: value, in: range) {
+            LabeledContent(label) {
+                TextField(label, value: value, format: .number)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .monospacedDigit()
+                    .frame(minWidth: 50)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func dateRow(_ label: String, value: Binding<String>) -> some View {
+        if value.wrappedValue.isEmpty {
+            LabeledContent(label) {
+                Button("Set") { value.wrappedValue = dayFormatter.string(from: Date()) }
+                    .ledgerGlassButton()
+                    .accessibilityLabel("Set \(label.lowercased())")
+            }
+        } else {
+            HStack {
+                DatePicker(label, selection: Binding(
+                    get: { dayFormatter.date(from: value.wrappedValue) ?? Date() },
+                    set: { value.wrappedValue = dayFormatter.string(from: $0) }
+                ), displayedComponents: .date)
+                Button {
+                    value.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .accessibilityLabel("Clear \(label.lowercased())")
+            }
+        }
+    }
+
+    private var dayFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }
+
+    private static func listChange(_ title: Title, _ entry: ListEntry?) -> ListChange {
+        ListChange(status: entry?.status ?? title.kind.statuses.last!,
+                   progress: entry?.progress ?? 0, rating: entry?.rating ?? 0)
+    }
+
+    private func prepare() async {
+        guard !loading else { return }
+        loading = true
+        error = nil
+        defer { loading = false }
+        do {
+            let entry = try await store.api.listEntry(title)
+            guard !Task.isCancelled else { return }
+            original = entry
+            details = entry?.details ?? ListDetails()
+            change = Self.listChange(title, entry)
+            ready = true
+        } catch {
+            if !Task.isCancelled { self.error = error.localizedDescription }
+        }
+    }
+
+    private func createList() {
+        let name = newListName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        if let existing = (store.organization.lists + newLists).first(where: {
+            $0.name.localizedCaseInsensitiveCompare(name) == .orderedSame
+        }) {
+            selectedLists.insert(existing.id)
+        } else {
+            let list = CustomTitleList(name: name)
+            newLists.append(list)
+            selectedLists.insert(list.id)
         }
     }
 
@@ -772,11 +926,20 @@ struct ListEditor: View {
     }
 
     private func submit(_ value: ListChange?) {
+        guard let accountID = store.account?.id else { return }
+        guard value == nil || !saveDisabled else { return }
+        let shouldUpdateMAL = value == nil || remoteChanged
+        let shouldOrganize = value != nil && mode == .full && organizationChanged
+        var update = value
+        if mode == .full { update?.details = details.changes(from: original?.details ?? ListDetails()) }
         busy = true
         Task {
             defer { busy = false }
             do {
-                try await store.change(title, value)
+                if shouldUpdateMAL { try await store.change(title, update) }
+                if shouldOrganize {
+                    store.organize(title, lists: selectedLists, adding: newLists, hidden: hidden, accountID: accountID)
+                }
                 dismiss()
             } catch {
                 if (error as? APIError)?.status == 401 { store.handle(error) }
