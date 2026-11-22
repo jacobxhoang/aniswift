@@ -44,9 +44,14 @@ struct TitleScreen: View {
             .frame(maxWidth: 760)
             .frame(maxWidth: .infinity)
         }
-        .background(Palette.background)
+        .background(Palette.canvas)
         .navigationTitle(current.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                ShareLink(item: API.backend.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
+            }
+        }
         .task { await load() }
         .task(id: store.account?.id) {
             friendRows = []
@@ -61,9 +66,9 @@ struct TitleScreen: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 16) {
+        HStack(alignment: .center, spacing: 16) {
             Art(url: current.image ?? title.image).frame(width: 106, height: 150)
-                .clipShape(.rect(cornerRadius: 10))
+                .clipShape(.rect(cornerRadius: 12))
             VStack(alignment: .leading, spacing: 8) {
                 Text(current.name).font(.title2.bold()).fixedSize(horizontal: false, vertical: true)
                 if current.original != current.name { Text(current.original).font(.subheadline).foregroundStyle(.secondary) }
@@ -79,6 +84,22 @@ struct TitleScreen: View {
             }
             Spacer(minLength: 0)
         }
+        .padding(14)
+        .background {
+            ZStack {
+                Palette.surface
+                Art(url: current.image ?? title.image)
+                    .blur(radius: 34)
+                    .opacity(0.40)
+                LinearGradient(colors: [.black.opacity(0.20), .black.opacity(0.57)],
+                               startPoint: .topLeading, endPoint: .bottomTrailing)
+            }
+            .clipShape(.rect(cornerRadius: 20))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 20).strokeBorder(.white.opacity(0.12))
+                .allowsHitTesting(false)
+        }
     }
 
     private var actions: some View {
@@ -87,13 +108,17 @@ struct TitleScreen: View {
             else if store.account != nil {
                 Button { editor = true } label: {
                     Label(saved == nil ? "Add to My List" : "Edit My List Entry", systemImage: saved == nil ? "plus" : "pencil")
-                }.buttonStyle(.borderedProminent)
+                }.ledgerProminentButton()
                 if let saved {
                     Text("\(statusLabel(saved.status)) · \(saved.progress) \(title.kind.unit.lowercased())")
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             } else { SignInButton() }
-            Link("View on MyAnimeList", destination: title.malURL).font(.subheadline)
+            Link(destination: title.malURL) {
+                Label("MyAnimeList", systemImage: "arrow.up.right")
+            }
+            .font(.subheadline)
+            .ledgerGlassButton()
         }
     }
 
@@ -253,7 +278,7 @@ struct TitleScreen: View {
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.surface, in: .rect(cornerRadius: 12))
+        .ledgerPanel(radius: 14)
     }
 
     private func load() async {

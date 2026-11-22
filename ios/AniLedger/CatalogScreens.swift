@@ -32,7 +32,7 @@ struct HomeScreen: View {
                 }
                 .padding()
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.surface, in: .rect(cornerRadius: 14))
+                .ledgerPanel()
                 .padding(.horizontal)
                 Rail(name: "This season", titles: season)
                 Rail(name: store.account == nil ? "Anime suggestions" : "My AnimeList suggestions", titles: anime, empty: animeHint)
@@ -41,7 +41,7 @@ struct HomeScreen: View {
                 ranking("Top upcoming anime", titles: upcoming)
             }.padding(.vertical)
         }
-        .background(Palette.background)
+        .background(Palette.canvas)
         .navigationTitle("AniLedger")
         .task { await loadCatalog() }
         .task(id: suggestionsKey) { if !store.checking { await loadSuggestions() } }
@@ -161,6 +161,8 @@ struct ListsScreen: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Palette.canvas)
         .navigationTitle("My Lists")
         .onChange(of: kind) { _, _ in status = "all" }
         .refreshable { await store.loadLists(force: true) }
@@ -221,7 +223,7 @@ struct DiscoverScreen: View {
         }
         .navigationTitle("Discover")
         .searchable(text: $search, prompt: "Search anime or manga")
-        .background(Palette.background)
+        .background(Palette.canvas)
         .task(id: "\(kind)-\(mode)-\(search)-\(year)-\(season)-\(reload)") {
             await load(reset: true)
         }
@@ -295,6 +297,8 @@ struct FriendsScreen: View {
                 }
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Palette.canvas)
         .navigationTitle("Friends")
         .task(id: store.account?.id) { if store.checkedFriends == 0 { await store.loadFriends() } }
         .refreshable { await store.loadFriends(reset: true) }

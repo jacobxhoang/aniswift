@@ -8,6 +8,30 @@ struct AniLedgerApp: App {
 
     var body: some Scene {
         WindowGroup {
+            rootTabs
+            .tint(Palette.accent)
+            .preferredColorScheme(.dark)
+            .environmentObject(store)
+            .task { await store.restore() }
+            .alert("AniLedger", isPresented: Binding(
+                get: { store.message != nil }, set: { if !$0 { store.message = nil } }
+            )) { Button("OK", role: .cancel) {} }
+            message: { Text(store.message ?? "") }
+        }
+    }
+
+    @ViewBuilder
+    private var rootTabs: some View {
+        if #available(iOS 26.0, *) {
+            TabView {
+                Tab("Home", systemImage: "house") { stack { HomeScreen() } }
+                Tab("My Lists", systemImage: "checklist") { stack { ListsScreen() } }
+                Tab("Discover", systemImage: "safari") { stack { DiscoverScreen() } }
+                Tab("Friends", systemImage: "person.2") { stack { FriendsScreen() } }
+                Tab("Account", systemImage: "person.crop.circle") { stack { AccountScreen() } }
+            }
+            .tabBarMinimizeBehavior(.onScrollDown)
+        } else {
             TabView {
                 stack { HomeScreen() }
                     .tabItem { Label("Home", systemImage: "house") }
@@ -20,14 +44,6 @@ struct AniLedgerApp: App {
                 stack { AccountScreen() }
                     .tabItem { Label("Account", systemImage: "person.crop.circle") }
             }
-            .tint(Palette.accent)
-            .preferredColorScheme(.dark)
-            .environmentObject(store)
-            .task { await store.restore() }
-            .alert("AniLedger", isPresented: Binding(
-                get: { store.message != nil }, set: { if !$0 { store.message = nil } }
-            )) { Button("OK", role: .cancel) {} }
-            message: { Text(store.message ?? "") }
         }
     }
 
@@ -43,6 +59,54 @@ enum Palette {
     static let background = Color(red: 0.055, green: 0.085, blue: 0.13)
     static let surface = Color(red: 0.09, green: 0.14, blue: 0.21)
     static let accent = Color(red: 0.58, green: 0.83, blue: 0.99)
+    static let glow = Color(red: 0.12, green: 0.22, blue: 0.38)
+
+    static var canvas: some View {
+        ZStack {
+            background
+            RadialGradient(colors: [glow.opacity(0.8), background], center: .topTrailing,
+                           startRadius: 0, endRadius: 570)
+        }
+        .ignoresSafeArea()
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func ledgerProminentButton() -> some View {
+        if #available(iOS 26.0, *) {
+            buttonStyle(.glassProminent)
+        } else {
+            buttonStyle(.borderedProminent)
+        }
+    }
+
+    @ViewBuilder
+    func ledgerGlassButton() -> some View {
+        if #available(iOS 26.0, *) {
+            buttonStyle(.glass)
+        } else {
+            buttonStyle(.bordered)
+        }
+    }
+
+    @ViewBuilder
+    func ledgerGlassBadge() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular, in: .capsule)
+        } else {
+            background(.ultraThinMaterial, in: .capsule)
+        }
+    }
+
+    func ledgerPanel(radius: CGFloat = 16) -> some View {
+        background(.thinMaterial, in: .rect(cornerRadius: radius))
+            .overlay {
+                RoundedRectangle(cornerRadius: radius)
+                    .strokeBorder(.white.opacity(0.08))
+                    .allowsHitTesting(false)
+            }
+    }
 }
 
 struct Art: View {
@@ -81,7 +145,8 @@ struct CoverTile: View {
                         if let score = title.score, score > 0 {
                             Text(score.formatted(.number.precision(.fractionLength(2))))
                                 .font(.caption2.monospacedDigit().weight(.semibold))
-                                .padding(6).background(.black.opacity(0.75), in: .capsule).padding(5)
+                                .padding(.horizontal, 7).padding(.vertical, 5)
+                                .ledgerGlassBadge().padding(6)
                         }
                     }
                 Text(title.name).font(.subheadline.weight(.semibold)).lineLimit(2, reservesSpace: true)
@@ -148,7 +213,7 @@ struct SignInButton: View {
             if working { ProgressView() } else { Label("Sign in with MyAnimeList", systemImage: "person.crop.circle") }
         }
         .disabled(working)
-        .buttonStyle(.borderedProminent)
+        .ledgerProminentButton()
     }
 }
 
@@ -185,6 +250,9 @@ struct AccountScreen: View {
                 Link("Tenrai", destination: URL(string: "https://tenrai.org")!)
                 Link("Jikan Edge", destination: URL(string: "https://jikan.lucashdo.com")!)
             }
-        }.navigationTitle("Account")
+        }
+        .scrollContentBackground(.hidden)
+        .background(Palette.canvas)
+        .navigationTitle("Account")
     }
 }
