@@ -662,8 +662,7 @@ struct FriendsScreen: View {
                 }
                 ForEach(store.activity) { item in
                     PreferredTitle(title: item.title) { title in
-                        NavigationLink(value: title) { feedRow(item, title: title) }
-                            .buttonStyle(.plain)
+                        feedRow(item, title: title)
                     }
                         .listRowInsets(EdgeInsets(top: 9, leading: LedgerLayout.inset, bottom: 9, trailing: LedgerLayout.inset))
                         .listRowBackground(Color.clear)
@@ -695,20 +694,45 @@ struct FriendsScreen: View {
     }
 
     private func feedRow(_ item: FriendUpdate, title: Title) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            Art(url: item.friend.avatar, symbol: "person.fill").frame(width: 46, height: 46)
-                .clipShape(.rect(cornerRadius: 7))
-            VStack(alignment: .leading, spacing: 6) {
-                Text("\(Text(item.friend.name).bold()) \(activityPhrase(item)) \(Text(title.name).bold())")
-                    .font(.subheadline)
+        let profile = URL(string: "https://myanimelist.net/profile/\(item.friend.name)")!
+        return HStack(alignment: .top, spacing: 10) {
+            Link(destination: profile) {
+                Art(url: item.friend.avatar, symbol: "person.fill")
+                    .frame(width: 46, height: 46)
+                    .clipShape(.rect(cornerRadius: 7))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(item.friend.name)’s MyAnimeList profile")
+
+            VStack(alignment: .leading, spacing: 4) {
+                Link(destination: profile) {
+                    Text(item.friend.name).font(.subheadline.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint("Opens their MyAnimeList profile")
+
+                NavigationLink(value: title) {
+                    Text("\(activityPhrase(item)) \(Text(title.name).bold())")
+                        .font(.subheadline)
+                        .multilineTextAlignment(.leading)
+                }
+                .buttonStyle(.plain)
+
                 let details = [item.score.flatMap { $0 > 0 ? "\($0)/10" : nil }, item.date.map { displayDate($0) }]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                 if !details.isEmpty { Text(details).font(.caption).foregroundStyle(.secondary) }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Art(url: title.image).frame(width: 48, height: 68).clipShape(.rect(cornerRadius: 5))
+
+            NavigationLink(value: title) {
+                Art(url: title.image).frame(width: 48, height: 68)
+                    .clipShape(.rect(cornerRadius: 5))
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open \(title.name)")
         }
-        .accessibilityElement(children: .combine)
     }
 
     private func activityPhrase(_ item: FriendUpdate) -> String {
