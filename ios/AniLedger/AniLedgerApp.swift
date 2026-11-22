@@ -811,11 +811,19 @@ private struct ProfileStatistics: View {
 
     var body: some View {
         ForEach(Kind.allCases) { kind in
-            if let details = stats?.details(for: kind) {
+            if let details = visibleDetails(for: kind) {
                 ProfileStatisticsSection(kind: kind, stats: details)
                     .padding(.horizontal, LedgerLayout.inset)
             }
         }
+    }
+
+    private func visibleDetails(for kind: Kind) -> ProfileMediaStats? {
+        guard let stats, let details = stats.details(for: kind) else { return nil }
+        let count = kind == .anime ? stats.animeCount : stats.mangaCount
+        let isEmpty = count.map { $0 == 0 }
+            ?? kind.statuses.allSatisfy { details.statusCounts[$0] == 0 }
+        return isEmpty ? nil : details
     }
 }
 
