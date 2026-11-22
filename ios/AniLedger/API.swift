@@ -82,7 +82,10 @@ final class API {
     private var cached: [URL: (Date, Fields)] = [:]
     private var catalogRequests: [URL: Task<Fields, Error>] = [:]
     private let catalogCacheLimit = 160
-    private var nextTitleLookup = ContinuousClock().now
+    private var titleLookups: [String: Task<Title?, Never>] = [:]
+    private var activeTitleLookups = 0
+    private var titleLookupWaiters: [CheckedContinuation<Void, Never>] = []
+    private let titleLookupLimit = 6
 
     static func url(_ base: URL, _ path: String, _ query: [URLQueryItem] = []) -> URL {
         let url = base.appending(path: path)
@@ -153,19 +156,41 @@ final class API {
     }
 
     func resolveTitle(_ title: Title) async -> Title? {
-        let path = "\(title.kind.rawValue)/\(title.malID)"
-        while !Task.isCancelled {
+        guard !Task.isCancelled else { return nil }
+        if let cached = cachedTitle(title) { return cached }
+        if let pending = titleLookups[title.id] { return await pending.value }
+
+        let lookup = Task<Title?, Never> {
+            await acquireTitleLookupSlot()
+            defer { releaseTitleLookupSlot() }
+
             if let cached = cachedTitle(title) { return cached }
-            let now = ContinuousClock().now
-            if now >= nextTitleLookup {
-                nextTitleLookup = now.advanced(by: .milliseconds(270))
-                guard let response = try? await catalog(path), let fields: Fields = response.read("data") else { return nil }
-                return Title(fields, kind: title.kind)
-            }
-            do { try await Task.sleep(until: nextTitleLookup, clock: .continuous) }
-            catch { return nil }
+            let path = "\(title.kind.rawValue)/\(title.malID)"
+            guard let response = try? await catalog(path),
+                  let fields: Fields = response.read("data") else { return nil }
+            return Title(fields, kind: title.kind)
         }
-        return nil
+        titleLookups[title.id] = lookup
+        defer { titleLookups[title.id] = nil }
+        return await lookup.value
+    }
+
+    private func acquireTitleLookupSlot() async {
+        if activeTitleLookups < titleLookupLimit {
+            activeTitleLookups += 1
+        } else {
+            await withCheckedContinuation { continuation in
+                titleLookupWaiters.append(continuation)
+            }
+        }
+    }
+
+    private func releaseTitleLookupSlot() {
+        if titleLookupWaiters.isEmpty {
+            activeTitleLookups -= 1
+        } else {
+            titleLookupWaiters.removeFirst().resume()
+        }
     }
 
     // Serialize authenticated requests so refresh-token rotation and list edits stay ordered.

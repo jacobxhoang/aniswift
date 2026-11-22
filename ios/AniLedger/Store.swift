@@ -396,22 +396,29 @@ final class Store: ObservableObject {
     }
 
     private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
-        let limit = 50
-        let result = try await api.catalog("users/\(cursor.friend.name)/\(cursor.kind.rawValue)list", [
-            URLQueryItem(name: "page", value: String(cursor.page)),
+        let result = try await publicListPage(cursor.friend, kind: cursor.kind, page: cursor.page)
+        return Page(items: result.items.filter { $0.date != nil }, more: result.more)
+    }
+
+    func publicListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int = 50) async throws -> Page<FriendUpdate> {
+        let result = try await api.catalog("users/\(friend.name)/\(kind.rawValue)list", [
+            URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "limit", value: String(limit))
         ])
         let data: Fields? = result.read("data")
-        let rows: [Fields] = result.read("data") ?? data?.read("entries") ?? []
+        guard let rows: [Fields] = result.read("data") ?? data?.read("entries") else {
+            throw APIError(status: 0, message: "Could not load this list.")
+        }
         let meta: Fields? = result.read("meta")
         let pagination: Fields? = meta?.read("pagination") ?? result.read("pagination")
-        let more: Bool = pagination?.read("hasNextPage", "has_next_page") ?? (rows.count == limit)
-        let updates = rows.compactMap { row -> FriendUpdate? in
-            guard row.string("updatedAt", "updated_at") != nil,
-                  let title = Title(row, kind: cursor.kind) else { return nil }
-            return FriendUpdate(friend: cursor.friend, title: title, fields: row)
+        let hasNext: Bool? = pagination?.read("hasNextPage", "has_next_page")
+        let total: Int? = data?.read("total")
+        let more = hasNext ?? (total.map { $0 > page * limit } ?? (rows.count == limit))
+        let entries = rows.compactMap { row -> FriendUpdate? in
+            guard let title = Title(row, kind: kind) else { return nil }
+            return FriendUpdate(friend: friend, title: title, fields: row)
         }
-        return Page(items: updates, more: more)
+        return Page(items: entries, more: more)
     }
 
     private func sortedFriendActivity(_ items: [FriendUpdate]) -> [FriendUpdate] {

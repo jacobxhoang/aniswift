@@ -528,6 +528,18 @@ struct FriendProfileScreen: View {
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 }
+                HStack(spacing: 12) {
+                    ForEach(Kind.allCases) { kind in
+                        NavigationLink {
+                            FriendMediaListScreen(friend: friend, kind: kind)
+                        } label: {
+                            Label("\(kind.label) List", systemImage: kind == .anime ? "film" : "books.vertical")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .ledgerGlassButton()
+                    }
+                }
+                .padding(.horizontal, LedgerLayout.inset)
                 ProfileStatistics(stats: profile.stats?.value)
                 recentUpdates
                 ForEach(Kind.allCases) { kind in
@@ -617,6 +629,85 @@ struct FriendProfileScreen: View {
         defer { loading = false }
         let loaded = await store.loadProfile(friend.name, refresh: refresh)
         if !Task.isCancelled { unavailable = !loaded }
+    }
+}
+
+private struct FriendMediaListScreen: View {
+    @EnvironmentObject private var store: Store
+    let friend: Friend
+    let kind: Kind
+
+    @State private var entries: [FriendUpdate] = []
+    @State private var nextPage: Int? = 1
+    @State private var loading = false
+    @State private var errorMessage: String?
+    @State private var isPrivate = false
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(entries) { entry in
+                    NavigationLink(value: store.friendFeedTitle(entry.title)) {
+                        TitleRow(title: store.friendFeedTitle(entry.title), note: detail(for: entry))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.vertical, 9)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    Divider()
+                }
+
+                if let errorMessage {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(errorMessage).foregroundStyle(.secondary)
+                        if !isPrivate {
+                            Button("Retry") { Task { await load() } }.ledgerGlassButton()
+                        }
+                    }
+                    .padding(.vertical, 12)
+                } else if let nextPage {
+                    NextPageIndicator(label: "Loading \(kind.rawValue) list", page: nextPage) { await load() }
+                } else if entries.isEmpty {
+                    ContentUnavailableView("No \(kind.rawValue) in this list",
+                                           systemImage: kind == .anime ? "film" : "books.vertical")
+                }
+            }
+            .padding(.horizontal, LedgerLayout.inset)
+            .frame(maxWidth: 800)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("\(friend.name)’s \(kind.label) List")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func detail(for entry: FriendUpdate) -> String {
+        var details: [String] = []
+        if let status = entry.status { details.append(statusLabel(status)) }
+        if let progress = entry.progress, progress > 0 {
+            let count = entry.total.flatMap { $0 > 0 ? "\(progress) / \($0)" : nil } ?? progress.formatted()
+            details.append("\(count) \(kind.unit.lowercased())")
+        }
+        if let score = entry.score, score > 0 { details.append("★ \(score)/10") }
+        return details.joined(separator: " · ")
+    }
+
+    private func load() async {
+        guard let page = nextPage, !loading else { return }
+        loading = true
+        errorMessage = nil
+        defer { loading = false }
+        do {
+            let result = try await store.publicListPage(friend, kind: kind, page: page)
+            guard !Task.isCancelled else { return }
+            entries = unique(entries + result.items)
+            nextPage = result.more ? page + 1 : nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            let status = (error as? APIError)?.status
+            isPrivate = status == 401 || status == 403
+            errorMessage = isPrivate ? "This list is private." : "Could not load this list."
+        }
     }
 }
 
