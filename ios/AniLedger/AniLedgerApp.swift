@@ -643,42 +643,84 @@ private struct FriendMediaListScreen: View {
     @State private var errorMessage: String?
     @State private var isPrivate = false
 
-    var body: some View {
-        ScrollView {
-            LazyVStack(alignment: .leading, spacing: 0) {
-                ForEach(entries) { entry in
-                    NavigationLink(value: store.friendFeedTitle(entry.title)) {
-                        TitleRow(title: store.friendFeedTitle(entry.title), note: detail(for: entry))
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 9)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    Divider()
-                }
+    @State private var collapsed: Set<String>
+    private let unknownStatus = "other"
 
-                if let errorMessage {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text(errorMessage).foregroundStyle(.secondary)
-                        if !isPrivate {
-                            Button("Retry") { Task { await load() } }.ledgerGlassButton()
-                        }
-                    }
-                    .padding(.vertical, 12)
-                } else if let nextPage {
-                    NextPageIndicator(label: "Loading \(kind.rawValue) list", page: nextPage) { await load() }
-                } else if entries.isEmpty {
-                    ContentUnavailableView("No \(kind.rawValue) in this list",
-                                           systemImage: kind == .anime ? "film" : "books.vertical")
-                }
+    init(friend: Friend, kind: Kind) {
+        self.friend = friend
+        self.kind = kind
+        _collapsed = State(initialValue: Set(kind.statuses.dropFirst().dropLast()))
+    }
+
+    var body: some View {
+        List {
+            if !entries.isEmpty {
+                statusGroups
             }
-            .padding(.horizontal, LedgerLayout.inset)
-            .frame(maxWidth: 800)
-            .frame(maxWidth: .infinity)
+
+            if let errorMessage {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(errorMessage).foregroundStyle(.secondary)
+                    if !isPrivate {
+                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
+                    }
+                }
+                .padding(.vertical, 12)
+                .listRowBackground(Color.clear)
+            } else if let nextPage {
+                NextPageIndicator(label: "Loading \(kind.rawValue) list", page: nextPage) { await load() }
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else if entries.isEmpty {
+                ContentUnavailableView("No \(kind.rawValue) in this list",
+                                       systemImage: kind == .anime ? "film" : "books.vertical")
+                    .listRowBackground(Color.clear)
+            }
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("\(friend.name)’s \(kind.label) List")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var statusGroups: some View {
+        let groups = Dictionary(grouping: entries, by: groupKey)
+        let statuses = groups[unknownStatus] == nil ? kind.statuses : kind.statuses + [unknownStatus]
+        return ForEach(statuses, id: \.self) { status in
+            let group = groups[status, default: []]
+            let expanded = !collapsed.contains(status)
+            ListStatusHeader(title: statusLabel(status), count: group.count,
+                             expanded: expanded, partial: nextPage != nil) {
+                if expanded { collapsed.insert(status) }
+                else { collapsed.remove(status) }
+            }
+            .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+
+            if expanded {
+                ForEach(group) { entry in entryRow(entry) }
+            }
+        }
+    }
+
+    private func entryRow(_ entry: FriendUpdate) -> some View {
+        let title = store.friendFeedTitle(entry.title)
+        return NavigationLink(value: title) {
+            TitleRow(title: title, note: detail(for: entry))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+        }
+        .listRowBackground(Color.clear)
+    }
+
+    private func groupKey(_ entry: FriendUpdate) -> String {
+        guard let status = entry.status else { return unknownStatus }
+        let key = status.lowercased().split(whereSeparator: { $0.isWhitespace || $0 == "-" || $0 == "_" })
+            .joined(separator: "_")
+        return kind.statuses.contains(key) ? key : unknownStatus
     }
 
     private func detail(for entry: FriendUpdate) -> String {

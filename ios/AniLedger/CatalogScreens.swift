@@ -126,9 +126,49 @@ private struct ListStatusGlass: ViewModifier {
     }
 }
 
+struct ListStatusHeader: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let title: String
+    let count: Int
+    let expanded: Bool
+    let partial: Bool
+    var isInteractive = true
+    let toggle: () -> Void
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
+                toggle()
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Text(title).foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                Text("\(count)\(partial ? "+" : "")").monospacedDigit()
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: expanded)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 18)
+                    .accessibilityHidden(true)
+            }
+            .font(.subheadline)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .modifier(ListStatusGlass(isInteractive: isInteractive))
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+        .disabled(!isInteractive)
+    }
+}
+
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
@@ -240,35 +280,11 @@ struct ListsScreen: View {
     private func groupHeader(_ status: String, count: Int) -> some View {
         let expanded = !collapsed.contains(status) || !searchTerm.isEmpty
         let partial = store.nextList[kind] != nil && searchTerm.isEmpty
-        return Button {
-            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.24)) {
-                if expanded { collapsed.insert(status) }
-                else { collapsed.remove(status) }
-            }
-        } label: {
-            HStack(spacing: 12) {
-                Text(statusLabel(status)).foregroundStyle(.secondary)
-                Spacer(minLength: 8)
-                Text("\(count)\(partial ? "+" : "")").monospacedDigit()
-                Image(systemName: "chevron.right")
-                    .rotationEffect(.degrees(expanded ? 90 : 0))
-                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: expanded)
-                    .font(.footnote.weight(.medium))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 18)
-                    .accessibilityHidden(true)
-            }
-            .font(.subheadline)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .contentShape(Capsule())
+        return ListStatusHeader(title: statusLabel(status), count: count, expanded: expanded,
+                                partial: partial, isInteractive: searchTerm.isEmpty) {
+            if expanded { collapsed.insert(status) }
+            else { collapsed.remove(status) }
         }
-        .buttonStyle(.plain)
-        .modifier(ListStatusGlass(isInteractive: searchTerm.isEmpty))
-        .accessibilityAddTraits(.isHeader)
-        .accessibilityValue(expanded ? "Expanded" : "Collapsed")
-        .disabled(!searchTerm.isEmpty)
     }
 
     private func visibleEntries(_ group: [ListEntry]) -> [ListEntry] {
