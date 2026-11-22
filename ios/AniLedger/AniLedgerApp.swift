@@ -359,11 +359,6 @@ struct AccountScreen: View {
                         }
                     }
                 }
-                NavigationLink { HomeScreen() } label: {
-                    Label("Dashboard", systemImage: "rectangle.grid.2x2")
-                }
-                .ledgerGlassButton()
-                .padding(.horizontal, LedgerLayout.inset)
             }.padding(.vertical, 18).frame(maxWidth: 800).frame(maxWidth: .infinity)
         }
         .background(Palette.background.ignoresSafeArea())
