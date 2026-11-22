@@ -102,6 +102,8 @@ struct Title: Identifiable, Hashable, Codable {
     let format: String?
     let total: Int?
     let members: Int?
+    let synopsis: String?
+    let genres: [String]?
     var id: String { "\(kind.rawValue)-\(malID)" }
     var malURL: URL { URL(string: "https://myanimelist.net/\(kind.rawValue)/\(malID)")! }
 
@@ -121,6 +123,9 @@ struct Title: Identifiable, Hashable, Codable {
         let count: Int? = fields.read("episodes", "chapters", "total", "num_episodes", "num_chapters")
         total = count.flatMap { $0 > 0 ? $0 : nil }
         members = fields.read("members")
+        synopsis = fields.string("synopsis")
+        let genreRows: [Fields]? = fields.read("genres")
+        genres = (fields.read("genres") as [String]?) ?? genreRows?.compactMap { $0.string("name") }
     }
 
     func fillingTitleAndImage(from other: Title?) -> Title {

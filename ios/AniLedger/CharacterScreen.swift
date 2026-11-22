@@ -42,7 +42,8 @@ struct CastCard: View {
             let detail = inDirectory || showsRoleOnly ? (member.role ?? "") :
                 [member.role, member.actor].compactMap { $0 }.joined(separator: " · ")
             PortraitCard(image: member.character.image, name: member.character.name,
-                         detail: detail, inDirectory: inDirectory, compactCaption: showsRoleOnly)
+                         detail: detail, inDirectory: inDirectory, compactCaption: showsRoleOnly,
+                         posterWidth: showsRoleOnly ? LedgerLayout.detailPosterWidth : nil)
         }
         .buttonStyle(.plain)
     }
@@ -241,7 +242,7 @@ struct CharacterScreen: View {
     }
 
     private func voiceCard(_ voice: CharacterVoice) -> some View {
-        PortraitCard(image: voice.image, name: voice.name, detail: voice.language)
+        PortraitCard(image: voice.image, name: voice.name, detail: voice.language, posterWidth: LedgerLayout.posterWidth)
             .frame(width: LedgerLayout.posterWidth)
     }
 
@@ -295,13 +296,13 @@ private struct PortraitCard: View {
     let detail: String
     var inDirectory = false
     var compactCaption = false
+    var posterWidth: CGFloat?
 
     private var reservesCaptionSpace: Bool { !inDirectory && !compactCaption }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Art(url: image, symbol: "person.fill")
-                .aspectRatio(inDirectory ? 0.70 : (compactCaption ? LedgerLayout.detailPosterRatio : 2 / 3), contentMode: .fit)
+            PosterArt(url: image, symbol: "person.fill", width: posterWidth)
                 .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
             Text(name)
                 .font(inDirectory ? .body : .subheadline)

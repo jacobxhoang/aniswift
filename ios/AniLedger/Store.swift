@@ -256,14 +256,19 @@ final class Store: ObservableObject {
             let batch = Array(friends.dropFirst(checkedFriends).prefix(6))
             var updates: [FriendUpdate] = []
             for friend in batch {
-                guard account == user else { return }
+                guard !Task.isCancelled, account == user else { return }
                 do { updates += try await publicUpdates(friend, refresh: reset) }
-                catch { friendMessage = "Some friends’ public activity is unavailable." }
+                catch {
+                    guard !Task.isCancelled, account == user else { return }
+                    friendMessage = "Some friends’ public activity is unavailable."
+                }
             }
-            guard account == user else { return }
+            guard !Task.isCancelled, account == user else { return }
             checkedFriends += batch.count
             activity = unique(activity + updates).sorted { activityDate($0.date) > activityDate($1.date) }
-        } catch { friendMessage = error.localizedDescription }
+        } catch {
+            if !Task.isCancelled, account == user { friendMessage = error.localizedDescription }
+        }
     }
 
     func fetchFriends(_ user: Account, refresh: Bool = false) async throws {

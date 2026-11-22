@@ -78,7 +78,7 @@ enum Palette {
 
 enum LedgerLayout {
     static let detailPosterWidth: CGFloat = 108
-    static let detailPosterRatio: CGFloat = 0.685
+    static let posterRatio: CGFloat = 0.685
     static let inset: CGFloat = 20
     static let gap: CGFloat = 12
     static let sectionGap: CGFloat = 28
@@ -219,11 +219,26 @@ struct PreferredTitle<Content: View>: View {
     }
 }
 
+struct PosterArt: View {
+    let url: URL?
+    let symbol: String
+    var width: CGFloat?
+
+    var body: some View {
+        if let width {
+            Art(url: url, symbol: symbol).frame(width: width, height: width / LedgerLayout.posterRatio)
+        } else {
+            Art(url: url, symbol: symbol).aspectRatio(LedgerLayout.posterRatio, contentMode: .fit)
+        }
+    }
+}
+
 struct CoverTile: View {
     let title: Title
     var showsScore = true
     var loadMissingImage = false
     var reservesCaptionSpace = true
+    var posterWidth: CGFloat?
 
     var body: some View {
         PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item in
@@ -234,8 +249,7 @@ struct CoverTile: View {
     private func tile(_ title: Title) -> some View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
-                Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
-                    .aspectRatio(reservesCaptionSpace ? 2 / 3 : LedgerLayout.detailPosterRatio, contentMode: .fit)
+                PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book", width: posterWidth)
                     .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
                     .overlay {
                         RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
@@ -272,7 +286,8 @@ struct Rail: View {
             } else {
                 LedgerShelf(inset: LedgerLayout.inset) {
                     ForEach(unique(titles)) { title in
-                        CoverTile(title: title, showsScore: false).frame(width: LedgerLayout.posterWidth)
+                        CoverTile(title: title, showsScore: false, posterWidth: LedgerLayout.posterWidth)
+                            .frame(width: LedgerLayout.posterWidth)
                     }
                 }
             }

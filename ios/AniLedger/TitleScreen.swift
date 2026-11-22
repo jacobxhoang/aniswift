@@ -21,6 +21,7 @@ struct TitleScreen: View {
     @State private var changingList = false
     @State private var friendRows: [FriendUpdate] = []
     @State private var friendOffset = 0
+    @State private var completedFriendBatches = 0
     @State private var checkingFriends = false
     @State private var friendsUnavailable = false
 
@@ -93,6 +94,7 @@ struct TitleScreen: View {
         .task(id: store.account?.id) {
             friendRows = []
             friendOffset = 0
+            completedFriendBatches = 0
             friendsUnavailable = false
             checkingFriends = false
             await loadFriendBatch()
@@ -395,7 +397,8 @@ struct TitleScreen: View {
 
     private func shelfCover(_ title: Title, note: String?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            CoverTile(title: title, showsScore: false, loadMissingImage: note != nil, reservesCaptionSpace: false)
+            CoverTile(title: title, showsScore: false, loadMissingImage: note != nil,
+                      reservesCaptionSpace: false, posterWidth: LedgerLayout.detailPosterWidth)
             if let note {
                 Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
             }
@@ -505,11 +508,12 @@ struct TitleScreen: View {
                         .font(.subheadline).foregroundStyle(.secondary)
                 }
             }
-            if checkingFriends { ProgressView("Checking friends") }
-            else {
-                if friendsUnavailable { Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary) }
-                if friendOffset < store.friends.count {
-                    Button("Check more friends") { Task { await loadFriendBatch() } }
+            if friendsUnavailable && !checkingFriends {
+                Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary)
+            }
+            if friendOffset < store.friends.count || checkingFriends {
+                NextPageIndicator(label: "Checking friends", page: completedFriendBatches) {
+                    await loadFriendBatch()
                 }
             }
         }
@@ -689,9 +693,11 @@ struct TitleScreen: View {
                             friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
                         }
                     } catch { if !Task.isCancelled { friendsUnavailable = true } }
-                    if user == store.account { friendOffset += 1 }
+                    guard !Task.isCancelled, user == store.account else { return }
+                    friendOffset += 1
                 }
             } while friendRows.isEmpty && friendOffset < store.friends.count
+            completedFriendBatches += 1
         } catch { if !Task.isCancelled { friendsUnavailable = true } }
     }
 }

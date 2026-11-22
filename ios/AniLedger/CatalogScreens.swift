@@ -133,6 +133,7 @@ struct ListsScreen: View {
     @State private var query = ""
     @State private var sort = ListSort.recent
     @State private var paging = false
+    @State private var listPageError: String?
     @State private var pendingRemoval: ListEntry?
     @State private var saving: Set<String> = []
     private let rowInset: CGFloat = 10
@@ -185,20 +186,22 @@ struct ListsScreen: View {
                         }
                     }
                 }
-                if !searchTerm.isEmpty && visibleEntries(entries).isEmpty {
-                    Text("No matches in your loaded list.").foregroundStyle(.secondary)
+                if !searchTerm.isEmpty && visibleEntries(entries).isEmpty && store.nextList[kind] == nil {
+                    Text("No matches in your list.").foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
                 }
                 if let page = store.nextList[kind] {
-                    Button(paging ? "Loading…" : "Load more entries") {
-                        Task {
-                            guard !paging else { return }
-                            paging = true
-                            defer { paging = false }
-                            do { try await store.loadList(kind, page: page) }
-                            catch { store.handle(error) }
+                    if let listPageError {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text(listPageError).foregroundStyle(.secondary)
+                            Button("Retry") { Task { await loadListPage(page) } }
                         }
-                    }.disabled(paging || store.refreshingLists.contains(kind)).listRowBackground(Color.clear)
+                        .listRowBackground(Color.clear)
+                    } else if !store.refreshingLists.contains(kind) {
+                        NextPageIndicator(label: "Loading entries", page: page) { await loadListPage(page) }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
                 }
             }
         }
@@ -221,8 +224,12 @@ struct ListsScreen: View {
         .scrollDismissesKeyboard(.interactively)
         .onChange(of: store.account?.id) { _, _ in
             query = ""
+            listPageError = nil
         }
-        .refreshable { await store.loadLists(force: true) }
+        .refreshable {
+            await store.loadLists(force: true)
+            listPageError = nil
+        }
         .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
             Button("Remove", role: .destructive) { update(item, change: nil) }
             Button("Cancel", role: .cancel) {}
@@ -317,16 +324,32 @@ struct ListsScreen: View {
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) { pendingRemoval = item } label: { Label("Remove", systemImage: "trash") }
+                .tint(.red)
                 .disabled(saving.contains(item.id))
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if (item.title.total ?? 0) <= 0 || item.progress < (item.title.total ?? 0) {
                 Button {
                     update(item, change: ListChange(status: item.status, progress: item.progress + 1, rating: item.rating))
-                } label: { Label("+1 progress", systemImage: "plus") }
-                .tint(.gray)
+                } label: { Label(kind == .anime ? "Episode" : "Chapter", systemImage: "plus") }
+                .tint(Color(red: 0.03, green: 0.57, blue: 0.08))
+                .accessibilityLabel(kind == .anime ? "Add one episode" : "Add one chapter")
                 .disabled(saving.contains(item.id))
             }
+        }
+    }
+
+    private func loadListPage(_ page: Int) async {
+        guard !paging, !store.refreshingLists.contains(kind), store.nextList[kind] == page else { return }
+        paging = true
+        defer { paging = false }
+        do {
+            try await store.loadList(kind, page: page)
+            listPageError = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            if (error as? APIError)?.status == 401 { store.handle(error) }
+            else { listPageError = "Could not load more entries." }
         }
     }
 
@@ -408,7 +431,7 @@ struct PosterShelf<Trailing: View>: View {
             LedgerShelf(inset: LedgerLayout.inset) {
                 ForEach(unique(titles)) { title in
                     VStack(alignment: .leading, spacing: 3) {
-                        CoverTile(title: title, showsScore: false)
+                        CoverTile(title: title, showsScore: false, reservesCaptionSpace: false, posterWidth: LedgerLayout.posterWidth)
                         if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
                             Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -557,6 +580,97 @@ struct CatalogFacetScreen: View {
     }
 }
 
+struct NextPageIndicator: View {
+    let label: String
+    let page: Int
+    let load: () async -> Void
+
+    var body: some View {
+        ProgressView().accessibilityLabel(label)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .task(id: page) { await load() }
+    }
+}
+
+private struct SearchResultCard: View {
+    let title: Title
+    @Environment(\.dynamicTypeSize) private var typeSize
+    @ScaledMetric(relativeTo: .body) private var posterWidth: CGFloat = 96
+
+    private var summary: String {
+        var values = [title.format ?? title.kind.label]
+        if let total = title.total {
+            let unit = title.kind == .anime ? "episode" : "chapter"
+            values.append("\(total) \(total == 1 ? unit : unit + "s")")
+        }
+        if let score = title.score, score > 0 {
+            values.append((score / 10).formatted(.percent.precision(.fractionLength(0))))
+        }
+        return values.joined(separator: " · ")
+    }
+
+    var body: some View {
+        PreferredTitle(title: title) { item in
+            NavigationLink(value: item) {
+                let layout = typeSize.isAccessibilitySize
+                    ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                    : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
+                layout {
+                    poster(item)
+                    details(item)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background {
+                    ZStack {
+                        Palette.surface
+                        if let image = item.image {
+                            Art(url: image)
+                                .overlay {
+                                    LinearGradient(colors: [.black.opacity(0.67), .black.opacity(0.95)],
+                                                   startPoint: .top, endPoint: .bottom)
+                                }
+                        }
+                    }
+                }
+                .clipShape(.rect(cornerRadius: 12))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(.white.opacity(0.18)).allowsHitTesting(false)
+                }
+                .contentShape(.rect(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private func poster(_ item: Title) -> some View {
+        PosterArt(url: item.image, symbol: item.kind == .anime ? "film" : "book", width: posterWidth)
+            .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+    }
+
+    private func details(_ item: Title) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(item.name).font(.headline).foregroundStyle(.white).lineLimit(2)
+            Text(summary).font(.footnote).foregroundStyle(.white.opacity(0.78))
+            if let synopsis = item.synopsis {
+                Text(synopsis).font(.subheadline).foregroundStyle(.white.opacity(0.82)).lineLimit(6)
+            }
+            if let genres = item.genres, !genres.isEmpty {
+                FlowLayout {
+                    ForEach(Array(genres.prefix(3)), id: \.self) { genre in
+                        Text(genre).font(.caption).foregroundStyle(.white)
+                            .padding(.horizontal, 8).padding(.vertical, 4)
+                            .background(.white.opacity(0.10), in: .capsule)
+                            .overlay { Capsule().strokeBorder(.white.opacity(0.38)) }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 private struct PosterResults: View {
     @EnvironmentObject private var store: Store
     let name: String
@@ -573,16 +687,26 @@ private struct PosterResults: View {
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 16) {
-                    ForEach(titles) { CoverTile(title: $0) }
+            LazyVStack(spacing: 16) {
+                if query.isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 16) {
+                        ForEach(titles) { CoverTile(title: $0) }
+                    }
+                } else {
+                    ForEach(titles) { SearchResultCard(title: $0) }
                 }
-                if loading { ProgressView().accessibilityLabel("Loading \(name)") }
-                else if failed {
+                if failed {
                     Text("Could not load \(name.lowercased()).").foregroundStyle(.secondary)
                     Button("Retry") { Task { await load() } }
-                } else if titles.isEmpty { Text("No titles found.").foregroundStyle(.secondary) }
-                if more && !loading && !failed { Button("Load more") { Task { await load() } } }
+                } else if more {
+                    NextPageIndicator(label: "Loading more titles", page: page) {
+                        if !loading { await load() }
+                    }
+                } else if loading {
+                    ProgressView().accessibilityLabel("Loading \(name)")
+                } else if titles.isEmpty {
+                    Text("No titles found.").foregroundStyle(.secondary)
+                }
             }.padding(18).frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
         .background(Palette.background)
@@ -641,7 +765,7 @@ struct CatalogBrowser: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            LazyVStack(alignment: .leading, spacing: 16) {
                 Picker("Media type", selection: $kind) {
                     ForEach(Kind.allCases) { Text($0.label).tag($0) }
                 }.pickerStyle(.segmented)
@@ -662,13 +786,28 @@ struct CatalogBrowser: View {
                         }
                     }
                 }
-                if let message { Text(message).foregroundStyle(.secondary); Button("Retry") { reload += 1 } }
-                if titles.isEmpty && !loading && message == nil { Text("No matching titles.").foregroundStyle(.secondary) }
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 12)], spacing: 14) {
-                    ForEach(titles) { CoverTile(title: $0) }
+                if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 12)], spacing: 14) {
+                        ForEach(titles) { CoverTile(title: $0) }
+                    }
+                } else {
+                    ForEach(titles) { SearchResultCard(title: $0) }
                 }
-                if loading { ProgressView().frame(maxWidth: .infinity) }
-                if next && !loading { Button("Load more") { Task { await load(reset: false) } } }
+                if let message {
+                    Text(message).foregroundStyle(.secondary)
+                    Button("Retry") {
+                        if page == 1 { reload += 1 }
+                        else { Task { await load(reset: false) } }
+                    }
+                } else if next {
+                    NextPageIndicator(label: "Loading more titles", page: page) {
+                        if !loading { await load(reset: false) }
+                    }
+                } else if loading {
+                    ProgressView().frame(maxWidth: .infinity)
+                } else if titles.isEmpty {
+                    Text("No matching titles.").foregroundStyle(.secondary)
+                }
             }.padding()
         }
         .navigationTitle("Browse catalog")
@@ -753,13 +892,14 @@ struct FriendsScreen: View {
                                 .padding(.horizontal, LedgerLayout.inset)
                         }
                     }
-                    if store.loadingFriends {
+                    if store.checkedFriends < store.friends.count {
+                        NextPageIndicator(label: "Loading friend activity", page: store.checkedFriends) {
+                            await store.loadFriends()
+                        }.padding(rowInsets)
+                    } else if store.loadingFriends {
                         ProgressView("Loading friend activity").padding(rowInsets)
                     } else if store.activity.isEmpty {
                         Text("No public friend updates loaded.").foregroundStyle(.secondary).padding(rowInsets)
-                    }
-                    if store.checkedFriends < store.friends.count && !store.loadingFriends {
-                        Button("Check more friends") { Task { await store.loadFriends() } }.padding(rowInsets)
                     }
                 }
             }
