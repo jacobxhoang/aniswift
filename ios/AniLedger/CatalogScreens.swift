@@ -570,6 +570,9 @@ struct CatalogFacet: Hashable, Identifiable {
             URLQueryItem(name: category.filter, value: String(id)),
             URLQueryItem(name: "page", value: String(page))
         ] + sort.queryItems
+        if !category.usesGenreIndex && sort == .newest {
+            filters.append(URLQueryItem(name: "nulls", value: "first"))
+        }
         if !query.isEmpty { filters.append(URLQueryItem(name: "q", value: query)) }
         return catalogPage(try await api.catalog(kind.rawValue, filters), kind: kind)
     }
@@ -604,13 +607,18 @@ struct CatalogFacetScreen: View {
         Group {
             if facet.category.usesGenreIndex {
                 results
+            } else if #available(iOS 26.0, *) {
+                results
+                    .searchable(text: $search, placement: .toolbar, prompt: "Search titles")
+                    .toolbar { DefaultToolbarItem(kind: .search, placement: .topBarTrailing) }
+                    .scrollDismissesKeyboard(.interactively)
             } else {
                 results
-                    .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(facet.name) titles")
+                    .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search titles")
                     .scrollDismissesKeyboard(.interactively)
             }
         }
-        .navigationTitle(facet.name)
+        .navigationTitle(facet.category.usesGenreIndex ? facet.name : "More from \(facet.name)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if facet.category.usesGenreIndex {
@@ -633,7 +641,7 @@ struct CatalogFacetScreen: View {
     private var results: some View {
         PosterResults(name: facet.name, shelf: nil,
                       query: search.trimmingCharacters(in: .whitespacesAndNewlines),
-                      kind: facet.kind, facet: facet, sort: sort)
+                      kind: facet.kind, facet: facet, sort: facet.category.usesGenreIndex ? sort : .newest)
     }
 }
 
@@ -728,6 +736,69 @@ private struct SearchResultCard: View {
     }
 }
 
+private enum ProducerPeriod: Hashable {
+    case announced
+    case year(Int)
+    case unknown
+
+    init(_ title: Title) {
+        if let year = title.releaseYear {
+            self = .year(year)
+        } else {
+            let status = title.catalogStatus?.lowercased().replacingOccurrences(of: "_", with: " ")
+            switch status {
+            case "not yet aired", "not yet published", "announced", "upcoming":
+                self = .announced
+            default:
+                self = .unknown
+            }
+        }
+    }
+
+    var heading: String {
+        switch self {
+        case .announced: "Announced"
+        case .year(let year): String(year)
+        case .unknown: "Year unknown"
+        }
+    }
+
+    var sortOrder: Int {
+        switch self {
+        case .announced: Int.max
+        case .year(let year): year
+        case .unknown: Int.min
+        }
+    }
+}
+
+private struct ProducerTitleRow: View {
+    let title: Title
+
+    var body: some View {
+        PreferredTitle(title: title) { item in
+            NavigationLink(value: item) {
+                HStack(alignment: .top, spacing: 8) {
+                    PosterArt(url: item.image, symbol: item.kind == .anime ? "film" : "book", width: 78)
+                        .clipShape(.rect(cornerRadius: 7))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(item.name).font(.body)
+                        if let total = item.total {
+                            let unit = item.kind == .anime ? "episode" : "chapter"
+                            Text("\(total) \(total == 1 ? unit : unit + "s") total")
+                                .font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.top, 4)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+    }
+}
+
 private struct PosterResults: View {
     @EnvironmentObject private var store: Store
     let name: String
@@ -743,10 +814,14 @@ private struct PosterResults: View {
     @State private var failed = false
     @State private var generation = UUID()
 
+    private var showsProducerRows: Bool { facet?.category.usesGenreIndex == false }
+
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
-                if query.isEmpty {
+            LazyVStack(spacing: showsProducerRows ? 8 : 16, pinnedViews: showsProducerRows ? .sectionHeaders : []) {
+                if showsProducerRows {
+                    producerSections
+                } else if query.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 16) {
                         ForEach(titles) { CoverTile(title: $0) }
                     }
@@ -765,7 +840,10 @@ private struct PosterResults: View {
                 } else if titles.isEmpty {
                     Text("No titles found.").foregroundStyle(.secondary)
                 }
-            }.padding(18).frame(maxWidth: 900).frame(maxWidth: .infinity)
+            }
+            .padding(.horizontal, showsProducerRows ? 8 : 18)
+            .padding(.vertical, showsProducerRows ? 4 : 18)
+            .frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
         .background(Palette.background)
         .task(id: "\(kind.rawValue)-\(sort.rawValue)-\(query)") {
@@ -774,6 +852,31 @@ private struct PosterResults: View {
             page = 1
             more = false
             await load()
+        }
+    }
+
+    private var producerSections: some View {
+        let groups = Dictionary(grouping: titles, by: ProducerPeriod.init)
+        let openPeriod = more ? titles.last.map(ProducerPeriod.init) : nil
+        return ForEach(groups.keys.sorted { $0.sortOrder > $1.sortOrder }, id: \.self) { period in
+            let items = groups[period, default: []]
+            Section {
+                ForEach(items) { ProducerTitleRow(title: $0) }
+            } header: {
+                HStack {
+                    Text(period.heading).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(items.count.formatted())\(period == openPeriod ? "+" : "")")
+                        .monospacedDigit()
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 38)
+                .modifier(ListStatusGlass(isInteractive: false))
+                .accessibilityElement(children: .combine)
+                .accessibilityAddTraits(.isHeader)
+                .padding(.vertical, 3)
+            }
         }
     }
 
