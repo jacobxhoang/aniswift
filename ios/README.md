@@ -26,11 +26,15 @@ xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
 - Full title pages with related entries, cast, themes for anime, public friend activity, and spoiler-aware reviews with reviewer ratings.
 - Public friends feed, profile access, and sign-out.
 
-## Backend
+## Direct MyAnimeList connection
 
-The app connects to `https://ani-ledger.onrender.com`. The hosted service must have the existing MyAnimeList OAuth environment variables and the mobile authentication routes in this revision. The existing HTTPS callback registered with MAL is used for both the website and the native app. No MyAnimeList client secret goes in the Xcode project.
+The iOS app calls MyAnimeList directly for authentication, personal lists, list edits, and personalized anime suggestions. Tenrai and Jikan Edge provide catalog data and public activity. List snapshots, artwork caches, and custom lists are stored on the device. The hosted AniLedger website uses its own web backend.
 
-The system authentication browser returns a short-lived encrypted handoff to the app. The app exchanges it using a device-generated verifier and stores the resulting session in Keychain. Signing out removes the local session. List edits require an internet connection.
+1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create a separate application with App Type `iOS`.
+2. Register the exact redirect URL `org.aniledger.ios://oauth`.
+3. In AniLedger, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser sign-in. To change it later, sign out and long-press the sign-in button.
+
+The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in the device-only Keychain. Existing hosted iOS sessions require one new sign-in. Never enter the website's client secret in the app. Sign-in, live list sync, and catalog updates require an internet connection.
 
 An unsigned simulator build can run on a Mac simulator. Installing on an iPhone or distributing through TestFlight requires signing with an Apple developer team.
 

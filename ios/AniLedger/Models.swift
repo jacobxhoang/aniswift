@@ -78,7 +78,8 @@ struct Fields: Decodable {
         let large = jpg?.string("large_image_url") ?? webp?.string("large_image_url") ?? images?.string("large")
         let standard = jpg?.string("image_url") ?? webp?.string("image_url")
         let direct = string("imageUrl", "image", "avatarUrl", "avatar", "picture")
-        return publicURL(large ?? standard ?? direct)
+        let mainPicture: Fields? = read("main_picture")
+        return publicURL(large ?? standard ?? mainPicture?.string("large", "medium") ?? direct)
     }
 }
 
@@ -116,8 +117,9 @@ struct Title: Identifiable, Hashable, Codable {
         sparseTitle = !fields.includesEnglishTitleField
         image = fields.image
         score = fields.read("score", "mean")
-        format = fields.string("type", "mediaType", "media_type")
-        total = fields.read("episodes", "chapters", "total")
+        format = fields.string("type", "mediaType") ?? fields.string("media_type")?.uppercased()
+        let count: Int? = fields.read("episodes", "chapters", "total", "num_episodes", "num_chapters")
+        total = count.flatMap { $0 > 0 ? $0 : nil }
         members = fields.read("members")
     }
 
@@ -166,27 +168,24 @@ struct ListEntry: Identifiable, Codable, Equatable {
     let details: ListDetails?
     var id: String { title.id }
 
-    init(title: Title, change: ListChange, previous: ListEntry?, response: Fields) {
+    init(_ fields: Fields, title: Title, fallback: ListChange? = nil, previous: ListEntry? = nil) {
         self.title = title
-        status = response.string("status") ?? change.status
-        progress = response.read("progress") ?? change.progress
-        rating = response.read("rating") ?? change.rating
-        updated = response.string("updated") ?? Date().ISO8601Format()
-        details = response.read("details") ?? previous?.details
-    }
+        status = fields.string("status") ?? fallback?.status ?? title.kind.statuses.last!
+        progress = fields.read("num_episodes_watched", "num_chapters_read") ?? fallback?.progress ?? 0
+        rating = fields.read("score") ?? fallback?.rating ?? 0
+        updated = fields.string("updated_at") ?? Date().ISO8601Format()
 
-    init?(_ fields: Fields, kind: Kind) {
-        guard let title = Title(fields, kind: kind) else { return nil }
-        self.init(fields, title: title)
-    }
-
-    init(_ fields: Fields, title: Title) {
-        self.title = title
-        status = fields.string("status") ?? title.kind.statuses.last!
-        progress = fields.read("progress") ?? 0
-        rating = fields.read("rating") ?? 0
-        updated = fields.string("updated") ?? ""
-        details = fields.read("details")
+        let prior = previous?.details ?? ListDetails()
+        let count: Int? = fields.read("num_times_rewatched", "num_times_reread")
+        let start: String? = fields.read("start_date")
+        let finish: String? = fields.read("finish_date")
+        let notes: String? = fields.read("comments")
+        details = ListDetails(
+            repeatCount: count ?? fallback?.details?.repeatCount ?? prior.repeatCount,
+            startDate: start ?? fallback?.details?.startDate ?? prior.startDate,
+            finishDate: finish ?? fallback?.details?.finishDate ?? prior.finishDate,
+            notes: notes ?? fallback?.details?.notes ?? prior.notes
+        )
     }
 }
 

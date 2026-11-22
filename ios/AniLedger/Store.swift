@@ -63,7 +63,8 @@ final class Store: ObservableObject {
     }
 
     func restore() async {
-        if api.hasSession, let cache = ListCache.read() {
+        guard api.hasSession else { checking = false; return }
+        if let cache = ListCache.read() {
             account = cache.account
             organization = readOrganization(for: cache.account)
             savedLists = cache.lists
@@ -85,7 +86,12 @@ final class Store: ObservableObject {
     }
 
     func connected(_ user: Account) async {
+        let cache = ListCache.read()
         setAccount(user)
+        if let cache, cache.account.id == user.id, savedLists.isEmpty {
+            savedLists = cache.lists
+            ListCache(account: user, lists: savedLists).write()
+        }
         await loadLists(force: true)
     }
 
@@ -190,19 +196,15 @@ final class Store: ObservableObject {
         let generation = accountGeneration
         let response = try await api.save(title, change: change)
         guard accountGeneration == generation else { return }
-        if change?.details != nil, (response.read("details") as ListDetails?) == nil {
-            throw APIError(status: 0, message: "The server could not confirm the updated list details.")
-        }
-
         let kind = title.kind
         listRevisions[kind, default: 0] += 1
         var snapshot = savedLists[kind] ?? SavedList(items: [], page: 0, more: true)
         snapshot.needsReconciliation = snapshot.more
         let previous = snapshot.items.first { $0.id == title.id }
         snapshot.items.removeAll { $0.id == title.id }
-        if let change {
+        if let change, let response {
             let savedTitle = previous?.title.fillingTitleAndImage(from: title) ?? title
-            snapshot.items.insert(ListEntry(title: savedTitle, change: change, previous: previous, response: response), at: 0)
+            snapshot.items.insert(ListEntry(response, title: savedTitle, fallback: change, previous: previous), at: 0)
         }
         updateList(kind, snapshot)
     }

@@ -72,7 +72,7 @@ struct TitleScreen: View {
                     .disabled(changingList)
                 }
                 Menu {
-                    ShareLink(item: API.backend.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
+                    ShareLink(item: API.website.appending(path: "\(title.kind.rawValue)/\(title.malID)"))
                     Link(destination: title.malURL) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
                     if store.account != nil, let saved {
                         if saved.status != "completed" {

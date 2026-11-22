@@ -279,23 +279,48 @@ struct TitleRow: View {
 struct SignInButton: View {
     @EnvironmentObject private var store: Store
     @State private var working = false
+    @State private var configuring = false
+    @State private var clientID = ""
 
     var body: some View {
         Button {
-            working = true
-            Task {
-                defer { working = false }
-                do {
-                    let account = try await store.api.signIn()
-                    await store.connected(account)
-                } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
-                } catch { store.handle(error) }
-            }
+            if let saved = store.api.configuredClientID { signIn(saved) }
+            else { configure() }
         } label: {
             if working { ProgressView() } else { Label("Sign in with MyAnimeList", systemImage: "person.crop.circle") }
         }
         .disabled(working)
         .ledgerProminentButton()
+        .contextMenu {
+            Button("Change MyAnimeList Client ID") { configure() }
+        }
+        .alert("MyAnimeList iOS Client ID", isPresented: $configuring) {
+            TextField("Client ID", text: $clientID)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Continue") { signIn(clientID) }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI). Enter its Client ID here.")
+        }
+    }
+
+    private func configure() {
+        clientID = store.api.configuredClientID ?? ""
+        configuring = true
+    }
+
+    private func signIn(_ clientID: String) {
+        guard !working else { return }
+        working = true
+        Task {
+            defer { working = false }
+            do {
+                let account = try await store.api.signIn(clientID: clientID)
+                await store.connected(account)
+            } catch let error as ASWebAuthenticationSessionError where error.code == .canceledLogin {
+            } catch { store.handle(error) }
+        }
     }
 }
 
@@ -507,8 +532,8 @@ private struct AboutScreen: View {
         List {
             Section("App") {
                 LabeledContent("Version", value: version).listRowBackground(Color.clear)
-                Link(destination: API.backend) {
-                    row("AniLedger website", detail: API.backend.host() ?? "", symbol: "arrow.up.right")
+                Link(destination: API.website) {
+                    row("AniLedger website", detail: API.website.host() ?? "", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)
             }

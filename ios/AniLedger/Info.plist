@@ -12,7 +12,7 @@
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>CFBundleURLTypes</key>
-    <array><dict><key>CFBundleURLName</key><string>org.aniledger.ios.auth</string><key>CFBundleURLSchemes</key><array><string>aniledger</string></array></dict></array>
+    <array><dict><key>CFBundleURLName</key><string>org.aniledger.ios.auth</string><key>CFBundleURLSchemes</key><array><string>org.aniledger.ios</string></array></dict></array>
     <key>LSRequiresIPhoneOS</key><true/>
     <key>UILaunchScreen</key><dict/>
     <key>UISupportedInterfaceOrientations</key>

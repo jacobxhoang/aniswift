@@ -1,5 +1,4 @@
 import AuthenticationServices
-import CryptoKit
 import Foundation
 import Security
 import UIKit
@@ -15,29 +14,44 @@ struct Page<Value> {
     let more: Bool
 }
 
+private struct MALSession: Codable {
+    let clientID: String
+    let accessToken: String
+    let refreshToken: String
+    let expiresAt: Date
+}
+
+private final class MALTransport: NSObject, URLSessionTaskDelegate {
+    // API and token endpoints are fixed. Never forward credentials through redirects.
+    func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest, completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+}
+
 private enum SessionKeychain {
     static let key: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
         kSecAttrService as String: "org.aniledger.ios",
-        kSecAttrAccount as String: "mal-session"
+        kSecAttrAccount as String: "mal-native-session"
     ]
 
-    static func read() -> String? {
+    static func read() -> MALSession? {
         var query = key
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
-        return String(data: data, encoding: .utf8)
+        return try? JSONDecoder().decode(MALSession.self, from: data)
     }
 
-    static func write(_ token: String?) throws {
-        guard let token else {
+    static func write(_ session: MALSession?) throws {
+        guard let session else {
             let status = SecItemDelete(key as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw failure() }
             return
         }
-        let value = [kSecValueData as String: Data(token.utf8)]
+        let value = [kSecValueData as String: try JSONEncoder().encode(session)]
         let status = SecItemUpdate(key as CFDictionary, value as CFDictionary)
         if status == errSecItemNotFound {
             var query = key.merging(value) { _, new in new }
@@ -53,10 +67,18 @@ private enum SessionKeychain {
 
 @MainActor
 final class API {
-    static let backend = URL(string: "https://ani-ledger.onrender.com")!
+    static let website = URL(string: "https://ani-ledger.onrender.com")!
+    static let callbackScheme = "org.aniledger.ios"
+    static let redirectURI = "\(callbackScheme)://oauth"
+    private static let mal = URL(string: "https://api.myanimelist.net/v2")!
+    private static let oauth = URL(string: "https://myanimelist.net/v1/oauth2")!
+    private static let clientIDKey = "aniledger.mal.nativeClientID"
     private let tenrai = URL(string: "https://api.tenrai.org/v1")!
     private let jikan = URL(string: "https://jikan.lucashdo.com/v1")!
-    private var token = SessionKeychain.read()
+    private var malSession = SessionKeychain.read()
+    private var sessionGeneration = UUID()
+    private var signingIn = false
+    private let transport = URLSession(configuration: .ephemeral, delegate: MALTransport(), delegateQueue: nil)
     private var privateQueue: Task<Void, Never>?
     private var cached: [URL: (Date, Fields)] = [:]
     private var nextTitleLookup = ContinuousClock().now
@@ -118,108 +140,245 @@ final class API {
         return nil
     }
 
-    // Serialize authenticated requests so a rotated MAL refresh token is never used twice.
+    // Serialize authenticated requests so refresh-token rotation and list edits stay ordered.
     private func privateRequest(_ path: String, _ query: [URLQueryItem] = [],
-                                method: String = "GET", body: Data? = nil) async throws -> Fields {
+                                method: String = "GET", form: [String: String]? = nil) async throws -> Fields? {
         let previous = privateQueue
+        let generation = sessionGeneration
         let job = Task { @MainActor in
             await previous?.value
-            return try await self.sendPrivate(path, query, method: method, body: body)
+            return try await self.sendPrivate(path, query, method: method, form: form, generation: generation)
         }
         privateQueue = Task { _ = try? await job.value }
         return try await job.value
     }
 
-    private func sendPrivate(_ path: String, _ query: [URLQueryItem],
-                             method: String, body: Data?) async throws -> Fields {
-        var req = URLRequest(url: Self.url(Self.backend, path, query), timeoutInterval: 25)
-        req.httpMethod = method
-        req.httpShouldHandleCookies = false
-        let current = token
-        if let current { req.setValue("Bearer \(current)", forHTTPHeaderField: "Authorization") }
-        if let body {
-            req.httpBody = body
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    private func sendPrivate(_ path: String, _ query: [URLQueryItem], method: String,
+                             form: [String: String]?, generation: UUID) async throws -> Fields? {
+        guard generation == sessionGeneration else { throw CancellationError() }
+        guard let current = malSession else {
+            throw APIError(status: 401, message: "Sign in with MyAnimeList to use your lists.")
         }
+        let session = current.expiresAt.timeIntervalSinceNow < 60 ? try await renew(current, generation: generation) : current
+        let url = Self.url(Self.mal, path, query)
         do {
-            let (fields, response) = try await request(req)
-            if let renewed = response.value(forHTTPHeaderField: "X-AniLedger-Session"), token == current {
-                try SessionKeychain.write(renewed)
-                token = renewed
-            }
+            let fields = try await sendMAL(url, method: method, form: form, accessToken: session.accessToken)
+            guard generation == sessionGeneration else { throw CancellationError() }
             return fields
-        } catch let error as APIError where error.status == 401 && current != nil && current == token {
-            try signOut()
-            throw error
+        } catch let error as APIError where error.status == 401 {
+            let refreshed = try await renew(session, generation: generation)
+            let fields = try await sendMAL(url, method: method, form: form, accessToken: refreshed.accessToken)
+            guard generation == sessionGeneration else { throw CancellationError() }
+            return fields
         }
     }
 
-    var hasSession: Bool { token != nil }
+    private func sendMAL(_ url: URL, method: String = "GET", form: [String: String]? = nil,
+                         accessToken: String? = nil) async throws -> Fields? {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 25)
+        request.httpMethod = method
+        request.httpShouldHandleCookies = false
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let accessToken { request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization") }
+        if let form {
+            request.httpBody = Self.formBody(form)
+            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, response) = try await transport.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: 0, message: "MyAnimeList did not respond.")
+        }
+        let fields = try? JSONDecoder().decode(Fields.self, from: data)
+        guard (200..<300).contains(http.statusCode) else {
+            throw APIError(status: http.statusCode,
+                           message: fields?.string("error_description", "message", "error") ?? "MyAnimeList rejected the request.")
+        }
+        return fields
+    }
+
+    private static func formBody(_ parameters: [String: String]) -> Data {
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+        func escape(_ value: String) -> String {
+            value.addingPercentEncoding(withAllowedCharacters: allowed)!.replacingOccurrences(of: "%20", with: "+")
+        }
+        return Data(parameters.sorted { $0.key < $1.key }.map { "\(escape($0.key))=\(escape($0.value))" }.joined(separator: "&").utf8)
+    }
+
+    private func exchange(_ form: [String: String], clientID: String, previous: MALSession? = nil) async throws -> MALSession {
+        var parameters = form
+        parameters["client_id"] = clientID
+        guard let result = try await sendMAL(Self.url(Self.oauth, "token"), method: "POST", form: parameters),
+              let access = result.string("access_token"),
+              let refresh = result.string("refresh_token") ?? previous?.refreshToken,
+              let lifetime: Int = result.read("expires_in"), lifetime > 0 else {
+            throw APIError(status: 0, message: "MyAnimeList returned an invalid session.")
+        }
+        return MALSession(clientID: clientID, accessToken: access, refreshToken: refresh,
+                          expiresAt: Date().addingTimeInterval(TimeInterval(lifetime)))
+    }
+
+    private func renew(_ current: MALSession, generation: UUID) async throws -> MALSession {
+        guard generation == sessionGeneration else { throw CancellationError() }
+        let renewed: MALSession
+        do {
+            renewed = try await exchange(["grant_type": "refresh_token", "refresh_token": current.refreshToken],
+                                         clientID: current.clientID, previous: current)
+        } catch let error as APIError where error.status == 400 || error.status == 401 {
+            guard generation == sessionGeneration else { throw CancellationError() }
+            try signOut()
+            throw APIError(status: 401, message: "Your MyAnimeList session expired. Sign in again.")
+        }
+        guard generation == sessionGeneration else { throw CancellationError() }
+        try SessionKeychain.write(renewed)
+        malSession = renewed
+        return renewed
+    }
+
+    var configuredClientID: String? { UserDefaults.standard.string(forKey: Self.clientIDKey) }
+    var hasSession: Bool { malSession != nil }
 
     func session() async throws -> Account? {
-        guard token != nil else { return nil }
-        let response = try await privateRequest("api/session")
-        let account: Account? = response.read("user")
-        if account == nil { try signOut() }
-        return account
+        guard hasSession else { return nil }
+        let fields = try await privateRequest("users/@me", [.init(name: "fields", value: "id,name,picture")])
+        return try account(from: fields)
     }
 
     func signOut() throws {
         try SessionKeychain.write(nil)
-        token = nil
+        malSession = nil
+        sessionGeneration = UUID()
     }
 
-    func signIn() async throws -> Account {
+    func signIn(clientID rawID: String) async throws -> Account {
+        guard !signingIn else { throw APIError(status: 0, message: "MyAnimeList sign-in is already open.") }
+        signingIn = true
+        defer { signingIn = false }
+        let clientID = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard clientID.range(of: "^[A-Za-z0-9]{32}$", options: .regularExpression) != nil else {
+            throw APIError(status: 0, message: "Enter the 32-character Client ID for your MyAnimeList iOS app.")
+        }
+        let generation = sessionGeneration
+        let verifier = try Self.randomProof()
+        let state = try Self.randomProof()
+        let start = Self.url(Self.oauth, "authorize", [
+            .init(name: "response_type", value: "code"), .init(name: "client_id", value: clientID),
+            .init(name: "redirect_uri", value: Self.redirectURI), .init(name: "state", value: state),
+            .init(name: "code_challenge", value: verifier), .init(name: "code_challenge_method", value: "plain"),
+        ])
+        let callback = try await LoginBrowser().authenticate(start, scheme: Self.callbackScheme)
+        let values = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let states = values.filter { $0.name == "state" }
+        let codes = values.filter { $0.name == "code" }
+        guard callback.scheme == Self.callbackScheme, callback.host == "oauth", callback.path.isEmpty,
+              callback.user == nil, callback.password == nil, callback.port == nil, callback.fragment == nil,
+              states.count == 1, states.first?.value == state,
+              codes.count == 1, let code = codes.first?.value, !code.isEmpty else {
+            throw APIError(status: 0, message: "MyAnimeList sign-in did not complete. Check the registered redirect URL and try again.")
+        }
+        let next = try await exchange([
+            "grant_type": "authorization_code", "code": code,
+            "redirect_uri": Self.redirectURI, "code_verifier": verifier,
+        ], clientID: clientID)
+        let profileURL = Self.url(Self.mal, "users/@me", [.init(name: "fields", value: "id,name,picture")])
+        let profile = try await sendMAL(profileURL, accessToken: next.accessToken)
+        let user = try account(from: profile)
+        guard generation == sessionGeneration else { throw CancellationError() }
+        try SessionKeychain.write(next)
+        sessionGeneration = UUID()
+        malSession = next
+        UserDefaults.standard.set(clientID, forKey: Self.clientIDKey)
+        return user
+    }
+
+    private static func randomProof() throws -> String {
         var bytes = [UInt8](repeating: 0, count: 32)
-        let randomStatus = bytes.withUnsafeMutableBytes { buffer in
+        let status = bytes.withUnsafeMutableBytes { buffer in
             SecRandomCopyBytes(kSecRandomDefault, buffer.count, buffer.baseAddress!)
         }
-        guard randomStatus == errSecSuccess else { throw SessionKeychain.failure() }
-        func base64url(_ data: Data) -> String {
-            data.base64EncodedString().replacingOccurrences(of: "+", with: "-")
-                .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+        guard status == errSecSuccess else {
+            throw APIError(status: 0, message: "Could not start MyAnimeList sign-in.")
         }
-        let verifier = base64url(Data(bytes))
-        let challenge = base64url(Data(SHA256.hash(data: Data(verifier.utf8))))
-        let start = Self.url(Self.backend, "auth/mobile", [URLQueryItem(name: "challenge", value: challenge)])
-        let callback = try await LoginBrowser().authenticate(start)
-        let values = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        guard callback.scheme == "aniledger", callback.host == "auth",
-              let handoff = values.first(where: { $0.name == "handoff" })?.value else {
-            throw APIError(status: 0, message: "MyAnimeList sign-in did not complete.")
+        return Data(bytes).base64EncodedString().replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "=", with: "")
+    }
+
+    private func account(from fields: Fields?) throws -> Account {
+        guard let fields, let id: Int = fields.read("id"), id > 0, let name = fields.string("name") else {
+            throw APIError(status: 0, message: "MyAnimeList returned an invalid account.")
         }
-        let body = try JSONEncoder().encode(["handoff": handoff, "verifier": verifier])
-        let response = try await privateRequest("api/mobile/exchange", method: "POST", body: body)
-        guard let account: Account = response.read("user"), let next = response.string("token") else {
-            throw APIError(status: 0, message: "MyAnimeList returned an invalid session.")
-        }
-        try SessionKeychain.write(next)
-        token = next
-        return account
+        return Account(id: id, name: name, image: fields.image)
+    }
+
+    private func titleFields(_ kind: Kind) -> String {
+        let total = kind == .anime ? "num_episodes" : "num_chapters"
+        return "id,title,main_picture,alternative_titles,mean,media_type,\(total)"
+    }
+
+    private func statusFields(_ kind: Kind) -> String {
+        let fields = kind == .anime ? "num_episodes_watched,num_times_rewatched" : "num_chapters_read,num_times_reread"
+        return "status,score,updated_at,start_date,finish_date,comments,\(fields)"
     }
 
     func list(_ kind: Kind, page: Int) async throws -> Page<ListEntry> {
-        let response = try await privateRequest("api/lists/\(kind.rawValue)", [URLQueryItem(name: "page", value: String(page))])
-        let entries: [Fields] = response.read("entries") ?? []
-        return Page(items: entries.compactMap { ListEntry($0, kind: kind) }, more: response.read("hasNext") ?? false)
+        let result = try await privateRequest("users/@me/\(kind.rawValue)list", [
+            .init(name: "fields", value: "list_status{\(statusFields(kind))},\(titleFields(kind))"),
+            .init(name: "limit", value: "100"), .init(name: "offset", value: String((page - 1) * 100)),
+            .init(name: "sort", value: "list_updated_at"), .init(name: "nsfw", value: "true"),
+        ])
+        guard let rows: [Fields] = result?.read("data") else {
+            throw APIError(status: 0, message: "MyAnimeList returned an invalid list.")
+        }
+        let paging: Fields? = result?.read("paging")
+        let items = rows.compactMap { row -> ListEntry? in
+            guard let node: Fields = row.read("node"), let status: Fields = row.read("list_status"),
+                  let title = Title(node, kind: kind), status.string("status") != nil else { return nil }
+            return ListEntry(status, title: title)
+        }
+        return Page(items: items, more: paging?.string("next") != nil)
     }
 
     func suggestions() async throws -> [Title] {
-        let response = try await privateRequest("api/suggestions/anime")
-        let entries: [Fields] = response.read("entries") ?? []
-        return entries.compactMap { Title($0, kind: .anime) }
+        let result = try await privateRequest("anime/suggestions", [
+            .init(name: "limit", value: "24"), .init(name: "fields", value: titleFields(.anime)),
+        ])
+        guard let rows: [Fields] = result?.read("data") else {
+            throw APIError(status: 0, message: "MyAnimeList returned invalid suggestions.")
+        }
+        return rows.compactMap { row in
+            guard let node: Fields = row.read("node") else { return nil }
+            return Title(node, kind: .anime)
+        }
     }
 
     func listEntry(_ title: Title) async throws -> ListEntry? {
-        let response = try await privateRequest("api/lists/\(title.kind.rawValue)/\(title.malID)")
-        let entry: Fields? = response.read("entry")
-        return entry.map { ListEntry($0, title: title) }
+        guard let result = try await privateRequest("\(title.kind.rawValue)/\(title.malID)", [
+            .init(name: "fields", value: "my_list_status{\(statusFields(title.kind))}"),
+        ]) else { throw APIError(status: 0, message: "MyAnimeList returned an invalid entry.") }
+        guard let entry: Fields = result.read("my_list_status"), entry.string("status") != nil else { return nil }
+        return ListEntry(entry, title: title)
     }
 
-    func save(_ title: Title, change: ListChange?) async throws -> Fields {
-        let body = try change.map { try JSONEncoder().encode($0) }
-        return try await privateRequest("api/lists/\(title.kind.rawValue)/\(title.malID)",
-                                        method: change == nil ? "DELETE" : "PUT", body: body)
+    func save(_ title: Title, change: ListChange?) async throws -> Fields? {
+        let path = "\(title.kind.rawValue)/\(title.malID)/my_list_status"
+        guard let change else {
+            _ = try await privateRequest(path, method: "DELETE")
+            return nil
+        }
+        let progressField = title.kind == .anime ? "num_watched_episodes" : "num_chapters_read"
+        var form = ["status": change.status, "score": String(change.rating), progressField: String(change.progress)]
+        if let details = change.details {
+            if let count = details.repeatCount {
+                form[title.kind == .anime ? "num_times_rewatched" : "num_times_reread"] = String(count)
+            }
+            form["start_date"] = details.startDate
+            form["finish_date"] = details.finishDate
+            form["comments"] = details.notes
+        }
+        guard let response = try await privateRequest(path, method: "PUT", form: form),
+              response.string("status") != nil else {
+            throw APIError(status: 0, message: "MyAnimeList did not confirm the update.")
+        }
+        return response
     }
 }
 
@@ -254,11 +413,11 @@ private final class LoginBrowser: NSObject, ASWebAuthenticationPresentationConte
         window!
     }
 
-    func authenticate(_ start: URL) async throws -> URL {
+    func authenticate(_ start: URL, scheme: String) async throws -> URL {
         guard window != nil else { throw APIError(status: 0, message: "Bring AniLedger to the foreground and try again.") }
         defer { session = nil }
         return try await withCheckedThrowingContinuation { continuation in
-            let browser = ASWebAuthenticationSession(url: start, callbackURLScheme: "aniledger") { url, error in
+            let browser = ASWebAuthenticationSession(url: start, callbackURLScheme: scheme) { url, error in
                 if let url { continuation.resume(returning: url) }
                 else { continuation.resume(throwing: error ?? APIError(status: 0, message: "Sign-in did not complete.")) }
             }
