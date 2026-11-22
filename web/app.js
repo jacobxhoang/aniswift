@@ -25,6 +25,7 @@ const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, { ...ite
 const memory = new Map();
 const titleQueue = new Map();
 const checkedTitles = new Set();
+const checkedPosterImages = new Set();
 let resolvingTitles = false;
 let browseTicket = 0;
 let detailTicket = 0;
@@ -37,6 +38,11 @@ const score = (value) => Number(value) > 0 ? Number(value).toFixed(2) : '';
 const key = (entry) => `${entry.kind}-${entry.id}`;
 const displayTitle = (entry) => registry.get(key(entry))?.englishTitle || entry.title;
 const safeImage = (url) => typeof url === 'string' && url.startsWith('https://') ? url : '';
+// MAL recommendation thumbnails use a resize path in front of the original cover.
+function originalMalCover(image) {
+  const match = /^https:\/\/cdn\.myanimelist\.net\/r\/\d+x\d+(\/images\/manga\/\d+\/\d+\.(?:jpg|jpeg|png|webp))(?:\?[^#]*)?$/i.exec(image || '');
+  return match ? `https://cdn.myanimelist.net${match[1]}` : '';
+}
 const listStatus = (kind) => [kind === 'anime' ? 'watching' : 'reading', 'completed', 'on_hold', 'dropped', kind === 'anime' ? 'plan_to_watch' : 'plan_to_read'];
 const ordered = (entries) => [...entries].sort((a, b) => (Date.parse(b.updated) || 0) - (Date.parse(a.updated) || 0));
 
@@ -115,6 +121,8 @@ function adapt(item, kind) {
     japanese: item.titleJapanese || item.title_japanese || existing?.japanese,
     synonyms: item.titleSynonyms || item.title_synonyms || existing?.synonyms,
     image: item.imageUrl || images?.large || images?.jpg?.large_image_url || images?.jpg?.image_url || existing?.image,
+    posterImage: [images?.webp?.large_image_url, images?.jpg?.large_image_url, images?.large, item.largeImageUrl,
+      kind === 'manga' ? originalMalCover(item.imageUrl || images?.jpg?.image_url) : ''].find(safeImage),
     score: item.score || existing?.score, total: item.episodes || item.chapters || existing?.total,
     volumes: item.volumes ?? existing?.volumes, type: item.type || existing?.type,
     status: item.status || existing?.status, aired: release || existing?.aired,
@@ -208,7 +216,17 @@ function updateTitle(id) {
   const entry = registry.get(id);
   if (!entry) return;
   const title = displayTitle(entry);
-  for (const node of view.querySelectorAll(`[data-catalog-title="${id}"]`)) node.textContent = title;
+  for (const node of view.querySelectorAll(`[data-catalog-title="${id}"]`)) {
+    node.textContent = title;
+    const poster = node.closest('[data-suggestion="manga"] .poster');
+    const image = safeImage(entry.posterImage);
+    if (!poster || !image) continue;
+    const container = poster.querySelector('.cover');
+    const current = container?.querySelector('img');
+    if (current?.getAttribute('src') !== image && current?.dataset.failedPoster !== image && container) {
+      container.outerHTML = cover(entry, '', true);
+    }
+  }
   for (const node of view.querySelectorAll(`[data-entry="${id}"][data-edit="true"][aria-label]`)) {
     const action = node.dataset.icon === 'edit' ? 'Edit' : 'Add';
     node.setAttribute('aria-label', `${action} ${title}`);
@@ -217,19 +235,29 @@ function updateTitle(id) {
   if (active) active.textContent = title;
 }
 
+function needsPosterImage(entry, node) {
+  return node.closest('[data-suggestion="manga"] .poster') && !entry.posterImage && !checkedPosterImages.has(key(entry));
+}
+
 async function resolveTitles() {
   if (resolvingTitles) return;
   resolvingTitles = true;
   try {
     for (const [id, node] of titleQueue) {
       titleQueue.delete(id);
-      if (!node.isConnected || checkedTitles.has(id)) continue;
+      if (!node.isConnected) continue;
       const entry = registry.get(id);
-      if (!entry || entry.englishTitle) continue;
+      if (!entry) continue;
+      const needsImage = needsPosterImage(entry, node);
+      if (!needsImage && (entry.englishTitle || checkedTitles.has(id))) continue;
       checkedTitles.add(id);
+      if (needsImage) checkedPosterImages.add(id);
       try {
         const { data } = await catalog(`/${entry.kind}/${entry.id}`);
-        remember([adapt(data, entry.kind)]);
+        const details = adapt(data, entry.kind);
+        if (needsImage && !details.posterImage) details.posterImage = safeImage(details.image);
+        if (needsImage) details.image = entry.image || details.image;
+        remember([details]);
         updateTitle(id);
       } catch {
         // Keep the catalog title if details are unavailable.
@@ -244,7 +272,11 @@ async function resolveTitles() {
 const titleObserver = typeof IntersectionObserver === 'function' ? new IntersectionObserver((changes) => {
   for (const { target, isIntersecting } of changes) {
     const id = target.dataset.catalogTitle;
-    if (isIntersecting && target.isConnected && !checkedTitles.has(id) && !registry.get(id)?.englishTitle) titleQueue.set(id, target);
+    const entry = registry.get(id);
+    if (isIntersecting && target.isConnected && entry &&
+        (needsPosterImage(entry, target) || (!checkedTitles.has(id) && !entry.englishTitle))) {
+      titleQueue.set(id, target);
+    }
   }
   resolveTitles();
 }) : null;
@@ -260,9 +292,11 @@ async function siteApi(path, init) {
   return data;
 }
 
-function cover(entry, variant = '') {
-  const src = safeImage(entry.image);
-  return `<span class="cover ${variant}" ${src ? '' : 'data-failed'}>${src ? `<img src="${escape(src)}" alt="" decoding="async">` : ''}</span>`;
+function cover(entry, variant = '', usePosterImage = false) {
+  const original = safeImage(entry.image);
+  const src = (usePosterImage && safeImage(entry.posterImage)) || original;
+  const fallback = original && original !== src ? ` data-fallback-src="${escape(original)}"` : '';
+  return `<span class="cover ${variant}" ${src ? '' : 'data-failed'}>${src ? `<img src="${escape(src)}"${fallback} alt="" decoding="async">` : ''}</span>`;
 }
 
 function entryButton(entry) {
@@ -361,10 +395,10 @@ function activityRows(entries, editable) {
   }).join('')}</div>`;
 }
 
-function posters(entries, catalog = false) {
+function posters(entries, catalog = false, usePosterImage = false) {
   return `<div class="poster-grid ${catalog ? 'catalog-grid' : ''}">${entries.map((entry) => {
     const genre = entry.genres?.slice(0, 2).join(' · ');
-    return `<button type="button" class="poster" data-entry="${key(entry)}">${cover(entry)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></button>`;
+    return `<button type="button" class="poster" data-entry="${key(entry)}">${cover(registry.get(key(entry)) || entry, '', usePosterImage)}${score(entry.score) ? `<span class="poster-score">★ ${score(entry.score)}</span>` : ''}<span class="poster-caption"><strong data-catalog-title="${key(entry)}">${escape(displayTitle(entry))}</strong>${genre || entry.type ? `<small>${escape(genre || entry.type)}</small>` : ''}</span></button>`;
   }).join('')}</div>`;
 }
 
@@ -488,7 +522,7 @@ function suggestionRail(kind, fallback) {
     if (!saved.has(entry.id) && !shown.has(entry.id)) shown.set(entry.id, entry);
   }
   if (!shown.size) return '<p class="empty">No new suggestions are available yet.</p>';
-  return `<div class="suggestion-rail" data-suggestion="${kind}" tabindex="0" aria-label="${kind === 'anime' ? 'Anime' : 'Manga'} suggestions">${posters([...shown.values()].slice(0, 16))}</div>`;
+  return `<div class="suggestion-rail" data-suggestion="${kind}" tabindex="0" aria-label="${kind === 'anime' ? 'Anime' : 'Manga'} suggestions">${posters([...shown.values()].slice(0, 16), false, kind === 'manga')}</div>`;
 }
 
 async function loadSuggestions() {
@@ -1068,6 +1102,13 @@ document.addEventListener('error', (event) => {
   if (!(event.target instanceof HTMLImageElement)) return;
   const container = event.target.closest('.cover');
   if (!container) return;
+  const fallback = event.target.dataset.fallbackSrc;
+  if (fallback) {
+    event.target.dataset.failedPoster = event.target.getAttribute('src');
+    delete event.target.dataset.fallbackSrc;
+    event.target.src = fallback;
+    return;
+  }
   container.setAttribute('data-failed', '');
   event.target.remove();
 }, true);
