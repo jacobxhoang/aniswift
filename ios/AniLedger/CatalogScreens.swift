@@ -516,16 +516,40 @@ struct DiscoverScreen: View {
     }
 }
 
+enum CatalogFacetSort: String, CaseIterable, Identifiable {
+    case catalog = "Default"
+    case highestRated = "Highest rated"
+    case mostPopular = "Most popular"
+    case newest = "Newest first"
+    case oldest = "Oldest first"
+
+    var id: Self { self }
+
+    var queryItems: [URLQueryItem] {
+        let field: String
+        let direction: String
+        switch self {
+        case .catalog: return []
+        case .highestRated: (field, direction) = ("score", "desc")
+        case .mostPopular: (field, direction) = ("popularity", "asc")
+        case .newest: (field, direction) = ("start_date", "desc")
+        case .oldest: (field, direction) = ("start_date", "asc")
+        }
+        var items = [
+            URLQueryItem(name: "order_by", value: field),
+            URLQueryItem(name: "sort", value: direction)
+        ]
+        if self == .oldest { items.append(URLQueryItem(name: "nulls", value: "last")) }
+        return items
+    }
+}
+
 struct CatalogFacet: Hashable, Identifiable {
     enum Category: String {
         case genre, theme, studio, producer
 
-        var filter: String {
-            switch self {
-            case .genre, .theme: "genres"
-            case .studio, .producer: "producers"
-            }
-        }
+        var usesGenreIndex: Bool { self == .genre || self == .theme }
+        var filter: String { usesGenreIndex ? "genres" : "producers" }
     }
 
     let name: String
@@ -535,23 +559,24 @@ struct CatalogFacet: Hashable, Identifiable {
     var id: String { name.lowercased() }
 
     @MainActor
-    func page(_ page: Int, api: API) async throws -> Page<Title> {
+    func page(_ page: Int, query: String, sort: CatalogFacetSort, api: API) async throws -> Page<Title> {
         let id: Int
         if let malID, malID > 0 {
             id = malID
         } else {
             id = try await resolveID(api: api)
         }
-        let filters = [
+        var filters = [
             URLQueryItem(name: category.filter, value: String(id)),
             URLQueryItem(name: "page", value: String(page))
-        ]
+        ] + sort.queryItems
+        if !query.isEmpty { filters.append(URLQueryItem(name: "q", value: query)) }
         return catalogPage(try await api.catalog(kind.rawValue, filters), kind: kind)
     }
 
     @MainActor
     private func resolveID(api: API) async throws -> Int {
-        let usesGenreIndex = category.filter == "genres"
+        let usesGenreIndex = category.usesGenreIndex
         let path = usesGenreIndex ? "genres/\(kind.rawValue)" : "producers"
         let query = usesGenreIndex
             ? URLQueryItem(name: "filter", value: category == .theme ? "themes" : "genres")
@@ -572,11 +597,43 @@ struct CatalogFacet: Hashable, Identifiable {
 
 struct CatalogFacetScreen: View {
     let facet: CatalogFacet
+    @State private var sort = CatalogFacetSort.catalog
+    @State private var search = ""
 
     var body: some View {
-        PosterResults(name: facet.name, shelf: nil, query: "", kind: facet.kind, facet: facet)
-            .navigationTitle(facet.name)
-            .navigationBarTitleDisplayMode(.inline)
+        Group {
+            if facet.category.usesGenreIndex {
+                results
+            } else {
+                results
+                    .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search \(facet.name) titles")
+                    .scrollDismissesKeyboard(.interactively)
+            }
+        }
+        .navigationTitle(facet.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if facet.category.usesGenreIndex {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Sort titles", selection: $sort) {
+                            ForEach(CatalogFacetSort.allCases) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }
+                    } label: {
+                        Label("Sort titles", systemImage: "arrow.up.arrow.down")
+                    }
+                    .accessibilityValue(sort.rawValue)
+                }
+            }
+        }
+    }
+
+    private var results: some View {
+        PosterResults(name: facet.name, shelf: nil,
+                      query: search.trimmingCharacters(in: .whitespacesAndNewlines),
+                      kind: facet.kind, facet: facet, sort: sort)
     }
 }
 
@@ -678,6 +735,7 @@ private struct PosterResults: View {
     let query: String
     let kind: Kind
     var facet: CatalogFacet? = nil
+    var sort = CatalogFacetSort.catalog
     @State private var titles: [Title] = []
     @State private var page = 1
     @State private var more = false
@@ -710,7 +768,7 @@ private struct PosterResults: View {
             }.padding(18).frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
         .background(Palette.background)
-        .task(id: "\(kind.rawValue)-\(query)") {
+        .task(id: "\(kind.rawValue)-\(sort.rawValue)-\(query)") {
             generation = UUID()
             titles = []
             page = 1
@@ -726,10 +784,10 @@ private struct PosterResults: View {
         defer { if current == generation { loading = false } }
         do {
             let result: Page<Title>
+            if page == 1, !query.isEmpty { try await Task.sleep(for: .milliseconds(300)) }
             if let shelf { result = try await shelf.page(page, api: store.api) }
-            else if let facet { result = try await facet.page(page, api: store.api) }
+            else if let facet { result = try await facet.page(page, query: query, sort: sort, api: store.api) }
             else {
-                if page == 1 { try await Task.sleep(for: .milliseconds(300)) }
                 let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]
                 result = catalogPage(try await store.api.catalog(kind.rawValue, filters), kind: kind)
             }
