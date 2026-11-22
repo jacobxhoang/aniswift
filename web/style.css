@@ -313,10 +313,11 @@ a.poster { display: block; }
 .entry-metadata { grid-area: metadata; min-width: 0; display: grid; gap: 16px; }
 .entry-metadata > div:empty, .entry-content > div:empty { display: none; }
 .entry-metadata .info-table { font-size: 13px; }
-.entry-metadata .info-table th { width: auto; }
+.entry-metadata .info-table th { width: 1%; white-space: nowrap; overflow-wrap: normal; }
+.entry-metadata .info-table td { overflow-wrap: anywhere; }
 .entry-metadata .entry-links { flex-direction: column; gap: 6px; }
-.entry-overview { grid-area: overview; min-width: 0; }
-.entry-content { grid-area: content; min-width: 0; display: grid; gap: 20px; align-self: start; }
+.entry-overview { min-width: 0; }
+.entry-content { min-width: 0; display: grid; gap: 20px; }
 .entry-content > * { min-width: 0; scroll-margin-top: 80px; }
 .entry-prose { white-space: pre-line; line-height: 1.55; }
 .entry-page .entry-jumps {
@@ -337,7 +338,7 @@ a.poster { display: block; }
 .entry-overview-card .entry-stat:last-child:nth-child(odd) { grid-column: auto; }
 .entry-overview-card .dialog-actions { margin-top: 10px; }
 .entry-page .cast-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.entry-main { grid-area: main; min-width: 0; display: grid; gap: 18px; }
+.entry-main { grid-area: main; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
 @media (max-width: 700px) {
   .entry-page {
     grid-template-areas: "cover overview" "content content" "metadata metadata";
@@ -345,6 +346,8 @@ a.poster { display: block; }
     gap: 16px 12px;
   }
   .entry-main { display: contents; }
+  .entry-overview { grid-area: overview; }
+  .entry-content { grid-area: content; }
 }
 @media (max-width: 420px) {
   .entry-page .cast-grid, .entry-page .edit-fields { grid-template-columns: minmax(0, 1fr); }
