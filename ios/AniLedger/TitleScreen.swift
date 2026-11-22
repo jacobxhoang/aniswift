@@ -544,24 +544,15 @@ struct TitleScreen: View {
                 ForEach(external) { item in
                     Link(destination: item.url) {
                         HStack(spacing: 7) {
-                            switch item.style {
-                            case .social:
-                                Text("𝕏").font(.body)
-                                    .accessibilityHidden(true)
-                            case .crunchyroll:
-                                Image(systemName: "play.circle.fill").accessibilityHidden(true)
-                            case .netflix:
-                                Text("N").font(.subheadline.weight(.black)).accessibilityHidden(true)
-                            case .standard:
-                                EmptyView()
-                            }
+                            item.appearance.icon
+                                .accessibilityHidden(true)
                             Text(item.name).fixedSize(horizontal: false, vertical: true)
                         }
                         .font(.subheadline)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 11)
                         .padding(.vertical, 6)
-                        .background(item.style.fill, in: .capsule)
+                        .background(item.appearance.fill, in: .capsule)
                         .frame(minHeight: 44)
                         .contentShape(Rectangle())
                     }
@@ -639,12 +630,13 @@ struct TitleScreen: View {
     }
 
     private func loadExternalLinks(_ path: String) async -> [TitleExternalLink] {
-        async let websites = loadLinkRows(path + "/external", key: "externalLinks")
+        async let officialLinks = loadLinkRows(path + "/external", key: "externalLinks")
         async let services = title.kind == .anime
             ? loadLinkRows(path + "/streaming", key: "streaming") : []
-        let rows = await (websites, services)
-        let allRows = rows.0 + rows.1
-        let links = unique(allRows.compactMap(TitleExternalLink.init))
+        let rows = await (officialLinks, services)
+        let websites = rows.0.compactMap { TitleExternalLink($0, streaming: false) }
+        let streaming = rows.1.compactMap { TitleExternalLink($0, streaming: true) }
+        let links = unique(websites + streaming)
         return links.sorted { $0.priority < $1.priority }
     }
 
@@ -941,43 +933,115 @@ private struct TitleFriendActivityRow: View {
 }
 
 private struct TitleExternalLink: Identifiable {
-    enum Style {
-        case standard, social, crunchyroll, netflix
+    enum Mark {
+        case asset(String)
+        case symbol(String)
+        case monogram(String)
+    }
 
-        var fill: Color {
-            switch self {
-            case .standard: Palette.surface
-            case .social: .clear
-            case .crunchyroll: Color(red: 0.53, green: 0.27, blue: 0.07)
-            case .netflix: Color(red: 0.55, green: 0.04, blue: 0.07)
+    struct Appearance {
+        let mark: Mark
+        var fill = Palette.surface
+        var priority = 3
+
+        @ViewBuilder
+        var icon: some View {
+            switch mark {
+            case .asset(let name):
+                Image("External-\(name)")
+                    .renderingMode(.template)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 15, height: 15)
+            case .symbol(let symbol):
+                Image(systemName: symbol).font(.subheadline.weight(.semibold))
+            case .monogram(let text):
+                Text(text).font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 3)
+                    .padding(.vertical, 1)
+                    .background(.white.opacity(0.17), in: .rect(cornerRadius: 3))
             }
         }
     }
 
-    let name: String
-    let url: URL
-    let style: Style
-    var id: URL { url }
+    private struct Provider {
+        let appearance: Appearance
+        let domains: [String]
+        let names: [String]
 
-    var priority: Int {
-        if name.localizedCaseInsensitiveContains("official") { return 0 }
-        switch style {
-        case .social: return 1
-        case .crunchyroll, .netflix: return 2
-        case .standard: return 3
+        init(_ mark: Mark, domains: [String] = [], names: [String] = [],
+             fill: Color = Palette.surface, priority: Int = 3) {
+            appearance = Appearance(mark: mark, fill: fill, priority: priority)
+            self.domains = domains
+            self.names = names
+        }
+
+        func matches(host: String) -> Bool {
+            domains.contains { host == $0 || host.hasSuffix("." + $0) }
         }
     }
 
-    init?(_ fields: Fields) {
+    private static let providers: [Provider] = [
+        Provider(.asset("x"), domains: ["x.com", "twitter.com"], names: ["X", "Twitter", "Twitter JP", "X JP"],
+                 fill: .clear, priority: 1),
+        Provider(.asset("crunchyroll"), domains: ["crunchyroll.com"], names: ["Crunchyroll"],
+                 fill: Color(red: 0.53, green: 0.27, blue: 0.07), priority: 2),
+        Provider(.asset("netflix"), domains: ["netflix.com"], names: ["Netflix"],
+                 fill: Color(red: 0.55, green: 0.04, blue: 0.07), priority: 2),
+        Provider(.monogram("HD"), domains: ["hidive.com"], names: ["HIDIVE"],
+                 fill: Color(red: 0.10, green: 0.32, blue: 0.43), priority: 2),
+        Provider(.symbol("play.rectangle.fill"), domains: ["primevideo.com"],
+                 names: ["Amazon Prime Video", "Prime Video", "Amazon Prime"],
+                 fill: Color(red: 0.10, green: 0.29, blue: 0.44), priority: 2),
+        Provider(.monogram("h"), domains: ["hulu.com", "hulu.jp"], names: ["Hulu"],
+                 fill: Color(red: 0.10, green: 0.33, blue: 0.24), priority: 2),
+        Provider(.asset("youtube"), domains: ["youtube.com", "youtu.be"], names: ["YouTube"],
+                 fill: Color(red: 0.46, green: 0.13, blue: 0.14)),
+        Provider(.asset("bilibili"), domains: ["bilibili.com", "bilibili.tv"], names: ["Bilibili", "Bilibili TV"]),
+        Provider(.asset("niconico"), domains: ["nicovideo.jp"], names: ["Niconico", "Nico Nico"]),
+        Provider(.monogram("FOD"), domains: ["fod.fujitv.co.jp"], names: ["FOD"]),
+        Provider(.monogram("W"), domains: ["watcha.com"], names: ["Watcha"]),
+        Provider(.monogram("C+"), domains: ["catchplay.com"], names: ["Catchplay", "Catchplay Plus"]),
+        Provider(.monogram("F"), domains: ["athome.fandango.com", "vudu.com"], names: ["Fandango At Home", "Vudu"]),
+        Provider(.monogram("B"), domains: ["gamer.com.tw"], names: ["Bahamut Anime Crazy", "Bahamut"]),
+        Provider(.monogram("L"), domains: ["laftel.net"], names: ["Laftel"]),
+        Provider(.monogram("A+"), domains: ["aniplus-asia.com"], names: ["Aniplus Asia", "Aniplus"]),
+        Provider(.monogram("AV"), domains: ["aniverse.com"], names: ["Aniverse"]),
+        Provider(.monogram("AG"), names: ["Anime Generation"]),
+        Provider(.asset("wikipedia"), domains: ["wikipedia.org"], names: ["Wikipedia", "Wikipedia JP"]),
+        Provider(.symbol("books.vertical.fill"), domains: ["anidb.net"], names: ["AniDB"]),
+        Provider(.symbol("newspaper.fill"), domains: ["animenewsnetwork.com"], names: ["ANN", "Anime News Network"]),
+        Provider(.symbol("calendar"), domains: ["cal.syoboi.jp"], names: ["Syoboi"]),
+        Provider(.asset("anilist"), domains: ["anilist.co"], names: ["AniList"]),
+        Provider(.asset("myanimelist"), domains: ["myanimelist.net"], names: ["MyAnimeList"]),
+        Provider(.asset("instagram"), domains: ["instagram.com"], names: ["Instagram"]),
+        Provider(.asset("facebook"), domains: ["facebook.com", "fb.com"], names: ["Facebook"]),
+        Provider(.asset("tiktok"), domains: ["tiktok.com"], names: ["TikTok"])
+    ]
+
+    let name: String
+    let url: URL
+    let appearance: Appearance
+    var id: URL { url }
+
+    var priority: Int {
+        name.lowercased().hasPrefix("official") ? 0 : appearance.priority
+    }
+
+    init?(_ fields: Fields, streaming: Bool) {
         guard let name = fields.string("name"), let url = publicURL(fields.string("url")),
               let host = url.host()?.lowercased() else { return nil }
         self.name = name
         self.url = url
-        func isDomain(_ domain: String) -> Bool { host == domain || host.hasSuffix("." + domain) }
-        if isDomain("x.com") || isDomain("twitter.com") { style = .social }
-        else if isDomain("crunchyroll.com") { style = .crunchyroll }
-        else if isDomain("netflix.com") { style = .netflix }
-        else { style = .standard }
+        let key = Self.nameKey(name)
+        let provider = Self.providers.first { $0.matches(host: host) }
+            ?? Self.providers.first { $0.names.contains { Self.nameKey($0) == key } }
+        appearance = provider?.appearance
+            ?? Appearance(mark: .symbol(streaming ? "play.rectangle" : "globe"))
+    }
+
+    private static func nameKey(_ name: String) -> String {
+        name.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 }
 

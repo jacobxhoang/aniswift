@@ -2,7 +2,7 @@
 
 AniLedger is a native SwiftUI anime and manga tracker for iPhone and iPad running iOS 17 or newer. It uses MyAnimeList for accounts and personal lists, Tenrai for catalog data, and Jikan Edge for catalog fallback and public friend activity.
 
-Cover art and avatars use [Kingfisher](https://github.com/onevcat/Kingfisher) for image loading and memory and disk caching. Xcode resolves the package on the first build.
+Cover art and avatars use [Kingfisher](https://github.com/onevcat/Kingfisher) for image loading and memory and disk caching. Xcode resolves the package on the first build. External links use bundled marks from [Simple Icons](https://simpleicons.org/) where available, with system icons or initials for other providers.
 
 ## Run on a Mac
 
