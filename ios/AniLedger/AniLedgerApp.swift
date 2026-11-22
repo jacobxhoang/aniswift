@@ -822,15 +822,16 @@ private struct ProfileStatistics: View {
 private struct ProfileStatisticsSection: View {
     let kind: Kind
     let stats: ProfileMediaStats
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = true
 
     private var statuses: [Status] {
         zip(kind.statuses, [
-            (kind == .anime ? "play.fill" : "book.fill", Color.blue),
-            ("checkmark", .green),
-            ("pause.fill", .orange),
-            ("xmark", .red),
-            ("calendar", .gray)
+            (kind == .anime ? "play.fill" : "book.fill", Color(red: 0.43, green: 0.69, blue: 0.93)),
+            ("checkmark", Color(red: 0.49, green: 0.76, blue: 0.61)),
+            ("pause.fill", Color(red: 0.89, green: 0.69, blue: 0.44)),
+            ("xmark", Color(red: 0.92, green: 0.53, blue: 0.55)),
+            ("calendar", Color(white: 0.68))
         ]).map { key, style in
             Status(key: key, icon: style.0, color: style.1, count: stats.statusCounts[key])
         }
@@ -851,122 +852,138 @@ private struct ProfileStatisticsSection: View {
     }
 
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    expanded.toggle()
+                }
+            } label: {
+                HStack(spacing: 12) {
+                    Text("\(kind.label) Statistics").font(.headline)
+                    Spacer(minLength: 8)
+                    Image(systemName: "chevron.down")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .rotationEffect(.degrees(expanded ? 0 : -90))
+                        .accessibilityHidden(true)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .frame(minHeight: 48)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityValue(expanded ? "Expanded" : "Collapsed")
+
+            if expanded {
                 VStack(alignment: .leading, spacing: 12) {
+                    Divider()
                     summary
                     if total > 0 {
-                        statusChart
-                        Divider()
+                        VStack(alignment: .trailing, spacing: 5) {
+                            statusChart
+                            if statuses.allSatisfy({ $0.count != nil }) {
+                                Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                                    .monospacedDigit()
+                            }
+                        }
                     }
                     statusRows
+                    if !totalsLabel.isEmpty {
+                        Divider()
+                        Text(totalsLabel)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
-                .padding(14)
-                .background(Palette.surface, in: .rect(cornerRadius: 18))
-
-                if !totalsLabel.isEmpty {
-                    Text(totalsLabel)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 14)
-                }
+                .padding(.horizontal, 16)
+                .padding(.bottom, 14)
             }
-            .padding(.top, 9)
-        } label: {
-            Text("\(kind.label) Statistics")
-                .font(.headline)
-                .foregroundStyle(.secondary)
-                .accessibilityAddTraits(.isHeader)
         }
-        .tint(.blue)
+        .ledgerPanel(radius: 18)
     }
 
     private var summary: some View {
         ViewThatFits(in: .horizontal) {
-            HStack {
+            HStack(alignment: .top, spacing: 16) {
                 meanScore
-                Spacer(minLength: 10)
+                Spacer(minLength: 0)
                 days
             }
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 8) {
                 meanScore
                 days
             }
         }
-        .font(.footnote)
-        .foregroundStyle(.secondary)
     }
 
     @ViewBuilder
     private var meanScore: some View {
         if let score = stats.meanScore, score > 0 {
-            Text("Mean score \(score.formatted(.number.precision(.fractionLength(2))))")
+            metric("Mean score", score.formatted(.number.precision(.fractionLength(2))))
         }
     }
 
     @ViewBuilder
     private var days: some View {
         if let days = stats.days {
-            Text("\(days.formatted(.number.precision(.fractionLength(0...1)))) \(days == 1 ? "day" : "days") \(kind == .anime ? "watched" : "read")")
+            metric(kind == .anime ? "Days watched" : "Days read",
+                   days.formatted(.number.precision(.fractionLength(0...1))))
         }
     }
 
+    private func metric(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .font(.title3.weight(.semibold))
+                .monospacedDigit()
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+    }
+
     private var statusChart: some View {
-        VStack(spacing: 4) {
-            GeometryReader { geometry in
-                HStack(spacing: 0) {
-                    ForEach(statuses.filter { ($0.count ?? 0) > 0 }) { status in
-                        let width = geometry.size.width * CGFloat(status.count ?? 0) / CGFloat(total)
-                        status.color
-                            .overlay {
-                                if width >= 26 {
-                                    Image(systemName: status.icon)
-                                        .font(.caption.weight(.semibold))
-                                        .foregroundStyle(.black.opacity(0.8))
-                                }
-                            }
-                            .frame(width: width)
-                    }
+        GeometryReader { geometry in
+            HStack(spacing: 0) {
+                ForEach(statuses.filter { ($0.count ?? 0) > 0 }) { status in
+                    status.color.opacity(0.76)
+                        .frame(width: geometry.size.width * CGFloat(status.count ?? 0) / CGFloat(total))
                 }
             }
-            .frame(height: 24)
-            .clipShape(.rect(cornerRadius: 5))
-
-            HStack {
-                Text(0.formatted())
-                Spacer()
-                Text((total / 2).formatted())
-                Spacer()
-                Text(total.formatted())
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .monospacedDigit()
         }
+        .frame(height: 8)
+        .clipShape(Capsule())
         .accessibilityHidden(true)
     }
 
     private var statusRows: some View {
         VStack(spacing: 0) {
             ForEach(statuses) { status in
-                if status.id != statuses[0].id {
-                    Divider().padding(.leading, 42)
+                if status.id != statuses.first?.id {
+                    Divider().padding(.leading, 36)
                 }
                 HStack(spacing: 10) {
                     Image(systemName: status.icon)
-                        .font(.subheadline.weight(.semibold))
+                        .font(.caption.weight(.semibold))
                         .foregroundStyle(status.color)
-                        .frame(width: 32, height: 32)
-                        .background(status.color.opacity(0.18), in: .rect(cornerRadius: 7))
+                        .frame(width: 26, height: 26)
+                        .background(status.color.opacity(0.13), in: .rect(cornerRadius: 7))
                         .accessibilityHidden(true)
 
-                    Text(status.label).font(.subheadline)
+                    Text(status.label)
                     Spacer(minLength: 8)
                     Text(status.count?.formatted() ?? "—")
-                        .font(.subheadline.weight(.semibold))
+                        .fontWeight(.semibold)
                         .monospacedDigit()
                         .accessibilityLabel(status.count?.formatted() ?? "Count unavailable")
                 }
+                .font(.subheadline)
                 .padding(.vertical, 7)
                 .accessibilityElement(children: .combine)
             }
