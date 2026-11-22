@@ -301,12 +301,222 @@ struct ListsScreen: View {
     }
 }
 
+private enum DiscoverShelf: String, CaseIterable, Identifiable {
+    case airing = "Airing anime"
+    case current = "Current season"
+    case upcoming = "Upcoming season"
+    case animeRank = "Top ranked anime"
+    case movies = "Top ranked movies"
+    case animePopular = "Popular anime"
+    case mangaPublishing = "Popular publishing manga"
+    case mangaRank = "Top ranked manga"
+    case mangaPopular = "Popular manga"
+    case manhwa = "Popular manhwa"
+
+    var id: Self { self }
+    var kind: Kind {
+        switch self {
+        case .mangaPublishing, .mangaRank, .mangaPopular, .manhwa: .manga
+        default: .anime
+        }
+    }
+    var path: String {
+        switch self {
+        case .current: "seasons/now"
+        case .upcoming: "seasons/upcoming"
+        default: "top/\(kind.rawValue)"
+        }
+    }
+    var query: [URLQueryItem] {
+        switch self {
+        case .airing: [URLQueryItem(name: "filter", value: "airing")]
+        case .movies: [URLQueryItem(name: "type", value: "movie")]
+        case .animePopular, .mangaPopular: [URLQueryItem(name: "filter", value: "bypopularity")]
+        case .mangaPublishing: [URLQueryItem(name: "filter", value: "publishing")]
+        case .manhwa: [URLQueryItem(name: "type", value: "manhwa"), URLQueryItem(name: "filter", value: "bypopularity")]
+        default: []
+        }
+    }
+
+    @MainActor
+    func page(_ page: Int, api: API, refresh: Bool = false) async throws -> Page<Title> {
+        let pageQuery = [URLQueryItem(name: "page", value: String(page))]
+        do {
+            return catalogPage(try await api.catalog(path, query + pageQuery, refresh: refresh), kind: kind)
+        } catch {
+            try Task.checkCancellation()
+            guard self == .manhwa else { throw error }
+            let fallback = [URLQueryItem(name: "type", value: "manhwa"),
+                            URLQueryItem(name: "order_by", value: "members"), URLQueryItem(name: "sort", value: "desc")]
+            return catalogPage(try await api.catalog("manga", fallback + pageQuery, refresh: refresh), kind: kind)
+        }
+    }
+}
+
+struct PosterShelf<Trailing: View>: View {
+    @EnvironmentObject private var store: Store
+    let heading: String
+    let titles: [Title]
+    @ViewBuilder var trailing: Trailing
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text(heading.uppercased()).font(.subheadline.weight(.medium)).foregroundStyle(.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                trailing
+            }.padding(.horizontal, 18)
+            ScrollView(.horizontal) {
+                LazyHStack(alignment: .top, spacing: 10) {
+                    ForEach(unique(titles)) { title in
+                        VStack(alignment: .leading, spacing: 3) {
+                            CoverTile(title: title)
+                            if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
+                                Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                        }.frame(width: 112)
+                    }
+                }.padding(.horizontal, 18)
+            }.scrollIndicators(.hidden)
+        }
+    }
+}
+
+struct DiscoverScreen: View {
+    @EnvironmentObject private var store: Store
+    @State private var shelves: [DiscoverShelf: [Title]] = [:]
+    @State private var search = ""
+    @State private var loading = true
+    @State private var searchKind: Kind = .anime
+
+    var body: some View {
+        Group {
+            if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                PosterResults(name: "Search results", shelf: nil, query: search, kind: searchKind)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        Picker("Search category", selection: $searchKind) {
+                            ForEach(Kind.allCases) { Text($0.label).tag($0) }
+                        }.pickerStyle(.segmented).padding(.horizontal, 18).padding(.vertical, 6)
+                            .background(.regularMaterial)
+                    }
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 28) {
+                        ForEach(DiscoverShelf.allCases) { shelf in
+                            if let titles = shelves[shelf], !titles.isEmpty {
+                                PosterShelf(heading: shelf.rawValue, titles: Array(titles.prefix(14))) {
+                                    NavigationLink {
+                                        PosterResults(name: shelf.rawValue, shelf: shelf, query: "", kind: shelf.kind)
+                                            .navigationTitle(shelf.rawValue)
+                                    } label: { Text("View all").font(.caption.weight(.semibold)) }
+                                }
+                            }
+                        }
+                        if loading { ProgressView("Loading Discover").frame(maxWidth: .infinity) }
+                        else if shelves.values.allSatisfy(\.isEmpty) {
+                            VStack(spacing: 12) {
+                                Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
+                                Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
+                            }.frame(maxWidth: .infinity)
+                        }
+                    }.padding(.vertical, 18)
+                }
+                .refreshable { await loadShelves(refresh: true) }
+            }
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Discover")
+        .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .toolbar {
+            if search.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
+                }
+            }
+        }
+        .task { if shelves.isEmpty { await loadShelves() } }
+    }
+
+    private func loadShelves(refresh: Bool = false) async {
+        loading = true
+        defer { loading = false }
+        for shelf in DiscoverShelf.allCases {
+            if Task.isCancelled { return }
+            if let page = try? await shelf.page(1, api: store.api, refresh: refresh), !Task.isCancelled {
+                shelves[shelf] = page.items
+            }
+        }
+    }
+}
+
+private struct PosterResults: View {
+    @EnvironmentObject private var store: Store
+    let name: String
+    let shelf: DiscoverShelf?
+    let query: String
+    let kind: Kind
+    @State private var titles: [Title] = []
+    @State private var page = 1
+    @State private var more = false
+    @State private var loading = true
+    @State private var failed = false
+    @State private var generation = UUID()
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 16) {
+                    ForEach(titles) { CoverTile(title: $0) }
+                }
+                if loading { ProgressView().accessibilityLabel("Loading \(name)") }
+                else if failed {
+                    Text("Could not load \(name.lowercased()).").foregroundStyle(.secondary)
+                    Button("Retry") { Task { await load() } }
+                } else if titles.isEmpty { Text("No titles found.").foregroundStyle(.secondary) }
+                if more && !loading && !failed { Button("Load more") { Task { await load() } } }
+            }.padding(18).frame(maxWidth: 900).frame(maxWidth: .infinity)
+        }
+        .background(Palette.background)
+        .task(id: "\(kind.rawValue)-\(query)") {
+            generation = UUID()
+            titles = []
+            page = 1
+            more = false
+            await load()
+        }
+    }
+
+    private func load() async {
+        let current = generation
+        loading = true
+        failed = false
+        defer { if current == generation { loading = false } }
+        do {
+            let result: Page<Title>
+            if let shelf { result = try await shelf.page(page, api: store.api) }
+            else {
+                if page == 1 { try await Task.sleep(for: .milliseconds(300)) }
+                let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]
+                result = catalogPage(try await store.api.catalog(kind.rawValue, filters), kind: kind)
+            }
+            guard !Task.isCancelled, current == generation else { return }
+            titles = unique(titles + result.items)
+            page += 1
+            more = result.more
+        } catch {
+            if !Task.isCancelled && current == generation { failed = true }
+        }
+    }
+}
+
 private enum BrowseMode: String, CaseIterable, Identifiable {
     case popular = "Top rated", season = "Seasonal", airing = "Airing", upcoming = "Upcoming"
     var id: Self { self }
 }
 
-struct DiscoverScreen: View {
+struct CatalogBrowser: View {
     @EnvironmentObject private var store: Store
     @State private var kind: Kind = .anime
     @State private var mode: BrowseMode = .popular
@@ -353,7 +563,7 @@ struct DiscoverScreen: View {
                 if next && !loading { Button("Load more") { Task { await load(reset: false) } } }
             }.padding()
         }
-        .navigationTitle("Discover")
+        .navigationTitle("Browse catalog")
         .searchable(text: $search, prompt: "Search anime or manga")
         .background(Palette.canvas)
         .task(id: "\(kind)-\(mode)-\(search)-\(year)-\(season)-\(reload)") {
@@ -407,33 +617,77 @@ struct FriendsScreen: View {
 
     var body: some View {
         List {
-            if store.checking { ProgressView("Checking session") }
-            else if store.account == nil { SignInButton() }
-            else {
+            if store.checking { ProgressView("Checking session").listRowBackground(Color.clear) }
+            else if store.account == nil {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("See what your MyAnimeList friends are watching and reading.").foregroundStyle(.secondary)
+                    SignInButton()
+                }.listRowBackground(Color.clear)
+            } else {
                 if let message = store.friendMessage {
-                    Text(message).foregroundStyle(.secondary)
-                    Button("Retry") { Task { await store.loadFriends(reset: true) } }
+                    Text(message).foregroundStyle(.secondary).listRowBackground(Color.clear)
+                    Button("Retry") { Task { await store.loadFriends(reset: true) } }.listRowBackground(Color.clear)
                 }
                 ForEach(store.activity) { item in
-                    NavigationLink(value: item.title) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            FriendCaption(item: item)
-                            TitleRow(title: item.title, note: statusLabel(item.status ?? ""))
-                        }
-                    }
+                    NavigationLink(value: item.title) { feedRow(item) }
+                        .buttonStyle(.plain)
+                        .listRowInsets(EdgeInsets(top: 9, leading: 14, bottom: 9, trailing: 14))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparatorTint(.white.opacity(0.20))
                 }
-                if store.loadingFriends { ProgressView("Loading friend activity") }
-                else if store.activity.isEmpty { Text("No public friend updates loaded.").foregroundStyle(.secondary) }
-                if store.checkedFriends < store.friends.count {
-                    Button("Check more friends") { Task { await store.loadFriends() } }
+                if store.loadingFriends { ProgressView("Loading friend activity").listRowBackground(Color.clear) }
+                else if store.activity.isEmpty { Text("No public friend updates loaded.").foregroundStyle(.secondary).listRowBackground(Color.clear) }
+                if store.checkedFriends < store.friends.count && !store.loadingFriends {
+                    Button("Check more friends") { Task { await store.loadFriends() } }.listRowBackground(Color.clear)
                 }
             }
         }
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
-        .background(Palette.canvas)
-        .navigationTitle("Friends")
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Friends Feed")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            if store.account != nil {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { Task { await store.loadFriends(reset: true) } } label: {
+                        Label("Refresh friends feed", systemImage: "arrow.clockwise")
+                    }.disabled(store.loadingFriends)
+                }
+            }
+        }
         .task(id: store.account?.id) { if store.checkedFriends == 0 { await store.loadFriends() } }
         .refreshable { await store.loadFriends(reset: true) }
+    }
+
+    private func feedRow(_ item: FriendUpdate) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Art(url: item.friend.avatar, symbol: "person.fill").frame(width: 46, height: 46)
+                .clipShape(.rect(cornerRadius: 7))
+            VStack(alignment: .leading, spacing: 6) {
+                Text("\(Text(item.friend.name).bold()) \(activityPhrase(item)) \(Text(item.title.name).bold())")
+                    .font(.subheadline)
+                let details = [item.score.flatMap { $0 > 0 ? "\($0)/10" : nil }, item.date.map { displayDate($0) }]
+                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
+                if !details.isEmpty { Text(details).font(.caption).foregroundStyle(.secondary) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            Art(url: item.title.image).frame(width: 48, height: 68).clipShape(.rect(cornerRadius: 5))
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private func activityPhrase(_ item: FriendUpdate) -> String {
+        let status = item.status?.lowercased().replacingOccurrences(of: "_", with: " ")
+        if status == "completed" { return "completed" }
+        if status?.hasPrefix("plan to") == true { return "plans to \(item.title.kind == .anime ? "watch" : "read")" }
+        if status == "dropped" { return "dropped" }
+        if status == "on hold" { return "put on hold" }
+        if let progress = item.progress, progress > 0 {
+            let unit = item.title.kind == .anime ? "episode" : "chapter"
+            return "\(item.title.kind == .anime ? "watched" : "read") through \(unit) \(progress) of"
+        }
+        return "updated"
     }
 }
 
