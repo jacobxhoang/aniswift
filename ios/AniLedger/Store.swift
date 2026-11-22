@@ -13,25 +13,41 @@ final class Store: ObservableObject {
     @Published var friendMessage: String?
     @Published var loadingFriends = false
     @Published var checkedFriends = 0
-    @Published private(set) var localFavorites: [Title] = {
+    @Published private(set) var malFavorites: [Kind: [Title]] = [:]
+    @Published private(set) var favoritesUnavailable = false
+    let previousLocalFavorites: [Title] = {
         guard let data = UserDefaults.standard.data(forKey: "aniledger.localFavorites.v1") else { return [] }
         return (try? JSONDecoder().decode([Title].self, from: data)) ?? []
     }()
+    private var favoritesRequest: UUID?
 
-    func isFavorite(_ title: Title) -> Bool {
-        localFavorites.contains { $0.id == title.id }
+    func isMALFavorite(_ title: Title) -> Bool {
+        malFavorites[title.kind]?.contains { $0.id == title.id } ?? false
     }
 
-    func toggleFavorite(_ title: Title) {
-        var updated = localFavorites
-        if let index = updated.firstIndex(where: { $0.id == title.id }) {
-            updated.remove(at: index)
-        } else {
-            updated.insert(title, at: 0)
+    func loadFavorites(refresh: Bool = false) async {
+        guard let user = account else { return }
+        guard refresh || (malFavorites.isEmpty && favoritesRequest == nil) else { return }
+        let request = UUID()
+        favoritesRequest = request
+        defer { if favoritesRequest == request { favoritesRequest = nil } }
+        do {
+            let response = try await api.catalog("users/\(user.name)/favorites", refresh: refresh)
+            guard account?.id == user.id, favoritesRequest == request, !Task.isCancelled else { return }
+            guard let data: Fields = response.read("data") else {
+                favoritesUnavailable = true
+                return
+            }
+            malFavorites = Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
+                let entries: [Fields] = data.read(kind.rawValue) ?? []
+                return (kind, entries.compactMap { Title($0, kind: kind) })
+            })
+            favoritesUnavailable = false
+        } catch {
+            if account?.id == user.id, favoritesRequest == request, !Task.isCancelled {
+                favoritesUnavailable = true
+            }
         }
-        guard let data = try? JSONEncoder().encode(updated) else { return }
-        UserDefaults.standard.set(data, forKey: "aniledger.localFavorites.v1")
-        localFavorites = updated
     }
 
     private var accountGeneration = UUID()
@@ -89,6 +105,9 @@ final class Store: ObservableObject {
             friends = []
             checkedFriends = 0
             friendMessage = nil
+            malFavorites = [:]
+            favoritesUnavailable = false
+            favoritesRequest = nil
             ListCache.remove()
         }
         account = user

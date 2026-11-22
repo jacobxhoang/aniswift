@@ -301,9 +301,7 @@ struct SignInButton: View {
 struct AccountScreen: View {
     @EnvironmentObject private var store: Store
     @State private var stats: Fields?
-    @State private var favorites: [Kind: [Title]] = [:]
     @State private var loadingProfile = false
-    @State private var favoritesUnavailable = false
     @State private var confirmSignOut = false
 
     var body: some View {
@@ -312,7 +310,7 @@ struct AccountScreen: View {
                 if let account = store.account {
                     profileHeader(account)
                     if loadingProfile { ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset) }
-                    else if favoritesUnavailable {
+                    else if store.favoritesUnavailable {
                         Button("Retry loading favorites") { Task { await loadProfile(refresh: true) } }
                             .padding(.horizontal, LedgerLayout.inset)
                     }
@@ -327,9 +325,9 @@ struct AccountScreen: View {
                     }.padding(.horizontal, LedgerLayout.inset)
                 }
                 ForEach(Kind.allCases) { kind in
-                    let titles = store.localFavorites.filter { $0.kind == kind }
+                    let titles = store.previousLocalFavorites.filter { $0.kind == kind && !store.isMALFavorite($0) }
                     if !titles.isEmpty {
-                        PosterShelf(heading: "Favorite \(kind.rawValue) on this device", titles: titles) {
+                        PosterShelf(heading: "Previously saved \(kind.rawValue)", titles: titles) {
                             EmptyView()
                         }
                     }
@@ -365,8 +363,6 @@ struct AccountScreen: View {
         }
         .task(id: store.account?.id) {
             stats = nil
-            favorites = [:]
-            favoritesUnavailable = false
             await loadProfile()
         }
         .refreshable { await loadProfile(refresh: true) }
@@ -426,7 +422,7 @@ struct AccountScreen: View {
 
     @ViewBuilder
     private func favoriteShelf(_ kind: Kind) -> some View {
-        if let titles = favorites[kind] {
+        if let titles = store.malFavorites[kind] {
             if titles.isEmpty {
                 Text("No public favorite \(kind.rawValue).").font(.subheadline)
                     .foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
@@ -449,20 +445,12 @@ struct AccountScreen: View {
     private func loadProfile(refresh: Bool = false) async {
         guard let user = store.account else { loadingProfile = false; return }
         loadingProfile = true
-        favoritesUnavailable = false
-        let path = "users/\(user.name)"
-        async let statsResponse = store.api.catalog(path + "/statistics", refresh: refresh)
-        async let favoritesResponse = store.api.catalog(path + "/favorites", refresh: refresh)
-        let result = try? await statsResponse
-        let favoriteResult = try? await favoritesResponse
+        async let favorites: Void = store.loadFavorites(refresh: refresh)
+        let path = "users/\(user.name)/statistics"
+        let result = try? await store.api.catalog(path, refresh: refresh)
+        await favorites
         guard !Task.isCancelled, store.account == user else { return }
         stats = result?.read("data")
-        if let data: Fields = favoriteResult?.read("data") {
-            for kind in Kind.allCases {
-                let rows: [Fields] = data.read(kind.rawValue) ?? []
-                favorites[kind] = rows.compactMap { Title($0, kind: kind) }
-            }
-        } else { favoritesUnavailable = true }
         loadingProfile = false
     }
 }
