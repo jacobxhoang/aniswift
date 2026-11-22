@@ -535,6 +535,14 @@ struct ProfileStats: Codable {
         kind == .anime ? animeDetails : mangaDetails
     }
 
+    func isListEmpty(for kind: Kind) -> Bool {
+        if let count = kind == .anime ? animeCount : mangaCount {
+            return count == 0
+        }
+        guard let details = details(for: kind) else { return false }
+        return kind.statuses.allSatisfy { details.statusCounts[$0] == 0 }
+    }
+
     init?(_ fields: Fields) {
         let anime: Fields? = fields.read("anime")
         let manga: Fields? = fields.read("manga")
