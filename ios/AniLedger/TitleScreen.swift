@@ -499,14 +499,19 @@ struct TitleScreen: View {
 
     private var friends: some View {
         block("Friends’ list activity") {
-            ForEach(friendRows) { row in
-                VStack(alignment: .leading, spacing: 4) {
-                    FriendCaption(item: row)
-                    Text([row.status.map(statusLabel),
-                          row.progress.map { "\($0)/\(row.total.map { String($0) } ?? "?")" },
-                          row.score.flatMap { $0 > 0 ? "\($0)/10" : nil }].compactMap { $0 }.joined(separator: " · "))
-                        .font(.subheadline).foregroundStyle(.secondary)
+            VStack(spacing: 0) {
+                ForEach(friendRows) { row in
+                    TitleFriendActivityRow(item: row)
+                    if row.id != friendRows.last?.id {
+                        Divider().padding(.leading, 62)
+                    }
                 }
+            }
+            .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 12))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(.white.opacity(0.08))
+                    .allowsHitTesting(false)
             }
             if friendsUnavailable && !checkingFriends {
                 Text("Some friends’ activity is unavailable.").foregroundStyle(.secondary)
@@ -699,6 +704,66 @@ struct TitleScreen: View {
             } while friendRows.isEmpty && friendOffset < store.friends.count
             completedFriendBatches += 1
         } catch { if !Task.isCancelled { friendsUnavailable = true } }
+    }
+}
+
+private struct TitleFriendActivityRow: View {
+    let item: FriendUpdate
+
+    private var progressLabel: String? {
+        guard let progress = item.progress else { return nil }
+        let total = item.total.flatMap { $0 > 0 ? $0 : nil }
+        let singular = (total ?? progress) == 1
+        let unit = item.title.kind == .anime ? (singular ? "episode" : "episodes") : (singular ? "chapter" : "chapters")
+        let count = total.map { "\(progress.formatted()) / \($0.formatted())" } ?? progress.formatted()
+        return "\(count) \(unit)"
+    }
+
+    var body: some View {
+        NavigationLink(value: item.friend) {
+            HStack(alignment: .top, spacing: 10) {
+                Art(url: item.friend.avatar, symbol: "person.fill")
+                    .frame(width: 40, height: 40)
+                    .clipShape(.circle)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.friend.name)
+                        .font(.subheadline.weight(.semibold))
+                    let date = displayDate(item.date)
+                    if !date.isEmpty {
+                        Text(date).font(.caption).foregroundStyle(.secondary)
+                    }
+                    FlowLayout {
+                        if let status = item.status {
+                            Text(statusLabel(status))
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(.white.opacity(0.10), in: .capsule)
+                        }
+                        if let progressLabel {
+                            Text(progressLabel).foregroundStyle(.secondary)
+                        }
+                        if let score = item.score, score > 0 {
+                            Label("\(score) / 10", systemImage: "star.fill")
+                                .foregroundStyle(.yellow)
+                                .accessibilityLabel("Score \(score) out of 10")
+                        }
+                    }
+                    .font(.caption)
+                    .monospacedDigit()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 3)
+                    .accessibilityHidden(true)
+            }
+            .padding(12)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Opens their profile")
     }
 }
 

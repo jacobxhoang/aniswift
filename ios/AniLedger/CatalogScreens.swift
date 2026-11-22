@@ -1184,17 +1184,3 @@ struct FriendsScreen: View {
     }
 
 }
-
-struct FriendCaption: View {
-    let item: FriendUpdate
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Art(url: item.friend.avatar, symbol: "person.fill")
-                .frame(width: 28, height: 28).clipShape(.circle)
-            Text(item.friend.name).font(.caption.weight(.semibold))
-            Spacer()
-            Text(displayDate(item.date)).font(.caption).foregroundStyle(.secondary)
-        }
-    }
-}

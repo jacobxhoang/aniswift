@@ -416,6 +416,8 @@ func activityDate(_ value: String?) -> Date {
     guard let value else { return .distantPast }
     let iso = ISO8601DateFormatter()
     if let date = iso.date(from: value) { return date }
+    iso.formatOptions.insert(.withFractionalSeconds)
+    if let date = iso.date(from: value) { return date }
     let formatter = DateFormatter()
     formatter.locale = Locale(identifier: "en_US_POSIX")
     formatter.defaultDate = Date()
