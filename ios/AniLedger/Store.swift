@@ -372,11 +372,14 @@ final class Store: ObservableObject {
     }
 
     private func sortedFriendActivity(_ items: [FriendUpdate]) -> [FriendUpdate] {
-        unique(items).map { (item: $0, date: activityDate($0.date)) }
-            .sorted { lhs, rhs in
-                lhs.date == rhs.date ? lhs.item.id < rhs.item.id : lhs.date > rhs.date
-            }
-            .map(\.item)
+        var dated: [(item: FriendUpdate, date: Date)] = unique(items).map { update in
+            (item: update, date: activityDate(update.date))
+        }
+        dated.sort { lhs, rhs in
+            if lhs.date == rhs.date { return lhs.item.id < rhs.item.id }
+            return lhs.date > rhs.date
+        }
+        return dated.map { $0.item }
     }
 
     func fetchFriends(_ user: Account, refresh: Bool = false) async throws {
