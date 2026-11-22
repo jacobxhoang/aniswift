@@ -111,11 +111,26 @@ struct HomeScreen: View {
 }
 
 private struct LedgerSearchBar: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Binding var query: String
     @Binding var isPresented: Bool
     @FocusState private var focused: Bool
     @ScaledMetric(relativeTo: .body) private var controlHeight: CGFloat = 44
     @State private var didFocus = false
+
+    static func animation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .easeInOut(duration: 0.24)
+    }
+
+    static func transition(reduceMotion: Bool) -> AnyTransition {
+        guard !reduceMotion else { return .identity }
+        return .asymmetric(
+            insertion: .scale(scale: 0.88, anchor: .trailing).combined(with: .opacity)
+                .combined(with: .offset(y: -8)),
+            removal: .scale(scale: 0.92, anchor: .trailing).combined(with: .opacity)
+                .combined(with: .offset(y: -6))
+        )
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -138,8 +153,10 @@ private struct LedgerSearchBar: View {
 
             Button {
                 focused = false
-                query = ""
-                isPresented = false
+                withAnimation(Self.animation(reduceMotion: reduceMotion)) {
+                    query = ""
+                    isPresented = false
+                }
             } label: {
                 Image(systemName: "xmark")
                     .font(.body.weight(.semibold))
@@ -158,7 +175,12 @@ private struct LedgerSearchBar: View {
         .background(Palette.background)
         .task {
             guard !didFocus else { return }
-            await Task.yield()
+            if !reduceMotion {
+                // Let the header expand before the keyboard changes the safe area.
+                try? await Task.sleep(for: .milliseconds(240))
+            } else {
+                await Task.yield()
+            }
             guard !Task.isCancelled, isPresented else { return }
             focused = true
             didFocus = true
@@ -168,6 +190,7 @@ private struct LedgerSearchBar: View {
 
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
@@ -241,7 +264,10 @@ struct ListsScreen: View {
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
         .safeAreaInset(edge: .top, spacing: 0) {
-            if isSearching { LedgerSearchBar(query: $query, isPresented: $searchPresented) }
+            if isSearching {
+                LedgerSearchBar(query: $query, isPresented: $searchPresented)
+                    .transition(LedgerSearchBar.transition(reduceMotion: reduceMotion))
+            }
         }
         .toolbar(isSearching ? .hidden : .visible, for: .navigationBar)
         .navigationTitle(kind.label)
@@ -257,7 +283,11 @@ struct ListsScreen: View {
                 }
                 if !searchPresented {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { searchPresented = true } label: {
+                        Button {
+                            withAnimation(LedgerSearchBar.animation(reduceMotion: reduceMotion)) {
+                                searchPresented = true
+                            }
+                        } label: {
                             Label("Search list", systemImage: "magnifyingglass")
                         }
                     }
@@ -470,6 +500,7 @@ struct PosterShelf<Trailing: View>: View {
 
 struct DiscoverScreen: View {
     @EnvironmentObject private var store: Store
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
     @State private var searchPresented = false
@@ -524,6 +555,7 @@ struct DiscoverScreen: View {
                     }
                 }
                 .background(Palette.background)
+                .transition(LedgerSearchBar.transition(reduceMotion: reduceMotion))
             }
         }
         .scrollDismissesKeyboard(.interactively)
@@ -533,7 +565,11 @@ struct DiscoverScreen: View {
                 NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
             }
             ToolbarItem(placement: .topBarTrailing) {
-                Button { searchPresented = true } label: {
+                Button {
+                    withAnimation(LedgerSearchBar.animation(reduceMotion: reduceMotion)) {
+                        searchPresented = true
+                    }
+                } label: {
                     Label("Search catalog", systemImage: "magnifyingglass")
                 }
             }
