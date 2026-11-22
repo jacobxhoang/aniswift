@@ -97,6 +97,7 @@ final class Store: ObservableObject {
             account = cache.account
             organization = readOrganization(for: cache.account)
             savedLists = cache.lists
+            restoreFriendFeed(for: cache.account)
             checking = false
         }
         let generation = accountGeneration
@@ -147,8 +148,33 @@ final class Store: ObservableObject {
             loadingFriends = false
             friendMessage = nil
             ListCache.remove()
+            if let user {
+                restoreFriendFeed(for: user)
+            } else {
+                FriendFeedCache.remove()
+            }
         }
         account = user
+    }
+
+    private func restoreFriendFeed(for user: Account) {
+        guard let cache = FriendFeedCache.read() else { return }
+        guard cache.accountID == user.id else {
+            FriendFeedCache.remove()
+            return
+        }
+        friends = cache.friends
+        activity = cache.activity
+        checkedFriends = cache.checkedFriends
+        historyCursors = cache.historyCursors
+        friendFeedPage = cache.page
+    }
+
+    private func saveFriendFeed() {
+        guard let account else { return }
+        FriendFeedCache(accountID: account.id, friends: friends, activity: activity,
+                        checkedFriends: checkedFriends, historyCursors: historyCursors,
+                        page: friendFeedPage).write()
     }
 
     func handle(_ error: Error) {
@@ -307,6 +333,7 @@ final class Store: ObservableObject {
             let sorted = sortedFriendActivity(updates)
             activity = reset ? sorted : unique(activity + sorted)
             friendFeedPage += 1
+            saveFriendFeed()
         } catch {
             if !Task.isCancelled, accountGeneration == generation { friendMessage = error.localizedDescription }
         }
@@ -352,6 +379,7 @@ final class Store: ObservableObject {
         let older = sortedFriendActivity(results.flatMap { $0.1.items })
         activity = unique(activity + older)
         friendFeedPage += 1
+        saveFriendFeed()
     }
 
     private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
@@ -433,10 +461,35 @@ final class Store: ObservableObject {
     }
 }
 
-private struct FriendHistoryCursor {
+private struct FriendHistoryCursor: Codable {
     let friend: Friend
     let kind: Kind
     let page: Int
+}
+
+private struct FriendFeedCache: Codable {
+    let accountID: Int
+    let friends: [Friend]
+    let activity: [FriendUpdate]
+    let checkedFriends: Int
+    let historyCursors: [FriendHistoryCursor]
+    let page: Int
+
+    private static let file = URL.cachesDirectory.appending(path: "AniLedger-friends-feed-v1.json")
+
+    static func read() -> Self? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    func write() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        try? data.write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func remove() {
+        try? FileManager.default.removeItem(at: file)
+    }
 }
 
 private struct SavedList: Codable, Equatable {

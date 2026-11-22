@@ -252,6 +252,7 @@ struct ListsScreen: View {
                 Text("\(count)\(partial ? "+" : "")").monospacedDigit()
                 Image(systemName: "chevron.right")
                     .rotationEffect(.degrees(expanded ? 90 : 0))
+                    .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: expanded)
                     .font(.footnote.weight(.medium))
                     .foregroundStyle(.secondary)
                     .frame(width: 18)

@@ -227,7 +227,7 @@ struct Account: Codable, Equatable {
     let image: URL?
 }
 
-struct Friend: Identifiable, Hashable {
+struct Friend: Identifiable, Hashable, Codable {
     let name: String
     let avatar: URL?
     var id: String { name.lowercased() }
@@ -240,7 +240,7 @@ struct Friend: Identifiable, Hashable {
     }
 }
 
-struct FriendUpdate: Identifiable {
+struct FriendUpdate: Identifiable, Codable {
     let friend: Friend
     let title: Title
     let status: String?
@@ -257,7 +257,9 @@ struct FriendUpdate: Identifiable {
         score = fields.read("score")
         progress = fields.read("progress", "episodesWatched", "chaptersRead", "watchedEpisodes", "readChapters")
         total = fields.read("total") ?? title.total
-        date = fields.string("updatedAt", "updated_at", "date")
+        let rawDate = fields.string("updatedAt", "updated_at", "date")
+        let parsedDate = activityDate(rawDate)
+        date = parsedDate == .distantPast ? rawDate : parsedDate.formatted(.iso8601)
     }
 
     var activityPhrase: String {
