@@ -382,6 +382,7 @@ struct AccountScreen: View {
                         Button("Retry loading profile") { Task { await loadProfile(refresh: true) } }
                             .padding(.horizontal, LedgerLayout.inset)
                     }
+                    ProfileStatistics(stats: profile.stats?.value)
                     customListsLink
                     ForEach(Kind.allCases) { kind in favoriteShelf(kind) }
                 } else {
@@ -515,6 +516,7 @@ struct FriendProfileScreen: View {
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 }
+                ProfileStatistics(stats: profile.stats?.value)
                 recentUpdates
                 ForEach(Kind.allCases) { kind in
                     if let titles = profile.favorites?.value[kind], !titles.isEmpty {
@@ -656,6 +658,190 @@ private struct ProfileStatsHeader: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
+    }
+}
+
+private struct ProfileStatistics: View {
+    let stats: ProfileStats?
+
+    var body: some View {
+        ForEach(Kind.allCases) { kind in
+            if let details = stats?.details(for: kind) {
+                ProfileStatisticsSection(kind: kind, stats: details)
+                    .padding(.horizontal, LedgerLayout.inset)
+            }
+        }
+    }
+}
+
+private struct ProfileStatisticsSection: View {
+    let kind: Kind
+    let stats: ProfileMediaStats
+    @State private var expanded = true
+
+    private var statuses: [Status] {
+        zip(kind.statuses, [
+            (kind == .anime ? "play.fill" : "book.fill", Color.blue),
+            ("checkmark", .green),
+            ("pause.fill", .orange),
+            ("xmark", .red),
+            ("calendar", .gray)
+        ]).map { key, style in
+            Status(key: key, icon: style.0, color: style.1, count: stats.statusCounts[key])
+        }
+    }
+
+    private var total: Int { statuses.compactMap(\.count).reduce(0, +) }
+
+    private var totalsLabel: String {
+        var parts: [String] = []
+        if let progress = stats.progress {
+            let unit = kind == .anime ? (progress == 1 ? "episode" : "episodes") : (progress == 1 ? "chapter" : "chapters")
+            parts.append("\(kind == .anime ? "Watched" : "Read") \(progress.formatted()) \(unit)")
+        }
+        if kind == .manga, let volumes = stats.volumes {
+            parts.append("\(volumes.formatted()) \(volumes == 1 ? "volume" : "volumes")")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 12) {
+                    summary
+                    if total > 0 {
+                        statusChart
+                        Divider()
+                    }
+                    statusRows
+                }
+                .padding(14)
+                .background(Palette.surface, in: .rect(cornerRadius: 18))
+
+                if !totalsLabel.isEmpty {
+                    Text(totalsLabel)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 14)
+                }
+            }
+            .padding(.top, 9)
+        } label: {
+            Text("\(kind.label) Statistics")
+                .font(.headline)
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+        }
+        .tint(.blue)
+    }
+
+    private var summary: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack {
+                meanScore
+                Spacer(minLength: 10)
+                days
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                meanScore
+                days
+            }
+        }
+        .font(.footnote)
+        .foregroundStyle(.secondary)
+    }
+
+    @ViewBuilder
+    private var meanScore: some View {
+        if let score = stats.meanScore, score > 0 {
+            Text("Mean score \(score.formatted(.number.precision(.fractionLength(2))))")
+        }
+    }
+
+    @ViewBuilder
+    private var days: some View {
+        if let days = stats.days {
+            Text("\(days.formatted(.number.precision(.fractionLength(0...1)))) \(days == 1 ? "day" : "days") \(kind == .anime ? "watched" : "read")")
+        }
+    }
+
+    private var statusChart: some View {
+        VStack(spacing: 4) {
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+                    ForEach(statuses.filter { ($0.count ?? 0) > 0 }) { status in
+                        let width = geometry.size.width * CGFloat(status.count ?? 0) / CGFloat(total)
+                        status.color
+                            .overlay {
+                                if width >= 26 {
+                                    Image(systemName: status.icon)
+                                        .font(.caption.weight(.semibold))
+                                        .foregroundStyle(.black.opacity(0.8))
+                                }
+                            }
+                            .frame(width: width)
+                    }
+                }
+            }
+            .frame(height: 24)
+            .clipShape(.rect(cornerRadius: 5))
+
+            HStack {
+                Text(0.formatted())
+                Spacer()
+                Text((total / 2).formatted())
+                Spacer()
+                Text(total.formatted())
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .monospacedDigit()
+        }
+        .accessibilityHidden(true)
+    }
+
+    private var statusRows: some View {
+        VStack(spacing: 0) {
+            ForEach(statuses) { status in
+                if status.id != statuses[0].id {
+                    Divider().padding(.leading, 42)
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: status.icon)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(status.color)
+                        .frame(width: 32, height: 32)
+                        .background(status.color.opacity(0.18), in: .rect(cornerRadius: 7))
+                        .accessibilityHidden(true)
+
+                    Text(status.label).font(.subheadline)
+                    Spacer(minLength: 8)
+                    Text(status.count?.formatted() ?? "—")
+                        .font(.subheadline.weight(.semibold))
+                        .monospacedDigit()
+                        .accessibilityLabel(status.count?.formatted() ?? "Count unavailable")
+                }
+                .padding(.vertical, 7)
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    private struct Status: Identifiable {
+        let key: String
+        let icon: String
+        let color: Color
+        let count: Int?
+        var id: String { key }
+
+        var label: String {
+            switch key {
+            case "plan_to_watch": "Plan to Watch"
+            case "plan_to_read": "Plan to Read"
+            default: statusLabel(key)
+            }
+        }
     }
 }
 

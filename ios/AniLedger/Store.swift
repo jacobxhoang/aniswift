@@ -38,7 +38,7 @@ final class Store: ObservableObject {
         if let pending = profileRequests[key] { return await pending.value }
 
         let cached = profile(for: name)
-        let needsStats = refresh || cached.stats?.isFresh != true
+        let needsStats = refresh || cached.stats?.isFresh != true || cached.stats?.value.hasDetailedStatistics != true
         let needsFavorites = refresh || cached.favorites?.isFresh != true
         guard needsStats || needsFavorites else { return true }
 
@@ -364,6 +364,14 @@ struct ProfileStats: Codable {
     let mangaCount: Int?
     let daysWatched: Double?
     let chaptersRead: Int?
+    let animeDetails: ProfileMediaStats?
+    let mangaDetails: ProfileMediaStats?
+
+    var hasDetailedStatistics: Bool { animeDetails != nil || mangaDetails != nil }
+
+    func details(for kind: Kind) -> ProfileMediaStats? {
+        kind == .anime ? animeDetails : mangaDetails
+    }
 
     init?(_ fields: Fields) {
         let anime: Fields? = fields.read("anime")
@@ -373,6 +381,34 @@ struct ProfileStats: Codable {
         mangaCount = manga?.read("totalEntries", "total_entries")
         daysWatched = anime?.read("daysWatched", "days_watched")
         chaptersRead = manga?.read("chaptersRead", "chapters_read", "chapters")
+        animeDetails = anime.map { ProfileMediaStats($0, kind: .anime) }
+        mangaDetails = manga.map { ProfileMediaStats($0, kind: .manga) }
+    }
+}
+
+struct ProfileMediaStats: Codable {
+    let statusCounts: [String: Int]
+    let meanScore: Double?
+    let days: Double?
+    let progress: Int?
+    let volumes: Int?
+
+    init(_ fields: Fields, kind: Kind) {
+        let planKey = kind.statuses.last!
+        let values: [String: Int?] = [
+            kind.statuses[0]: fields.read(kind.statuses[0]),
+            "completed": fields.read("completed"),
+            "on_hold": fields.read("onHold", "on_hold"),
+            "dropped": fields.read("dropped"),
+            planKey: fields.read(kind == .anime ? "planToWatch" : "planToRead", planKey)
+        ]
+        statusCounts = values.compactMapValues { count in count.flatMap { $0 >= 0 ? $0 : nil } }
+        meanScore = fields.read("meanScore", "mean_score")
+        days = kind == .anime ? fields.read("daysWatched", "days_watched") : fields.read("daysRead", "days_read")
+        progress = kind == .anime
+            ? fields.read("episodesWatched", "episodes_watched", "episodes")
+            : fields.read("chaptersRead", "chapters_read", "chapters")
+        volumes = fields.read("volumesRead", "volumes_read", "volumes")
     }
 }
 
