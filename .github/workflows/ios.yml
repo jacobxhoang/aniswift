@@ -1,0 +1,47 @@
+name: Build AniLedger IPA
+on:
+  push:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+    inputs:
+      signed:
+        description: Export an IPA for devices registered in the distribution profile
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build unsigned IPA
+        if: ${{ !inputs.signed }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/AniLedger.xcarchive"
+          xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath "$archive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO archive
+          test -f "$archive/Products/Applications/AniLedger.app/AniLedger"
+          mkdir -p "$RUNNER_TEMP/ipa/Payload"
+          ditto "$archive/Products/Applications/AniLedger.app" "$RUNNER_TEMP/ipa/Payload/AniLedger.app"
+          (cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$RUNNER_TEMP/AniLedger-Unsigned.ipa" Payload)
+      - name: Sign and export IPA
+        if: ${{ inputs.signed }}
+        shell: bash
+        env:
+          IOS_CERTIFICATE_BASE64: ${{ secrets.IOS_CERTIFICATE_BASE64 }}
+          IOS_CERTIFICATE_PASSWORD: ${{ secrets.IOS_CERTIFICATE_PASSWORD }}
+          IOS_PROFILE_BASE64: ${{ secrets.IOS_PROFILE_BASE64 }}
+        run: bash ios/build-signed.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.signed && 'AniLedger-Signed' || 'AniLedger-Unsigned' }}
+          path: ${{ runner.temp }}/AniLedger-*.ipa
+          if-no-files-found: error

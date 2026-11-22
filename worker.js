@@ -5,6 +5,11 @@ const CALLBACK = '/auth/mal/callback';
 const STATE_COOKIE = 'ani_oauth';
 const SESSION_COOKIE = 'ani_session';
 const REFRESH_COOKIE = 'ani_refresh';
+const MOBILE_SCHEME = 'aniledger://auth';
+const MOBILE_SESSION = 'ani_mobile_session';
+const MOBILE_HANDOFF = 'ani_mobile_handoff';
+const proofPattern = /^[A-Za-z0-9_-]{43}$/;
+const proofHash = async (verifier) => base64(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(verifier))));
 const SESSION_AGE = 30 * 24 * 60 * 60;
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -41,12 +46,15 @@ async function seal(env, name, value) {
 
 async function unseal(request, env, name) {
   const raw = (request.headers.get('Cookie') || '').split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
-  if (!raw) return null;
+  return raw ? unsealValue(env, name, raw.slice(name.length + 1)) : null;
+}
+
+async function unsealValue(env, name, value) {
   try {
-    const [iv, cipher] = raw.slice(name.length + 1).split('.');
+    const [iv, cipher] = value.split('.');
     const bytes = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: fromBase64(iv), additionalData: enc.encode(name) }, await cookieKey(env), fromBase64(cipher));
-    const value = JSON.parse(dec.decode(bytes));
-    return value.until > Date.now() ? value : null;
+    const decoded = JSON.parse(dec.decode(bytes));
+    return decoded.until > Date.now() ? decoded : null;
   } catch {
     return null;
   }
@@ -79,7 +87,7 @@ async function getTokens(env, fields) {
   return { access: token.access_token, refresh: token.refresh_token || fields.refresh_token };
 }
 
-async function beginAuth(request, env) {
+async function beginAuth(request, env, mobileChallenge = null) {
   if (!config(env)) return redirect('/?auth=setup');
   const state = random(24);
   const verifier = random(48);
@@ -87,7 +95,7 @@ async function beginAuth(request, env) {
     client_id: env.MAL_CLIENT_ID, response_type: 'code', state,
     redirect_uri: env.MAL_REDIRECT_URI, code_challenge: verifier, code_challenge_method: 'plain',
   });
-  const cookie = await seal(env, STATE_COOKIE, { state, verifier, until: Date.now() + 600_000 });
+  const cookie = await seal(env, STATE_COOKIE, { state, verifier, mobileChallenge, until: Date.now() + 600_000 });
   return redirect(`${MAL_AUTH}/authorize?${query}`, [makeCookie(request, STATE_COOKIE, cookie, 600, CALLBACK)]);
 }
 
@@ -98,7 +106,8 @@ async function finishAuth(request, env, url) {
   const code = url.searchParams.get('code');
   const state = url.searchParams.get('state');
   if (!pending || !state || state !== pending.state) return redirect('/?auth=expired', [clearState]);
-  if (!code) return redirect('/?auth=cancelled', [clearState]);
+  const failure = (reason) => redirect(pending.mobileChallenge ? `${MOBILE_SCHEME}?error=${reason}` : `/?auth=${reason}`, [clearState]);
+  if (!code) return failure('cancelled');
   try {
     const tokens = await getTokens(env, { grant_type: 'authorization_code', code, code_verifier: pending.verifier, redirect_uri: env.MAL_REDIRECT_URI });
     const result = await malFetch('/users/@me?fields=id,name,picture', tokens.access);
@@ -107,10 +116,25 @@ async function finishAuth(request, env, url) {
     if (!profile.id || !profile.name) throw new Error('Incomplete MyAnimeList profile');
     const user = { id: profile.id, name: profile.name, image: profile.picture || null };
     const session = { ...tokens, user, sid: random(18), until: Date.now() + SESSION_AGE * 1000 };
+    if (pending.mobileChallenge) {
+      const handoff = await seal(env, MOBILE_HANDOFF, { session, challenge: pending.mobileChallenge, until: Date.now() + 90_000 });
+      return redirect(`${MOBILE_SCHEME}?handoff=${handoff}`, [clearState]);
+    }
     return redirect('/?auth=connected', [clearState, ...await sessionCookies(request, env, session)]);
   } catch {
-    return redirect('/?auth=failed', [clearState]);
+    return failure('failed');
   }
+}
+
+async function exchangeMobile(request, env) {
+  if (!config(env)) return json({ error: 'MyAnimeList sign-in is unavailable.' }, 503);
+  let input;
+  try { input = await readListUpdate(request); } catch { return json({ error: 'Invalid sign-in request.' }, 400); }
+  if (typeof input?.verifier !== 'string' || !proofPattern.test(input.verifier) ||
+      typeof input.handoff !== 'string' || input.handoff.length > 3500) return json({ error: 'Invalid sign-in request.' }, 400);
+  const handoff = await unsealValue(env, MOBILE_HANDOFF, input.handoff);
+  if (!handoff || handoff.challenge !== await proofHash(input.verifier)) return json({ error: 'Sign-in expired. Try again.' }, 401);
+  return json({ user: handoff.session.user, token: await seal(env, MOBILE_SESSION, handoff.session) });
 }
 
 async function sessionCookies(request, env, { access, refresh, user, sid, until }) {
@@ -137,12 +161,12 @@ class MalError extends Error {
   }
 }
 
-async function withMal(request, env, session, operation) {
+async function withMal(request, env, session, operation, mobile = false) {
   let renewal;
   const call = async (path, init) => {
     let result = await malFetch(path, (renewal || session).access, init);
     if (result.status === 401) {
-      const secret = await unseal(request, env, REFRESH_COOKIE);
+      const secret = mobile ? session : await unseal(request, env, REFRESH_COOKIE);
       if (secret?.sid !== session.sid) throw new MalError('Your MyAnimeList session expired. Sign in again.', 401);
       try {
         renewal = { ...session, ...await getTokens(env, { grant_type: 'refresh_token', refresh_token: secret.refresh }) };
@@ -161,7 +185,8 @@ async function withMal(request, env, session, operation) {
   try {
     const data = await operation(call);
     const response = json(data);
-    if (renewal) for (const cookie of await sessionCookies(request, env, renewal)) response.headers.append('Set-Cookie', cookie);
+    if (renewal && mobile) response.headers.set('X-AniLedger-Session', await seal(env, MOBILE_SESSION, renewal));
+    if (renewal && !mobile) for (const cookie of await sessionCookies(request, env, renewal)) response.headers.append('Set-Cookie', cookie);
     return response;
   } catch (error) {
     const status = error instanceof MalError ? error.status : 502;
@@ -258,21 +283,32 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
     const { method } = request;
+    if (pathname === '/auth/mobile' && method === 'GET') {
+      const challenge = url.searchParams.get('challenge') || '';
+      if (!proofPattern.test(challenge)) return json({ error: 'Invalid sign-in challenge.' }, 400);
+      if (!config(env)) return redirect(`${MOBILE_SCHEME}?error=setup`);
+      return beginAuth(request, env, challenge);
+    }
+    if (pathname === '/api/mobile/exchange' && method === 'POST') return exchangeMobile(request, env);
     if (pathname === '/auth/mal' && method === 'GET') return beginAuth(request, env);
     if (pathname === CALLBACK && method === 'GET') return finishAuth(request, env, url);
     if (pathname.startsWith('/api/')) {
-      if (method !== 'GET' && !allowedOrigin(request, url)) return json({ error: 'Request origin was rejected.' }, 403);
-      const session = config(env) ? await unseal(request, env, SESSION_COOKIE) : null;
+      const bearer = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(request.headers.get('Authorization') || '');
+      const mobile = Boolean(bearer);
+      if (method !== 'GET' && !mobile && !allowedOrigin(request, url)) return json({ error: 'Request origin was rejected.' }, 403);
+      const session = !config(env) ? null : mobile
+        ? await unsealValue(env, MOBILE_SESSION, bearer[1])
+        : await unseal(request, env, SESSION_COOKIE);
       if (pathname === '/api/session' && method === 'GET') return json({ configured: config(env), user: session?.user || null });
-      if (pathname === '/api/logout' && method === 'POST') return clearSession(request, { ok: true });
+      if (pathname === '/api/logout' && method === 'POST') return mobile ? json({ ok: true }) : clearSession(request, { ok: true });
       if (!session) return json({ error: 'Sign in with MyAnimeList to use your lists.' }, 401);
-      if (pathname === '/api/suggestions/anime' && method === 'GET') return withMal(request, env, session, getAnimeSuggestions);
+      if (pathname === '/api/suggestions/anime' && method === 'GET') return withMal(request, env, session, getAnimeSuggestions, mobile);
       const match = pathname.match(/^\/api\/lists\/(anime|manga)(?:\/([1-9]\d{0,10}))?$/);
       if (match) {
         const [, kind, id] = match;
         const page = Math.min(1000, Math.max(1, Number.parseInt(url.searchParams.get('page'), 10) || 1));
-        if (!id && method === 'GET') return withMal(request, env, session, (call) => getList(call, kind, page));
-        if (id && ['PUT', 'DELETE'].includes(method)) return withMal(request, env, session, (call) => writeList(request, call, kind, id));
+        if (!id && method === 'GET') return withMal(request, env, session, (call) => getList(call, kind, page), mobile);
+        if (id && ['PUT', 'DELETE'].includes(method)) return withMal(request, env, session, (call) => writeList(request, call, kind, id), mobile);
       }
       return json({ error: 'Route not found.' }, 404);
     }
