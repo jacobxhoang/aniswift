@@ -13,7 +13,11 @@ final class Store: ObservableObject {
     @Published var activity: [FriendUpdate] = []
     @Published var friendMessage: String?
     @Published var loadingFriends = false
-    @Published var checkedFriends = 0
+    @Published private(set) var friendFeedPage = 0
+    @Published private var checkedFriends = 0
+    @Published private var historyCursors: [FriendHistoryCursor] = []
+
+    var hasMoreFriendActivity: Bool { checkedFriends < friends.count || !historyCursors.isEmpty }
     @Published private var profiles = ProfileCache.read()
     private var profileRequests: [String: Task<Bool, Never>] = [:]
     let previousLocalFavorites: [Title] = {
@@ -138,6 +142,8 @@ final class Store: ObservableObject {
             activity = []
             friends = []
             checkedFriends = 0
+            friendFeedPage = 0
+            historyCursors = []
             loadingFriends = false
             friendMessage = nil
             ListCache.remove()
@@ -272,35 +278,105 @@ final class Store: ObservableObject {
         defer { if accountGeneration == generation { loadingFriends = false } }
         friendMessage = nil
 
+        if !reset, friendFeedPage > 0, checkedFriends >= friends.count {
+            await loadOlderFriendActivity(generation: generation)
+            return
+        }
+
         do {
             let refreshedFriends = reset || friends.isEmpty
                 ? try await friendList(user, refresh: reset)
                 : friends
             guard !Task.isCancelled, accountGeneration == generation else { return }
             let start = reset ? 0 : checkedFriends
-            let batch = Array(refreshedFriends.dropFirst(start).prefix(6))
-            var updates: [FriendUpdate] = []
-            var receivedUpdates = batch.isEmpty
-            for friend in batch {
-                guard !Task.isCancelled, accountGeneration == generation else { return }
-                if let items = try? await publicUpdates(friend, refresh: reset) {
-                    updates += items
-                    receivedUpdates = true
-                }
-            }
+            let batch = Array(refreshedFriends.dropFirst(start).prefix(8))
+            let results = await loadRecentFriendActivity(batch, refresh: reset)
             guard !Task.isCancelled, accountGeneration == generation else { return }
-            if reset && !receivedUpdates && !activity.isEmpty {
+            if reset && !batch.isEmpty && results.isEmpty && !activity.isEmpty {
                 friendMessage = "Could not refresh the feed."
                 return
             }
+            if reset || friendFeedPage == 0 {
+                historyCursors = refreshedFriends.flatMap { friend in
+                    Kind.allCases.map { FriendHistoryCursor(friend: friend, kind: $0, page: 1) }
+                }
+            }
             friends = refreshedFriends
             checkedFriends = start + batch.count
-            let combined = reset ? updates : activity + updates
-            activity = unique(combined).map { (item: $0, date: activityDate($0.date)) }
-                .sorted { $0.date > $1.date }.map(\.item)
+            let updates = results.flatMap { $0 }
+            activity = sortedFriendActivity(reset ? updates : activity + updates)
+            friendFeedPage += 1
         } catch {
             if !Task.isCancelled, accountGeneration == generation { friendMessage = error.localizedDescription }
         }
+    }
+
+    private func loadRecentFriendActivity(_ batch: [Friend], refresh: Bool) async -> [[FriendUpdate]] {
+        var results: [[FriendUpdate]] = []
+        let concurrency = 4
+        for start in stride(from: 0, to: batch.count, by: concurrency) {
+            guard !Task.isCancelled else { return results }
+            let friends = batch[start..<min(start + concurrency, batch.count)]
+            await withTaskGroup(of: [FriendUpdate]?.self) { group in
+                for friend in friends {
+                    group.addTask { try? await self.publicUpdates(friend, refresh: refresh) }
+                }
+                for await updates in group {
+                    if let updates { results.append(updates) }
+                }
+            }
+        }
+        return results
+    }
+
+    private func loadOlderFriendActivity(generation: UUID) async {
+        let batch = Array(historyCursors.prefix(4))
+        guard !batch.isEmpty else { return }
+        let results = await withTaskGroup(of: (FriendHistoryCursor, Page<FriendUpdate>?).self) { group in
+            for cursor in batch {
+                group.addTask { (cursor, try? await self.historyPage(cursor)) }
+            }
+            var results: [(FriendHistoryCursor, Page<FriendUpdate>)] = []
+            for await (cursor, page) in group {
+                if let page { results.append((cursor, page)) }
+            }
+            return results
+        }
+
+        guard !Task.isCancelled, accountGeneration == generation else { return }
+        historyCursors.removeFirst(batch.count)
+        for (cursor, page) in results where page.more {
+            historyCursors.append(FriendHistoryCursor(friend: cursor.friend, kind: cursor.kind, page: cursor.page + 1))
+        }
+        activity = sortedFriendActivity(activity + results.flatMap { $0.1.items })
+        friendFeedPage += 1
+    }
+
+    private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
+        let limit = 50
+        let result = try await api.catalog("users/\(cursor.friend.name)/\(cursor.kind.rawValue)list", [
+            URLQueryItem(name: "page", value: String(cursor.page)),
+            URLQueryItem(name: "limit", value: String(limit))
+        ])
+        let data: Fields? = result.read("data")
+        let rows: [Fields] = result.read("data") ?? data?.read("entries") ?? []
+        let meta: Fields? = result.read("meta")
+        let pagination: Fields? = meta?.read("pagination") ?? result.read("pagination")
+        let more: Bool = pagination?.read("hasNextPage", "has_next_page") ?? (rows.count == limit)
+        let updates = rows.compactMap { row -> FriendUpdate? in
+            guard row.string("updatedAt", "updated_at") != nil,
+                  let title = Title(row, kind: cursor.kind) else { return nil }
+            return FriendUpdate(friend: cursor.friend, title: title, fields: row)
+        }
+        return Page(items: updates, more: more)
+    }
+
+    private func sortedFriendActivity(_ items: [FriendUpdate]) -> [FriendUpdate] {
+        unique(items).map { (item: $0, date: activityDate($0.date)) }
+            .sorted { lhs, rhs in
+                lhs.date == rhs.date ? lhs.item.id < rhs.item.id : lhs.date > rhs.date
+            }
+            .map(\.item)
     }
 
     func fetchFriends(_ user: Account, refresh: Bool = false) async throws {
@@ -350,6 +426,12 @@ final class Store: ObservableObject {
         }
         return nil
     }
+}
+
+private struct FriendHistoryCursor {
+    let friend: Friend
+    let kind: Kind
+    let page: Int
 }
 
 private struct SavedList: Codable, Equatable {

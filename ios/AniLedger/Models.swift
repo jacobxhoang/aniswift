@@ -257,7 +257,7 @@ struct FriendUpdate: Identifiable {
         score = fields.read("score")
         progress = fields.read("progress", "episodesWatched", "chaptersRead", "watchedEpisodes", "readChapters")
         total = fields.read("total") ?? title.total
-        date = fields.string("updatedAt", "date")
+        date = fields.string("updatedAt", "updated_at", "date")
     }
 
     var activityPhrase: String {

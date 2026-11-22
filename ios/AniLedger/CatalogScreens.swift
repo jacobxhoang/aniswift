@@ -1130,8 +1130,8 @@ struct FriendsScreen: View {
                                 .padding(.horizontal, LedgerLayout.inset)
                         }
                     }
-                    if store.checkedFriends < store.friends.count {
-                        NextPageIndicator(label: "Loading friend activity", page: store.checkedFriends) {
+                    if store.hasMoreFriendActivity {
+                        NextPageIndicator(label: "Loading friend activity", page: store.friendFeedPage) {
                             await store.loadFriends()
                         }.padding(rowInsets)
                     } else if store.loadingFriends {
@@ -1154,7 +1154,7 @@ struct FriendsScreen: View {
                 }
             }
         }
-        .task(id: store.account?.id) { if store.checkedFriends == 0 { await store.loadFriends() } }
+        .task(id: store.account?.id) { if store.friendFeedPage == 0 { await store.loadFriends() } }
         .refreshable { await store.loadFriends(reset: true) }
     }
 
