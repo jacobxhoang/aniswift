@@ -110,6 +110,62 @@ struct HomeScreen: View {
     }
 }
 
+private struct LedgerSearchBar: View {
+    @Binding var query: String
+    @Binding var isPresented: Bool
+    @FocusState private var focused: Bool
+    @ScaledMetric(relativeTo: .body) private var controlHeight: CGFloat = 44
+    @State private var didFocus = false
+
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 9) {
+                Image(systemName: "magnifyingglass").accessibilityHidden(true)
+                TextField("Search", text: $query)
+                    .focused($focused)
+                    .autocorrectionDisabled()
+                    .textInputAutocapitalization(.never)
+                    .submitLabel(.search)
+                    .onSubmit { focused = false }
+            }
+            .font(.body)
+            .padding(.horizontal, 14)
+            .frame(minHeight: controlHeight)
+            .background(Palette.surface, in: .capsule)
+            .overlay {
+                Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+            }
+
+            Button {
+                focused = false
+                query = ""
+                isPresented = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.body.weight(.semibold))
+                    .frame(width: controlHeight, height: controlHeight)
+                    .background(Palette.surface, in: .circle)
+                    .overlay {
+                        Circle().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                    }
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close search")
+        }
+        .padding(.horizontal, LedgerLayout.inset)
+        .padding(.vertical, 6)
+        .background(Palette.background)
+        .task {
+            guard !didFocus else { return }
+            await Task.yield()
+            guard !Task.isCancelled, isPresented else { return }
+            focused = true
+            didFocus = true
+        }
+    }
+}
+
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
     let kind: Kind
@@ -142,20 +198,9 @@ struct ListsScreen: View {
         Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
     }
 
-    var body: some View {
-        if store.account == nil {
-            list
-        } else {
-            list
-                .searchable(text: $query, isPresented: $searchPresented,
-                            placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search")
-                .onChange(of: searchPresented) { _, presented in
-                    if !presented { query = "" }
-                }
-        }
-    }
+    private var isSearching: Bool { searchPresented && store.account != nil }
 
-    private var list: some View {
+    var body: some View {
         List {
             if store.checking {
                 ProgressView("Checking session").listRowBackground(Color.clear)
@@ -195,6 +240,10 @@ struct ListsScreen: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if isSearching { LedgerSearchBar(query: $query, isPresented: $searchPresented) }
+        }
+        .toolbar(isSearching ? .hidden : .visible, for: .navigationBar)
         .navigationTitle(kind.label)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -216,6 +265,10 @@ struct ListsScreen: View {
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .onChange(of: store.account?.id) { _, _ in
+            searchPresented = false
+            query = ""
+        }
         .refreshable { await store.loadLists(force: true) }
         .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
             Button("Remove", role: .destructive) { update(item, change: nil) }
@@ -419,19 +472,16 @@ struct DiscoverScreen: View {
     @EnvironmentObject private var store: Store
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
+    @State private var searchPresented = false
     @State private var loading = true
     @State private var searchKind: Kind = .anime
 
+    private var searchTerm: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
+
     var body: some View {
         Group {
-            if !search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                PosterResults(name: "Search results", shelf: nil, query: search, kind: searchKind)
-                    .safeAreaInset(edge: .top, spacing: 0) {
-                        Picker("Search category", selection: $searchKind) {
-                            ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                        }.pickerStyle(.segmented).padding(.horizontal, LedgerLayout.inset).padding(.vertical, 6)
-                            .background(.regularMaterial)
-                    }
+            if searchPresented && !searchTerm.isEmpty {
+                PosterResults(name: "Search results", shelf: nil, query: searchTerm, kind: searchKind)
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
@@ -460,11 +510,31 @@ struct DiscoverScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
-        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if searchPresented {
+                VStack(spacing: 0) {
+                    LedgerSearchBar(query: $search, isPresented: $searchPresented)
+                    if !searchTerm.isEmpty {
+                        Picker("Search category", selection: $searchKind) {
+                            ForEach(Kind.allCases) { Text($0.label).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .padding(.horizontal, LedgerLayout.inset)
+                        .padding(.bottom, 8)
+                    }
+                }
+                .background(Palette.background)
+            }
+        }
+        .scrollDismissesKeyboard(.interactively)
+        .toolbar(searchPresented ? .hidden : .visible, for: .navigationBar)
         .toolbar {
-            if search.isEmpty {
-                ToolbarItem(placement: .topBarTrailing) {
-                    NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink { CatalogBrowser() } label: { Label("Browse catalog", systemImage: "line.3.horizontal.decrease") }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { searchPresented = true } label: {
+                    Label("Search catalog", systemImage: "magnifyingglass")
                 }
             }
         }
