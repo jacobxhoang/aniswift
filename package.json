@@ -1,9 +1,0 @@
-{
-  "name": "ani-ledger-retired-web-endpoint",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "node --check scripts/preview.mjs",
-    "start": "node scripts/preview.mjs"
-  }
-}

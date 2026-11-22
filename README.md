@@ -5,4 +5,4 @@ AniLedger is an anime and manga tracker for iPhone and iPad. Browse the catalog,
 - [iOS setup and release guide](ios/README.md)
 - [iOS releases](https://github.com/jacobxhoang/ani-ledger/releases)
 
-The iOS app connects directly to MyAnimeList, Tenrai, and Jikan Edge. The former browser app has been retired. Its old Render URL serves a retirement notice.
+The iOS app connects directly to MyAnimeList, Tenrai, and Jikan Edge.

@@ -1,5 +1,3 @@
-dist/
 .env
 .env.*
-.sites-runtime/
 artifacts/
