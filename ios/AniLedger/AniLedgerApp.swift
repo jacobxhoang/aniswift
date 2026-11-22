@@ -851,47 +851,55 @@ private struct ProfileStatisticsSection: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        if #available(iOS 26.0, *) {
+            disclosure.glassEffect(.regular, in: shape)
+        } else {
+            disclosure.background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
+        }
+    }
+
+    private var disclosure: some View {
         DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 7) {
-                VStack(alignment: .leading, spacing: 0) {
-                    if (stats.meanScore ?? 0) > 0 || stats.days != nil || total > 0 {
-                        VStack(alignment: .leading, spacing: 10) {
-                            summary
-                            if total > 0 {
-                                statusChart
-                                if statuses.allSatisfy({ $0.count != nil }) {
-                                    Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .frame(maxWidth: .infinity, alignment: .trailing)
-                                }
+            VStack(alignment: .leading, spacing: 0) {
+                Divider()
+                if (stats.meanScore ?? 0) > 0 || stats.days != nil || total > 0 {
+                    VStack(alignment: .leading, spacing: 10) {
+                        summary
+                        if total > 0 {
+                            statusChart
+                            if statuses.allSatisfy({ $0.count != nil }) {
+                                Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .trailing)
                             }
                         }
-                        .padding(16)
-                        Divider().padding(.leading, 16)
                     }
-                    statusRows
+                    .padding(.vertical, 12)
+                    Divider()
                 }
-                .background(Color(uiColor: .secondarySystemGroupedBackground),
-                            in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
+                statusRows
                 if !totalsLabel.isEmpty {
+                    Divider()
                     Text(totalsLabel)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
                 }
             }
-            .padding(.top, 8)
+            .padding(.bottom, 4)
         } label: {
             Text("\(kind.label) Statistics")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .font(.headline)
+                .foregroundStyle(.primary)
                 .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                 .contentShape(Rectangle())
                 .accessibilityAddTraits(.isHeader)
         }
         .tint(Color(uiColor: .secondaryLabel))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 4)
     }
 
     private var summary: some View {
@@ -954,7 +962,7 @@ private struct ProfileStatisticsSection: View {
         VStack(spacing: 0) {
             ForEach(statuses) { status in
                 if status.id != statuses.first?.id {
-                    Divider().padding(.leading, 56)
+                    Divider().padding(.leading, 40)
                 }
                 LabeledContent {
                     Text(status.count?.formatted() ?? "—")
@@ -964,15 +972,14 @@ private struct ProfileStatisticsSection: View {
                     HStack(spacing: 10) {
                         Image(systemName: status.icon)
                             .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(status.color)
                             .frame(width: 30, height: 30)
-                            .background(status.color.opacity(0.72),
+                            .background(status.color.opacity(0.16),
                                         in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                             .accessibilityHidden(true)
                         Text(status.label)
                     }
                 }
-                .padding(.horizontal, 16)
                 .padding(.vertical, 7)
             }
         }
