@@ -170,6 +170,24 @@ async function withMal(request, env, session, operation) {
   }
 }
 
+async function getAnimeSuggestions(call) {
+  const fields = 'id,title,main_picture,alternative_titles,mean,media_type,num_episodes';
+  const params = new URLSearchParams({ limit: '24', fields });
+  const response = await call(`/anime/suggestions?${params}`);
+  const { data } = await response.json();
+  if (!Array.isArray(data)) throw new Error('MyAnimeList returned invalid suggestions.');
+  return {
+    entries: data.flatMap(({ node }) => {
+      if (!node?.id || !node.title) return [];
+      return [{
+        id: node.id, kind: 'anime', title: node.title, englishTitle: node.alternative_titles?.en?.trim() || null,
+        image: node.main_picture?.large || node.main_picture?.medium, type: node.media_type?.toUpperCase(),
+        score: node.mean, total: node.num_episodes || null,
+      }];
+    }),
+  };
+}
+
 async function getList(call, kind, page) {
   const fields = `list_status,mean,media_type,alternative_titles,${kind === 'anime' ? 'num_episodes' : 'num_chapters'}`;
   const params = new URLSearchParams({ fields, limit: '100', offset: String((page - 1) * 100), sort: 'list_updated_at', nsfw: 'true' });
@@ -248,6 +266,7 @@ export default {
       if (pathname === '/api/session' && method === 'GET') return json({ configured: config(env), user: session?.user || null });
       if (pathname === '/api/logout' && method === 'POST') return clearSession(request, { ok: true });
       if (!session) return json({ error: 'Sign in with MyAnimeList to use your lists.' }, 401);
+      if (pathname === '/api/suggestions/anime' && method === 'GET') return withMal(request, env, session, getAnimeSuggestions);
       const match = pathname.match(/^\/api\/lists\/(anime|manga)(?:\/([1-9]\d{0,10}))?$/);
       if (match) {
         const [, kind, id] = match;

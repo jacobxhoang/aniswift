@@ -301,3 +301,4 @@ dialog::backdrop { background: #060c14bc; }
 @media (max-width: 520px) {
   .related-grid { grid-template-columns: minmax(0, 1fr); }
 }
+.suggestion-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 12px; }

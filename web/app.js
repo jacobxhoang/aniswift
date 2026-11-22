@@ -19,7 +19,7 @@ const friendBatchSize = 6;
 const emptyFeed = () => ({ people: null, entries: [], checked: 0, failures: 0, loading: false, error: false });
 const state = {
   user: null, configured: null, sessionStatus: 'loading', entries: { anime: [], manga: [] }, listPaging: {}, listError: '',
-  listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [], upcoming: null, suggestions: {}, friends: emptyFeed(),
+  listKind: 'anime', status: 'all', catalogPage: 1, browse: null, season: [], airing: [], upcoming: null, suggestions: {}, malSuggestions: null, friends: emptyFeed(),
 };
 const registry = new Map(seed.map((item) => [`${item.kind}-${item.id}`, { ...item, englishTitle: item.title }]));
 const memory = new Map();
@@ -355,6 +355,7 @@ async function verifySession(message) {
 function expireSession(message) {
   state.user = null;
   state.suggestions = {};
+  state.malSuggestions = null;
   state.entries = { anime: [], manga: [] };
   state.listPaging = {};
   state.listError = '';
@@ -515,6 +516,13 @@ function statistics() {
 }
 
 function suggestionRail(kind, fallback) {
+  if (kind === 'anime' && state.user) {
+    const suggestions = state.malSuggestions;
+    if (!suggestions || suggestions.loading) return '<p class="empty" role="status">Loading your MyAnimeList suggestions…</p>';
+    if (suggestions.error) return `<div class="empty">Could not load your MyAnimeList suggestions.${button('Retry', 'retry-mal-suggestions')}</div>`;
+    if (!suggestions.items.length) return '<p class="empty">MyAnimeList has no anime suggestions for your account yet.</p>';
+    return `<div class="suggestion-rail" data-suggestion="anime" tabindex="0" aria-label="MyAnimeList anime suggestions">${posters(suggestions.items)}</div>`;
+  }
   const saved = new Set(state.entries[kind].map(({ id }) => id));
   const candidates = [...(state.suggestions[kind] || []), ...fallback];
   const shown = new Map();
@@ -525,10 +533,28 @@ function suggestionRail(kind, fallback) {
   return `<div class="suggestion-rail" data-suggestion="${kind}" tabindex="0" aria-label="${kind === 'anime' ? 'Anime' : 'Manga'} suggestions">${posters([...shown.values()].slice(0, 16), false, kind === 'manga')}</div>`;
 }
 
+async function loadMalSuggestions() {
+  const user = state.user;
+  if (!user || state.malSuggestions?.loading) return;
+  const request = { loading: true, items: [] };
+  state.malSuggestions = request;
+  const isCurrent = () => state.user?.id === user.id && state.malSuggestions === request;
+  if (route().page === 'panel') render();
+  try {
+    const { entries } = await siteApi('suggestions/anime');
+    if (isCurrent()) request.items = remember(entries);
+  } catch {
+    request.error = true;
+  } finally {
+    request.loading = false;
+    if (isCurrent() && route().page === 'panel') render();
+  }
+}
+
 async function loadSuggestions() {
   const ticket = ++suggestionTicket;
   const user = state.user;
-  await Promise.all(kinds.map(async (kind) => {
+  await Promise.all((user ? ['manga'] : kinds).map(async (kind) => {
     const sources = ordered(state.entries[kind])
       .filter((entry) => entry.rating >= 7 || entry.status === 'completed')
       .slice(0, 2);
@@ -575,7 +601,9 @@ function renderPanel() {
     ${section('Recent list updates', list, actionLink('#lists', 'View lists'))}
     ${section(discover, `<div class="season-rail">${posters(picks)}</div>`, actionLink('#season', 'View season'))}
     ${section(state.user ? 'My Anime Suggestions' : 'Anime Suggestions', suggestionRail('anime', [...otherAnime, ...featured]), button('Next anime', 'scroll-anime'))}
-    ${section(state.user ? 'My Manga Suggestions' : 'Manga Suggestions', suggestionRail('manga', mangaPicks), button('Next manga', 'scroll-manga'))}
+    ${section(state.user ? 'AniLedger Manga Suggestions' : 'Manga Suggestions', suggestionRail('manga', mangaPicks), state.user
+      ? `<div class="suggestion-actions"><a class="text-button" href="https://myanimelist.net/mypanel.php" target="_blank" rel="noopener">My MAL panel</a>${button('Next manga', 'scroll-manga')}</div>`
+      : button('Next manga', 'scroll-manga'))}
     </div><aside class="sidebar" aria-label="Dashboard sidebar">${accountCard()}${section('My statistics', statistics())}${section('Friends feed', friendsContent(true), actionLink('#friends', 'View feed'))}${section(rankHeading, rankings(airing), actionLink('#airing', 'See all'))}${section('Top Upcoming Anime', state.upcoming?.length ? rankings(state.upcoming.slice(0, 4), true) : `<p class="empty">${state.upcoming ? 'Upcoming rankings are unavailable.' : 'Loading upcoming anime…'}</p>`, actionLink('#upcoming', 'See all'))}</aside></div>`;
   for (const rail of view.querySelectorAll('[data-suggestion]')) rail.scrollLeft = railPositions.get(rail.dataset.suggestion) || 0;
 }
@@ -1048,6 +1076,7 @@ document.addEventListener('click', async (event) => {
       if (rail) rail.scrollLeft = rail.scrollLeft + rail.clientWidth >= rail.scrollWidth - 2 ? 0 : rail.scrollLeft + rail.clientWidth * .8;
       break;
     }
+    case 'retry-mal-suggestions': loadMalSuggestions(); break;
     case 'retry-catalog': browse(); break;
     case 'more-catalog': state.catalogPage++; browse(false); break;
     case 'retry-lists': loadLists(); break;
@@ -1060,6 +1089,7 @@ document.addEventListener('click', async (event) => {
         await siteApi('logout', { method: 'POST' });
         state.user = null;
         state.suggestions = {};
+        state.malSuggestions = null;
         state.entries = { anime: [], manga: [] };
         state.listError = '';
         state.listPaging = {};
@@ -1152,19 +1182,23 @@ async function checkSession(authResult = pendingAuth) {
     if (authResult) authFeedback(authResult);
     return;
   }
+  if (state.user?.id !== session.user?.id) state.malSuggestions = null;
   state.user = session.user;
   state.configured = session.configured;
   state.sessionStatus = 'ready';
   if (!state.user) {
     state.suggestions = {};
+    state.malSuggestions = null;
     state.entries = { anime: [], manga: [] };
     state.listPaging = {};
     state.listError = '';
     state.friends = emptyFeed();
   }
   renderAccount();
-  if (state.user) loadLists();
-  else loadSuggestions();
+  if (state.user) {
+    loadLists();
+    if (!state.malSuggestions || state.malSuggestions.error) loadMalSuggestions();
+  } else loadSuggestions();
   if (!state.user && ['panel', 'lists', 'friends'].includes(route().page)) render();
   loadVisibleFriends();
   if (authResult) {
