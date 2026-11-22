@@ -115,12 +115,11 @@ struct ListsScreen: View {
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
-    @State private var searching = false
     @State private var sort = ListSort.recent
     @State private var paging = false
     @State private var pendingRemoval: ListEntry?
     @State private var saving: Set<String> = []
-    @FocusState private var searchFocused: Bool
+    private let rowInset: CGFloat = 10
 
     private enum ListSort: String, CaseIterable {
         case recent = "Recently updated"
@@ -140,25 +139,34 @@ struct ListsScreen: View {
     }
 
     var body: some View {
+        if store.account == nil {
+            list
+        } else if #available(iOS 26.0, *) {
+            list
+                .searchable(text: $query, prompt: "Search")
+                .searchToolbarBehavior(.minimize)
+                .toolbar {
+                    DefaultToolbarItem(kind: .search, placement: .topBarTrailing)
+                }
+        } else {
+            list
+                .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        }
+    }
+
+    private var list: some View {
         List {
             if store.checking {
                 ProgressView("Checking session").listRowBackground(Color.clear)
             } else if store.account == nil {
                 SignInButton().listRowBackground(Color.clear)
             } else {
-                if searching {
-                    TextField("Search \(kind.label) list", text: $query)
-                        .focused($searchFocused)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .listRowBackground(Palette.surface)
-                }
                 ForEach(kind.statuses, id: \.self) { status in
                     let group = entries.filter { $0.status == status }
                     let matches = visibleEntries(group)
                     if searchTerm.isEmpty || !matches.isEmpty {
                         groupHeader(status, count: searchTerm.isEmpty ? group.count : matches.count)
-                            .listRowInsets(EdgeInsets(top: 5, leading: LedgerLayout.inset, bottom: 5, trailing: LedgerLayout.inset))
+                            .listRowInsets(EdgeInsets(top: 4, leading: rowInset, bottom: 4, trailing: rowInset))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
                         if !collapsed.contains(status) || !searchTerm.isEmpty {
@@ -197,15 +205,9 @@ struct ListsScreen: View {
                         }
                     } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
                 }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        searching.toggle()
-                        if !searching { query = "" }
-                    } label: { Label(searching ? "Close search" : "Search list", systemImage: searching ? "xmark" : "magnifyingglass") }
-                }
             }
         }
-        .onChange(of: searching) { _, showing in searchFocused = showing }
+        .scrollDismissesKeyboard(.interactively)
         .refreshable { await store.loadLists(force: true) }
         .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
             Button("Remove", role: .destructive) { update(item, change: nil) }
@@ -221,12 +223,15 @@ struct ListsScreen: View {
             else { collapsed.insert(status) }
         } label: {
             HStack(spacing: 12) {
-                Text(statusLabel(status)).font(.subheadline.weight(.semibold))
+                Text(statusLabel(status)).foregroundStyle(.secondary)
                 Spacer()
                 Text("\(count)\(partial ? "+" : "")").monospacedDigit()
                 Image(systemName: expanded ? "chevron.down" : "chevron.right")
-                    .font(.caption.weight(.semibold)).accessibilityHidden(true)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
             }
+            .font(.subheadline)
             .padding(.horizontal, 16)
             .frame(minHeight: 44)
             .contentShape(.capsule)
@@ -250,13 +255,16 @@ struct ListsScreen: View {
     }
 
     private func entryRow(_ item: ListEntry) -> some View {
-        NavigationLink(value: item.title) {
-            HStack(alignment: .top, spacing: 12) {
+        let link = NavigationLink(value: item.title) {
+            HStack(alignment: .top, spacing: 8) {
                 Art(url: item.title.image, symbol: kind == .anime ? "film" : "book")
                     .frame(width: 80, height: 116)
                     .clipShape(.rect(cornerRadius: 7))
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(item.title.name).font(.body.weight(.medium)).foregroundStyle(.primary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.title.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
                     let total = item.title.total.flatMap { $0 > 0 ? String($0) : nil }
                     if item.status.hasPrefix("plan_to"), let total {
                         Text("\(total) \(kind.unit.lowercased()) total").foregroundStyle(.secondary)
@@ -264,16 +272,30 @@ struct ListsScreen: View {
                         Text("\(item.progress) / \(total ?? "?") \(kind.unit.lowercased())").foregroundStyle(.secondary)
                     }
                     if item.rating > 0 {
-                        Label("\(item.rating)", systemImage: "star.fill")
-                            .foregroundStyle(.secondary)
-                            .accessibilityLabel("My rating \(item.rating) out of ten")
+                        HStack(spacing: 4) {
+                            Image(systemName: "star.fill").font(.caption)
+                                .accessibilityHidden(true)
+                            Text(item.rating.formatted()).monospacedDigit()
+                        }
+                        .foregroundStyle(.secondary)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel("My rating \(item.rating) out of ten")
                     }
-                }.font(.subheadline)
-                Spacer(minLength: 0)
+                }
+                .font(.subheadline)
+                .padding(.top, 4)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 3)
+            .contentShape(Rectangle())
         }
-        .listRowInsets(EdgeInsets(top: 3, leading: LedgerLayout.inset, bottom: 3, trailing: LedgerLayout.inset))
+        return Group {
+            if #available(iOS 26.0, *) {
+                link.navigationLinkIndicatorVisibility(.hidden)
+            } else {
+                link
+            }
+        }
+        .listRowInsets(EdgeInsets(top: 4, leading: rowInset, bottom: 4, trailing: rowInset))
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
