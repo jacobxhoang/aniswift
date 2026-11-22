@@ -461,13 +461,22 @@ function refreshFriendsView() {
   if (['panel', 'friends'].includes(route().page)) render();
 }
 
-async function friendNames(username, refresh = false) {
+function friendAvatar(person) {
+  return [person?.avatarUrl, person?.imageUrl, person?.avatar, person?.image, person?.picture,
+    person?.images?.webp?.image_url, person?.images?.jpg?.image_url].find(safeImage) || '';
+}
+
+async function friendProfiles(username, refresh = false) {
   const { data, meta } = await catalog(`/users/${encodeURIComponent(username)}/friends`, refresh);
   if (!Array.isArray(data)) throw new Error('Invalid friends list.');
   const people = data.filter((person) => /^[a-z0-9_-]{1,32}$/i.test(person?.username) && person.username.toLowerCase() !== username.toLowerCase());
   const lastOnline = ({ lastOnline }) => parseFriendDate(lastOnline, meta?.fetchedAt)?.timestamp ?? -Infinity;
   people.sort((a, b) => lastOnline(b) - lastOnline(a));
-  return [...new Map(people.map(({ username }) => [username.toLowerCase(), username])).values()];
+  const profiles = people.map((person) => ({
+    username: person.username,
+    avatar: friendAvatar(person),
+  }));
+  return [...new Map(profiles.map((person) => [person.username.toLowerCase(), person])).values()];
 }
 
 async function loadFriends(refresh = false) {
@@ -479,11 +488,11 @@ async function loadFriends(refresh = false) {
   refreshFriendsView();
   try {
     if (!feed.people) {
-      feed.people = await friendNames(username, refresh);
+      feed.people = await friendProfiles(username, refresh);
     }
     if (state.friends !== feed) return;
     const batch = feed.people.slice(feed.checked, feed.checked + friendBatchSize);
-    const results = await Promise.allSettled(batch.map(async (friend) => {
+    const results = await Promise.allSettled(batch.map(async ({ username: friend }) => {
       const { data, meta } = await catalog(`/users/${encodeURIComponent(friend)}/userupdates`, refresh);
       if (!Array.isArray(data?.anime) || !Array.isArray(data?.manga)) throw new Error('Invalid friend updates.');
       return kinds.flatMap((kind) => data[kind].filter((item) => item?.entry).map((item) => ({
@@ -842,7 +851,7 @@ function entryCharacters(people, kind) {
   return `<section class="entry-section"><h3>${kind === 'anime' ? 'Characters &amp; voice actors' : 'Characters'}</h3><div class="cast-grid">${cards}</div></section>`;
 }
 
-function reviewCards(data, reviewsUrl) {
+function reviewCards(data) {
   if (!Array.isArray(data)) throw new Error('Invalid reviews response.');
   const sentiments = new Map([
     ['Recommended', 'recommended'], ['Mixed Feelings', 'mixed'], ['Not Recommended', 'not-recommended'],
@@ -869,13 +878,11 @@ function reviewCards(data, reviewsUrl) {
       ? `<details><summary>Show review with spoilers</summary><p class="entry-prose">${escape(text)}</p></details>`
       : short ? `<p class="entry-prose review-preview">${escape(text.slice(0, 540).replace(/\s+\S*$/, ''))}…</p><details class="review-expanded"><summary><span class="review-more">Read more</span><span class="review-less">Read less</span></summary><p class="entry-prose">${escape(text)}</p></details>`
       : `<p class="entry-prose">${escape(text)}</p>`;
-    const url = /^https:\/\/myanimelist\.net\/reviews\.php\?/i.test(review.url || '') ? review.url
-      : Number.isSafeInteger(review.mal_id) && review.mal_id > 0 ? `https://myanimelist.net/reviews.php?id=${review.mal_id}` : reviewsUrl;
     cards.push(`<article class="entry-review">
       <span class="review-avatar" aria-hidden="true">${image ? `<img alt="" loading="lazy" src="${escape(image)}">` : escape(String(name).slice(0, 1).toUpperCase())}</span>
       <div class="review-body"><div class="review-byline"><strong>${escape(name)}</strong>${timestamp}</div>
       ${sentiment || ratingLabel ? `<div>${sentiment ? `<span class="review-tag ${sentiments.get(sentiment)}">${sentiment}</span> ` : ''}${ratingLabel}</div>` : ''}${content}
-      <a class="review-source" href="${escape(url)}" target="_blank" rel="noopener">Open on MyAnimeList</a></div>
+      </div>
     </article>`);
   }
   return cards.join('') || '<p class="row-meta">No reviews available for this title.</p>';
@@ -903,13 +910,13 @@ function themeSections(data, failed = false) {
 }
 
 function entryFriendRows(entry, updates) {
-  const rows = updates.map(({ friend, update, date }) => {
+  const rows = updates.map(({ friend, avatar, update, date }) => {
     const status = String(update.status || '').toLowerCase().replaceAll(' ', '_');
     const progress = update.progress ?? update.episodesWatched ?? update.chaptersRead ?? update.watchedEpisodes ?? update.readChapters;
     const activity = date ? new Date(date.timestamp).toLocaleString(undefined, {
       month: 'short', day: 'numeric', ...(date.calendarDate ? { timeZone: 'UTC' } : { hour: 'numeric', minute: '2-digit' }),
     }) : '—';
-    return `<tr><th scope="row"><a href="https://myanimelist.net/profile/${encodeURIComponent(friend)}" target="_blank" rel="noopener">${escape(friend)}</a></th><td>${escape(update.score || '—')}</td><td>${escape(labels[status] || update.status || '—')}</td><td>${progress == null ? '—' : escape(`${progress} / ${update.total || entry.total || '?'}`)}</td><td>${escape(activity)}</td></tr>`;
+    return `<tr><th scope="row"><a class="friend-table-member" href="https://myanimelist.net/profile/${encodeURIComponent(friend)}" target="_blank" rel="noopener"><span class="friend-table-avatar" aria-hidden="true"><span>${escape(friend.charAt(0).toUpperCase())}</span>${avatar ? `<img src="${escape(avatar)}" alt="" width="36" height="36" loading="lazy" decoding="async" data-friend-avatar>` : ''}</span><span>${escape(friend)}</span></a></th><td>${escape(update.score || '—')}</td><td>${escape(labels[status] || update.status || '—')}</td><td>${progress == null ? '—' : escape(`${progress} / ${update.total || entry.total || '?'}`)}</td><td>${escape(activity)}</td></tr>`;
   });
   return rows.length ? `<div class="friend-table-wrap" tabindex="0" aria-label="Friends’ list activity"><table class="friend-table"><thead><tr><th scope="col">Member</th><th scope="col">Score</th><th scope="col">Status</th><th scope="col">${entry.kind === 'anime' ? 'Episodes seen' : 'Chapters read'}</th><th scope="col">Activity</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>` : '';
 }
@@ -928,7 +935,7 @@ async function loadEntryFriends(entry, region, active) {
   async function showBatch() {
     region.innerHTML = entryFriendRows(entry, updates) + '<p class="row-meta" role="status">Checking friends’ activity…</p>';
     try {
-      people ??= state.friends.people || await friendNames(user.name);
+      people ??= state.friends.people || await friendProfiles(user.name);
     } catch {
       if (!current()) return;
       region.innerHTML = `<p class="row-meta">Friends’ activity is unavailable.</p>${button('Retry', '')}`;
@@ -937,16 +944,24 @@ async function loadEntryFriends(entry, region, active) {
     }
     if (!current()) return;
     const batch = people.slice(offset, offset + friendBatchSize);
-    const results = await Promise.allSettled(batch.map(async (friend) => {
-      const { data, meta } = await catalog(`/users/${encodeURIComponent(friend)}/userupdates`).catch(() => ({}));
+    const results = await Promise.allSettled(batch.map(async ({ username: friend, avatar }) => {
+      const profilePath = `/users/${encodeURIComponent(friend)}`;
+      async function activity(update, date) {
+        if (!avatar && current()) {
+          const profile = await catalog(profilePath).catch(() => null);
+          avatar = friendAvatar(profile?.data);
+        }
+        return { friend, avatar, update, date };
+      }
+      const { data, meta } = await catalog(`${profilePath}/userupdates`).catch(() => ({}));
       const recent = Array.isArray(data?.[entry.kind]) ? data[entry.kind].find((item) => Number(item.entry?.malId ?? item.entry?.mal_id) === entry.id) : null;
-      if (recent) return { friend, update: recent, date: parseFriendDate(recent.date, meta?.fetchedAt) };
+      if (recent) return activity(recent, parseFriendDate(recent.date, meta?.fetchedAt));
       for (let page = 1; page <= 10 && current(); page++) {
         const list = await catalog(`/users/${encodeURIComponent(friend)}/${entry.kind}list?limit=300&page=${page}`);
         const entries = Array.isArray(list.data) ? list.data : list.data?.entries;
         if (!Array.isArray(entries)) throw new Error('Invalid public list.');
         const update = entries.find((item) => Number(item.malId ?? item.mal_id ?? item.mediaId ?? item.entry?.malId ?? item.id) === entry.id);
-        if (update) return { friend, update, date: parseFriendDate(update.updatedAt, list.meta?.fetchedAt) };
+        if (update) return activity(update, parseFriendDate(update.updatedAt, list.meta?.fetchedAt));
         const next = list.meta?.pagination?.hasNextPage ?? list.pagination?.has_next_page ?? entries.length === 300;
         if (!next) break;
       }
@@ -1142,7 +1157,7 @@ async function showEntry(kind, number) {
       const region = view.querySelector('[data-entry-reviews]');
       try {
         const { data } = await catalog(`${path}/reviews`);
-        if (active()) region.innerHTML = reviewCards(data, reviewsUrl);
+        if (active()) region.innerHTML = reviewCards(data);
       } catch {
         if (active()) region.innerHTML = '<p class="row-meta">Reviews are temporarily unavailable.</p>';
       } finally {
@@ -1277,6 +1292,10 @@ document.addEventListener('change', (event) => {
 });
 document.addEventListener('error', (event) => {
   if (!(event.target instanceof HTMLImageElement)) return;
+  if (event.target.hasAttribute('data-friend-avatar')) {
+    event.target.remove();
+    return;
+  }
   const container = event.target.closest('.cover');
   if (!container) return;
   const fallback = event.target.dataset.fallbackSrc;
