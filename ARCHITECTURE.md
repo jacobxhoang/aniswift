@@ -45,16 +45,16 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | --- | ---: | --- |
 | `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
 | `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 439 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ARCHITECTURE.md` | 448 | This analysis: structure, APIs, state, caching, settings, CI and risks |
 | `ios/Aniswift/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
 | `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/Aniswift/Store.swift` | 855 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
+| `ios/Aniswift/Store.swift` | 884 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching (twelve friends per group until the page holds 30 rows) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
 | `ios/Aniswift/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/Aniswift/AniswiftApp.swift` | 1376 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
+| `ios/Aniswift/AniswiftApp.swift` | 1410 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch` (a toolbar search button that expands), `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
 | `ios/Aniswift/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
 | `ios/Aniswift/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/Aniswift/TitleScreen.swift` | 2019 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
-| `ios/Aniswift/CharacterScreen.swift` | 710 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
+| `ios/Aniswift/TitleScreen.swift` | 2029 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/Aniswift/CharacterScreen.swift` | 759 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits named in one batched request per kind, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniswiftTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniswiftTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
 | `ios/AniswiftTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
@@ -191,8 +191,11 @@ On top of that:
   count from `episodes | chapters | total | num_episodes | num_chapters`; artwork from
   `images.jpg.large_image_url | images.webp.… | images.large | main_picture | imageUrl | image | avatarUrl | avatar | picture`.
 - `includesEnglishTitleField` marks rows as “sparse”; sparse rows without an English title set `needsTitleLookup`,
-  which `PreferredTitle` resolves lazily through `API.resolveTitle` (6 concurrent lookups, de-duplicated per
-  title). Resolved names are persisted only in the friends-feed cache (`feedEnglishNames`), not for list rows.
+  which `PreferredTitle` resolves through `API.resolveTitle` (6 concurrent lookups, de-duplicated per title) unless
+  the page already named the row. A person page batches its credits through `API.titleNames` — one `ids` request
+  per 50 titles — and passes `knownName`/`nameSettled`, so a mangaka with 26 credits costs one request instead of
+  26; a name the batch did not return means there is no English title, not another lookup. Resolved names are
+  persisted only in the friends-feed cache (`feedEnglishNames`).
 - `Title.displayName(for:)` is the single display rule for the stored language preference. It returns the
   original (romaji) name for `Romaji`, the English name for `English`, and falls back to whichever exists.
   `PreferredTitle`, list rows and sorting, title headers, interest-stack entries, review headers and editor
@@ -242,8 +245,10 @@ On top of that:
 
 Concurrency patterns:
 
-- Discover loads 10 shelves in batches of 3 task groups; the friend feed loads 8 friends per batch with 4
-  concurrent `publicUpdates` calls; the title screen fans out up to 5 requests concurrently (`/full`, reviews
+- Discover loads 10 shelves in batches of 3 task groups; the friend feed walks twelve friends at a time with six
+  concurrent `publicUpdates` calls, in up to four groups per page, until the page holds 30 rows or it has walked
+  every friend it can reach — one friend answers with only a handful of updates, so a page built from one group
+  looked empty; the title screen fans out up to 5 requests concurrently (`/full`, reviews
   and stacks always; characters and recommendations only when those sections are enabled);
   friends'-activity scanning looks up 6 friends per batch concurrently.
 - List sync re-fetches the whole loaded page range as a unit. A `listRevisions[kind]` counter aborts a sync if an
@@ -263,7 +268,7 @@ Concurrency patterns:
 | Profile | account, public statistics, favorites, custom lists, legacy favorites, About/version; saved snapshot stays visible with a note and retry when the public data cannot be refreshed | sign in/out, client-ID change |
 | Title | detail, relations, cast, recommendations, trailer, themes, interest stacks, reviews, friends' activity; tapping the header poster opens it full screen, and a manga's authors open their own page; header, content and information groups follow the Details Page settings, and the hidden character and recommendation sections are never requested | add/edit/remove entry, mark completed, quick status/progress/score, full editor (rewatch count, dates, notes ≤ 4000 bytes, custom lists, hide), share, open on MAL |
 | Character | biography, member favorites, Japanese-preferred voice actors (each opening their own page), anime/manga appearances | — |
-| Voice actor or mangaka (`PersonScreen`) | `people/{id}/full`: portrait, alternate names, birthday, member favorites, biography, voiced roles (main parts first, 12 then all) and anime/manga staff credits (8 then all); a role opens its character, a credit opens its title. Opened from a character's voice actors and from the authors a manga's header lists | — |
+| Voice actor or mangaka (`PersonScreen`) | `people/{id}/full`: portrait, alternate names, birthday, member favorites, biography, voiced roles (main parts first, 12 then all) and anime/manga staff credits (8 then all); a role opens its character, a credit opens its title through `PreferredTitle`, which takes the credit's English name from one batched `titleNames` request per kind. Opened from a character's voice actors and from the authors a manga's header lists | — |
 | Friend profile | stats header, list buttons only for non-empty lists, recent updates, favorites, pull-to-refresh | — |
 | Settings | `@AppStorage` preferences, cache sizes, version and service credits | accent, language, link handling, score prompt, launch screen, tab bar, 31 detail toggles, cache clearing |
 
@@ -408,6 +413,10 @@ its `commits` job are gone: one push is one build, and a release is a tag.
 20. **The nightly asset is overwritten in place.** `Aniswift-Nightly-Unsigned.ipa` keeps its name so the download
     link is stable, which means a rebuild replaces it under the same URL: a cached or CDN copy can still hand out
     the previous nightly, and the build number in About is how two of them are told apart.
+21. **Search lives behind a toolbar button, and Discover's media switch rides with it.** `ledgerSearch` puts the
+    field behind the iOS 26 search button (behind a magnifier on the drawer before that), so a scope bar exists
+    only while the field is open. If an iOS release declines to draw scopes for the toolbar field, Discover's
+    anime/manga switch has no visible control while searching.
 
 ## 13. How this analysis was produced
 

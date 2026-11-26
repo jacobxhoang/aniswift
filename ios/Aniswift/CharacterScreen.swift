@@ -310,6 +310,12 @@ struct PersonScreen: View {
     @State private var failed = false
     @State private var showingAllRoles = false
     @State private var expandedCredits: Set<Kind> = []
+    /// English names for this person's credits, resolved in one batched request
+    /// per kind instead of a detail request per row.
+    @State private var creditNames: [String: String] = [:]
+    /// Every credit the batch asked about, so a row whose name did not come back
+    /// shows its original title instead of asking again.
+    @State private var askedCreditNames: Set<String> = []
 
     private var name: String {
         profile.flatMap { $0.string("name") }.map(displayPersonName) ?? person.name
@@ -500,7 +506,13 @@ struct PersonScreen: View {
                     LazyVStack(spacing: 0) {
                         ForEach(shown) { credit in
                             if let title = credit.title {
-                                PreferredTitle(title: title) { item, name in
+                                // The batch already asked about every credit, so
+                                // a row shows the name it returned and never
+                                // fires a detail request of its own.
+                                PreferredTitle(
+                                    title: title, knownName: creditNames[nameKey(title)],
+                                    nameSettled: askedCreditNames.contains(nameKey(title))
+                                ) { item, name in
                                     NavigationLink(value: item) {
                                         personRow(
                                             image: item.image, symbol: item.kind == .anime ? "film" : "book",
@@ -526,6 +538,31 @@ struct PersonScreen: View {
         }
     }
 
+    private func nameKey(_ title: Title) -> String { "\(title.kind.rawValue)-\(title.malID)" }
+
+    /// Every credit is a sparse title of its own, so the page names them all in
+    /// one `ids` request per kind instead of a detail request per row.
+    private func creditTitles(in fields: Fields) -> [Title] {
+        var titles: [Title] = []
+        for kind in Kind.allCases {
+            let rows: [Fields] = fields.read(kind == .anime ? "anime" : "manga") ?? []
+            let credits = rows.compactMap { PersonCredit($0, kind: kind) }
+            titles += credits.compactMap(\.title)
+        }
+        return unique(titles).filter(\.needsTitleLookup)
+    }
+
+    private func resolveCreditNames(_ titles: [Title]) async -> [String: String] {
+        var names: [String: String] = [:]
+        for kind in Kind.allCases {
+            let ids = titles.filter { $0.kind == kind }.map(\.malID)
+            guard !ids.isEmpty else { continue }
+            let resolved = await store.api.titleNames(ids, kind: kind)
+            for (id, name) in resolved { names["\(kind.rawValue)-\(id)"] = name }
+        }
+        return names
+    }
+
     /// A credit the provider flattens into ids and names carries no poster, so
     /// it still takes the shared row with a kind glyph standing in for one.
     private func plainCredit(_ credit: PersonCredit, kind: Kind) -> some View {
@@ -541,7 +578,19 @@ struct PersonScreen: View {
         do {
             let result = try await store.api.catalog("people/\(person.id)/full", [], refresh: refresh)
             guard !Task.isCancelled else { return }
-            if let updated: Fields = result.read("data") { profile = updated } else { failed = true }
+            guard let updated: Fields = result.read("data") else {
+                failed = true
+                return
+            }
+            // Mark every credit as asked before the rows are drawn, so they show
+            // their original title for a moment instead of each firing a detail
+            // request that renames it one at a time.
+            let pending = creditTitles(in: updated)
+            askedCreditNames = Set(pending.map(nameKey))
+            profile = updated
+            let names = await resolveCreditNames(pending)
+            guard !Task.isCancelled else { return }
+            creditNames = names
         } catch {
             if !Task.isCancelled { failed = true }
         }

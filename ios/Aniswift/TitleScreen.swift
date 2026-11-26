@@ -1436,10 +1436,8 @@ struct TitleReviewsScreen: View {
 
 private struct TitleReviewPreview: View {
     let review: TitleReview
-    /// Whether the card keeps the height of the tallest card beside it. A row of
-    /// shelf cards lines up only when every card reserves the same lines, because
-    /// the verdict wraps to two lines on one review and one on the next; the
-    /// reviews list leaves each row its own height instead.
+    /// Whether every card reserves the same verdict and date lines, so a row of
+    /// shelf cards lines up; the reviews list leaves each row its own height.
     var keepsShelfHeight = false
 
     var body: some View {
@@ -1451,12 +1449,24 @@ private struct TitleReviewPreview: View {
             }
             Text(review.spoiler ? "Contains spoilers" : review.text)
                 .font(.subheadline).lineLimit(4, reservesSpace: keepsShelfHeight)
-            let metadata = [review.tag, review.ratingLabel, review.displayedDate].compactMap { $0 }
-            if !metadata.isEmpty {
-                Text(metadata.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
-                    .lineLimit(2, reservesSpace: keepsShelfHeight)
-            } else if keepsShelfHeight {
-                Text(" ").font(.caption).lineLimit(2, reservesSpace: true).accessibilityHidden(true)
+            // The date keeps a line of its own: with it on the verdict's line, a
+            // long verdict pushed it onto a second line and broke the date in the
+            // middle, and the two cards never matched. Both rows are reserved in
+            // a shelf, so a card without a date still keeps the same height.
+            let verdict = [review.tag, review.ratingLabel].compactMap { $0 }.joined(separator: " · ")
+            VStack(alignment: .leading, spacing: 2) {
+                if !verdict.isEmpty {
+                    Text(verdict).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1, reservesSpace: keepsShelfHeight)
+                } else if keepsShelfHeight {
+                    Text(" ").font(.caption).lineLimit(1, reservesSpace: true).accessibilityHidden(true)
+                }
+                if let date = review.displayedDate {
+                    Text(date).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(1, reservesSpace: keepsShelfHeight)
+                } else if keepsShelfHeight {
+                    Text(" ").font(.caption).lineLimit(1, reservesSpace: true).accessibilityHidden(true)
+                }
             }
         }
         .accessibilityElement(children: .combine)

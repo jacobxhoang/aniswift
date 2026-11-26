@@ -359,8 +359,8 @@ extension View {
             }
     }
 
-    /// One search field for every searchable screen, so a search never sits in a
-    /// different place just because it lives on another screen.
+    /// One search field for every searchable screen, so a search never opens
+    /// differently just because it lives on another screen.
     func ledgerSearch(text: Binding<String>, prompt: String) -> some View {
         modifier(LedgerSearch(text: text, prompt: prompt))
     }
@@ -369,14 +369,34 @@ extension View {
 private struct LedgerSearch: ViewModifier {
     @Binding var text: String
     let prompt: String
+    @State private var isSearching = false
 
+    @ViewBuilder
     func body(content: Content) -> some View {
-        // Always on screen, so a screenshot of any search screen looks the same
-        // and a scope bar has somewhere to sit. The iOS 26 toolbar field hides
-        // the search behind a button, which is why it is not used here yet.
-        content
-            .searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
-            .scrollDismissesKeyboard(.interactively)
+        if #available(iOS 26.0, *) {
+            // The system's own search button: tapping it expands the field into
+            // the navigation bar, and its Close button collapses it again.
+            content
+                .searchable(text: $text, placement: .toolbar, prompt: prompt)
+                .toolbar { DefaultToolbarItem(kind: .search, placement: .topBarTrailing) }
+                .scrollDismissesKeyboard(.interactively)
+        } else {
+            // Before iOS 26 there is no search button, so the same expand-on-tap
+            // behaviour is a magnifying glass that presents the drawer's field.
+            content
+                .searchable(
+                    text: $text, isPresented: $isSearching,
+                    placement: .navigationBarDrawer(displayMode: .automatic), prompt: Text(prompt)
+                )
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { isSearching = true } label: {
+                            Label("Search", systemImage: "magnifyingglass")
+                        }
+                    }
+                }
+                .scrollDismissesKeyboard(.interactively)
+        }
     }
 }
 
@@ -466,6 +486,12 @@ struct PreferredTitle<Content: View>: View {
     /// Read titles always render a real name. A view that has nothing to show
     /// until the lookup resolves (a poster tile) can keep the placeholder.
     var showsLoadingTitle = true
+    /// A name the page resolved in a batch, so a row in a long list costs no
+    /// detail request of its own.
+    var knownName: String? = nil
+    /// Whether that batch asked for this title too, so a name it did not return
+    /// means there is no English title rather than one worth another request.
+    var nameSettled = false
     var onEnglishName: ((Title, String) -> Void)? = nil
     @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
@@ -479,18 +505,26 @@ struct PreferredTitle<Content: View>: View {
 
     var body: some View {
         let item = current
-        let waiting = item.needsTitleLookup && attemptedID != title.id && store.api.cachedTitle(title) == nil
+        let waiting =
+            !nameSettled && item.needsTitleLookup && attemptedID != title.id
+            && store.api.cachedTitle(title) == nil
         // A sparse row still carries its original title, so a reader that opts out
         // of the placeholder always has something real to show. Romaji reads the
         // original title instead of the English name.
-        content(item, waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
+        let name =
+            knownName
+            ?? (waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
+        content(item, name)
             .onChange(of: item.englishName, initial: true) { _, english in
                 if let english { onEnglishName?(item, english) }
             }
             .task(id: title) {
-                guard attemptedID != title.id,
-                    item.needsTitleLookup || (loadMissingImage && item.image == nil)
-                else { return }
+                guard attemptedID != title.id else { return }
+                // A settled name still leaves the poster to fetch, so either one
+                // can justify the lookup.
+                let needsName = item.needsTitleLookup && !nameSettled
+                let needsImage = loadMissingImage && item.image == nil
+                guard needsName || needsImage else { return }
                 let result = await store.api.resolveTitle(title)
                 if !Task.isCancelled {
                     resolved = result

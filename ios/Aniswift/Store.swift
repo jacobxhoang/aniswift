@@ -40,6 +40,12 @@ final class Store: ObservableObject {
     private var publicRetryTasks: [String: Task<Void, Never>] = [:]
     private static let feedBackoffKey = "feed"
     private static let publicRetryDelays: [TimeInterval] = [15, 30, 60]
+    /// One friend answers with a handful of updates, so a page is built from
+    /// several friends: twelve per request group, up to four groups, until the
+    /// page holds enough rows to scroll instead of looking empty.
+    private static let feedFriendBatch = 12
+    private static let feedBatchLimit = 4
+    private static let feedPageTarget = 30
 
     init() {
         api = API()
@@ -565,14 +571,34 @@ final class Store: ObservableObject {
                 refreshedFriends = friends
             }
             guard !Task.isCancelled, accountGeneration == generation else { return }
-            let start = reset ? 0 : checkedFriends
-            let batch = Array(refreshedFriends.dropFirst(start).prefix(8))
-            let batchResult = await loadRecentFriendActivity(batch, refresh: reset)
-            guard !Task.isCancelled, accountGeneration == generation else { return }
 
-            // Keep the snapshot the user is already reading instead of replacing it
-            // with a partial result when any friend's activity could not be fetched.
-            if reset, batchResult.failures > 0, !activity.isEmpty {
+            // One friend answers with a handful of updates, so a page built from
+            // one group of friends reads as a feed with nothing in it. Keep asking
+            // while the page is thin, up to four groups, and stop as soon as it
+            // holds enough rows to scroll.
+            var start = reset ? 0 : checkedFriends
+            var updates: [FriendUpdate] = []
+            var asked = 0
+            var failures = 0
+            var batches = 0
+            while batches < Self.feedBatchLimit, start < refreshedFriends.count {
+                let batch = Array(refreshedFriends.dropFirst(start).prefix(Self.feedFriendBatch))
+                guard !batch.isEmpty else { break }
+                let result = await loadRecentFriendActivity(batch, refresh: reset)
+                guard !Task.isCancelled, accountGeneration == generation else { return }
+                start += batch.count
+                asked += batch.count
+                batches += 1
+                updates += result.updates
+                failures += result.failures
+                stale = stale || result.stale
+                providerFetchedAt = result.fetchedAt ?? providerFetchedAt
+                if unique(updates).count >= Self.feedPageTarget { break }
+            }
+
+            // Keep the snapshot the user is already reading instead of replacing
+            // it with an empty page when no friend could be read at all.
+            if reset, updates.isEmpty, failures > 0, !activity.isEmpty {
                 // The page did not land, so the feed must not keep asking for one.
                 feedPageStalled = true
                 markFeedSavedData(message: "Could not refresh the feed.",
@@ -587,8 +613,8 @@ final class Store: ObservableObject {
                 }
             }
             friends = refreshedFriends
-            checkedFriends = start + batch.count
-            let sorted = sortedFriendActivity(batchResult.updates)
+            checkedFriends = start
+            let sorted = sortedFriendActivity(updates)
             await resolveEnglishNames(in: sorted)
             guard !Task.isCancelled, accountGeneration == generation else { return }
             activity = reset ? sorted : unique(activity + sorted)
@@ -596,9 +622,12 @@ final class Store: ObservableObject {
             feedPageStalled = false
             saveFriendFeed()
 
-            if stale || batchResult.stale || batchResult.failures > 0 {
-                markFeedSavedData(message: batchResult.failures > 0 ? "Could not refresh the feed." : nil,
-                                  savedAt: batchResult.fetchedAt ?? providerFetchedAt ?? feedStatus.savedAt)
+            // A stray friend whose list is private should not put the whole feed
+            // behind a note, so only an empty or mostly failed page says so.
+            let mostlyFailed = failures * 3 >= max(asked, 1)
+            if stale || (failures > 0 && unique(updates).isEmpty) || mostlyFailed {
+                markFeedSavedData(message: failures > 0 ? "Could not refresh the feed." : nil,
+                                  savedAt: providerFetchedAt ?? feedStatus.savedAt)
             } else {
                 clearFeedSavedData()
             }
@@ -639,7 +668,7 @@ final class Store: ObservableObject {
 
     private func loadRecentFriendActivity(_ batch: [Friend], refresh: Bool) async -> FriendActivityBatch {
         var result = FriendActivityBatch()
-        let concurrency = 4
+        let concurrency = 6
         for start in stride(from: 0, to: batch.count, by: concurrency) {
             guard !Task.isCancelled else { return result }
             let friends = batch[start..<min(start + concurrency, batch.count)]
