@@ -14,7 +14,7 @@ and follows friends' public activity. A settings layer controls the accent color
 handling, launch tab, tab-bar behavior, cache clearing and which groups appear on a title page. There is no
 backend and no database: the app talks directly to three third-party HTTP APIs and keeps state on the device.
 `AniLedgerTests` holds Swift Testing suites for the shared decoder, title parsing, the activity-date heuristics,
-the store's list sync and the OAuth callback; there are no UI or network tests.
+stack-link parsing, the store's list sync and the OAuth callback; there are no UI or network tests.
 
 The repository used to contain a web app and a Cloudflare Worker (`web/*`, `worker.js`, `package.json`, Render
 configs). Those were deleted in `5fe096a "Retire the web app and remove review thumbs-up"` and
@@ -30,7 +30,7 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | Swift | 5.0; Liquid Glass and tab-bar-minimize paths guarded by `#available(iOS 26.0, *)` |
 | Version | `MARKETING_VERSION = 1.0`, `CURRENT_PROJECT_VERSION = 1` |
 | Dependencies | **Kingfisher 8.12.0** (images), pinned `exactVersion`, via Swift Package Manager |
-| Tests | `AniLedgerTests` unit-test bundle, Swift Testing, hosted by the app target; five suites, no UI tests |
+| Tests | `AniLedgerTests` unit-test bundle, Swift Testing, hosted by the app target; six suites, no UI tests |
 | Privacy | `ios/AniLedger/PrivacyInfo.xcprivacy`: no tracking, no developer-collected data, UserDefaults and file timestamps |
 | Formatting | `swift-format` from the Xcode 26 toolchain against the repository's `.swift-format` (120 columns, 4 spaces, existing line breaks respected); CI lints only files a change touches |
 | URL scheme | `org.aniledger.ios` (OAuth callback `org.aniledger.ios://oauth`) |
@@ -44,26 +44,27 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | Path | Lines | Contents |
 | --- | ---: | --- |
 | `README.md` | 55 | Product overview, requirements, data sources, documentation links, repository layout |
-| `ios/README.md` | 253 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 427 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/README.md` | 256 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, development tools, manual verification checklist |
+| `ARCHITECTURE.md` | 428 | This analysis: structure, APIs, state, caching, settings, CI and risks |
 | `ios/AniLedger/API.swift` | 654 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on, the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
-| `ios/AniLedger/Models.swift` | 490 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, navigation route types |
+| `ios/AniLedger/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
 | `ios/AniLedger/Store.swift` | 840 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics |
 | `ios/AniLedger/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
 | `ios/AniLedger/AniLedgerApp.swift` | 1331 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
 | `ios/AniLedger/SettingsScreen.swift` | 545 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen`, `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
 | `ios/AniLedger/CatalogScreens.swift` | 1301 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed), Discover shelves + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser`, `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/AniLedger/TitleScreen.swift` | 1912 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail, list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/AniLedger/TitleScreen.swift` | 1974 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
 | `ios/AniLedger/CharacterScreen.swift` | 705 | `CharacterReference`, `PersonReference`, `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniLedgerTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniLedgerTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
 | `ios/AniLedgerTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
 | `ios/AniLedgerTests/StoreTests.swift` | 175 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting and feed-cursor tests |
 | `ios/AniLedgerTests/CallbackTests.swift` | 52 | `MALCallback` redirect validation: scheme, host, path, fragment, state and code |
+| `ios/AniLedgerTests/StackLinkTests.swift` | 59 | `StackLink` stack-URL parsing and description segmentation |
 | `ios/AniLedger/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
 | `ios/AniLedger/PrivacyInfo.xcprivacy` | 31 | Privacy manifest: no tracking, no collected data types, UserDefaults and file-timestamp reasons |
 | `ios/build-signed.sh` | 83 | Ad Hoc IPA export: temporary keychain, profile validation, manual signing, `release-testing` export |
-| `.github/workflows/ios.yml` | 256 | Format check, unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release |
+| `.github/workflows/ios.yml` | 266 | Format check (skipping the unformatted TitleScreen), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release |
 | `.gitignore` | 3 | `.env`, `.env.*`, `artifacts/` |
 
 ## 4. Architecture
@@ -317,10 +318,11 @@ the workflow, and manually with a `signed` flag. A newer push of the same branch
 pull requests never publish.
 
 1. `format` (macos-15) selects Xcode 26 and runs `swift-format lint --strict` on the Swift files changed against
-   the pull-request base (or the push `before` SHA). It skips when there is no usable base. The job is advisory:
+   the pull-request base (or the push `before` SHA). It skips when there is no usable base, and it skips
+   `TitleScreen.swift`, which predates the formatter and has never been formatted in bulk. The job is advisory:
    it is not in the `ipa` job's `needs`, so a lint failure is reported without stopping a build.
 2. `test` (macos-15) selects Xcode 26 and the newest available iPhone simulator, runs `xcodebuild test` for the
-   `AniLedger` scheme (arm64, signing disabled) against the five suites in `AniLedgerTests`, and uploads the
+   `AniLedger` scheme (arm64, signing disabled) against the six suites in `AniLedgerTests`, and uploads the
    `.xcresult` when the run fails. The Swift package cache is restored between runs.
 3. `ipa` (macos-15) needs `test`. The test result is advisory until the repository variable `TESTS_GATE` is `on`;
    after that a failing suite blocks the IPA. The job builds **one** tree — the tip of the push, the tagged
@@ -339,11 +341,11 @@ its `commits` job are gone: one push is one build, and a release is a tag.
 
 ## 12. Risks and gotchas
 
-1. **Tests cover the model and the store, not the screens.** Five Swift Testing suites cover `Fields`, `Title`
-   parsing, activity-date heuristics, the store's list sync and failure reporting, the friend-feed cursor
-   bookkeeping and the OAuth callback validation; there are no UI or live-network tests. The test job is advisory
-   until `TESTS_GATE=on`, and the format job is still not a dependency of the IPA job, so style regressions can
-   ship.
+1. **Tests cover the model and the store, not the screens.** Six Swift Testing suites cover `Fields`, `Title`
+   parsing, activity-date heuristics, stack-link parsing, the store's list sync and failure reporting, the
+   friend-feed cursor bookkeeping and the OAuth callback validation; there are no UI or live-network tests. The
+   test job is advisory until `TESTS_GATE=on`, and the format job is still not a dependency of the IPA job, so
+   style regressions can ship.
 2. **Two critical-path third-party proxies.** Tenrai serves the catalog; Jikan Edge serves every public user
    feature. Catalog has a Tenrai → Jikan Edge fallback; `users/*` has **none** (Tenrai rejects `/users/*` with
    `404 ROUTE_NOT_FOUND`), so the feed and profiles fail together if Jikan Edge is down. The app keeps the last

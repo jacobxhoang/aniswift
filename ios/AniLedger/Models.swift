@@ -408,6 +408,24 @@ struct InterestStack: Identifiable, Hashable {
         let parsed = activityDate(rawCreated)
         created = parsed == .distantPast ? nil : parsed
     }
+
+    /// A stack a link named only by its id. The page it opens replaces this with
+    /// the stack its response describes.
+    init(id: Int, kind: Kind) {
+        self.id = id
+        self.kind = kind
+        name = "Interest Stack"
+        summary = nil
+        author = "MyAnimeList member"
+        authorURL = nil
+        url = nil
+        restacks = 0
+        entryCount = 0
+        isOfficial = false
+        isChallenge = false
+        isSpoiler = false
+        created = nil
+    }
 }
 
 /// One title inside a stack, with the stack author's score and note for it.
@@ -430,16 +448,68 @@ struct StackEntry: Identifiable {
     }
 }
 
-/// The entries a stack page returns. The stack header is parsed too, because
-/// its `stack_type` is what tells the entries how to decode.
+/// The stack a page returns: its header and its entries. The header is parsed
+/// because its `stack_type` tells the entries how to decode, and because a page
+/// opened from a link is pushed with an id alone and draws its header from here.
 struct StackDetail {
+    let stack: InterestStack
     let entries: [StackEntry]
 
     init?(_ response: Fields) {
         let row: Fields = response.read("data") ?? response
         guard let stack = InterestStack(row) else { return nil }
+        self.stack = stack
         let rows: [Fields] = row.read("entries") ?? row.read("items") ?? []
         entries = rows.compactMap { StackEntry($0, kind: stack.kind) }
+    }
+}
+
+/// A stack link inside prose. Interest stacks chain themselves with lines like
+/// "Part 2: https://myanimelist.net/stacks/6746", so a description draws those
+/// links as controls that open the stack they name instead of a web page.
+enum StackLink {
+    enum Segment: Hashable {
+        case text(String)
+        case stack(text: String, id: Int)
+    }
+
+    private static let pattern = #"https?://(?:www\.)?myanimelist\.net/stacks/(\d+)"#
+
+    /// The stack a MyAnimeList URL names, when it names one.
+    static func stackID(from url: URL) -> Int? {
+        guard let host = url.host?.lowercased(),
+              host == "myanimelist.net" || host == "www.myanimelist.net"
+        else { return nil }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        guard parts.count == 2, parts[0].lowercased() == "stacks", let id = Int(parts[1]), id > 0 else {
+            return nil
+        }
+        return id
+    }
+
+    /// The text split so each stack link can be drawn as its own control.
+    static func segments(in text: String) -> [Segment] {
+        guard let expression = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive]) else {
+            return [.text(text)]
+        }
+        var segments: [Segment] = []
+        var start = text.startIndex
+        for match in expression.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let whole = Range(match.range, in: text),
+                  let digits = Range(match.range(at: 1), in: text),
+                  let id = Int(text[digits]), id > 0
+            else { continue }
+            if start < whole.lowerBound {
+                segments.append(.text(String(text[start..<whole.lowerBound])))
+            }
+            segments.append(.stack(text: String(text[whole]), id: id))
+            start = whole.upperBound
+        }
+        guard !segments.isEmpty else { return [.text(text)] }
+        if start < text.endIndex {
+            segments.append(.text(String(text[start...])))
+        }
+        return segments
     }
 }
 

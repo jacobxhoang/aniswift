@@ -46,7 +46,7 @@ its own.
 ```text
 ios/
   AniLedger/          SwiftUI app sources and assets
-  AniLedgerTests/     Swift Testing suites for decoding, titles, dates, store sync and OAuth callbacks
+  AniLedgerTests/     Swift Testing suites for decoding, titles, dates, stack links, store sync and OAuth callbacks
   AniLedger.xcodeproj Xcode project and shared scheme
   README.md           Setup, feature, settings and release guide
 .github/workflows/    Build, format, test and release workflow

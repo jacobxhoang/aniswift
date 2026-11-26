@@ -1034,14 +1034,17 @@ struct StackScreen: View {
                         Text("No entries were returned for this stack.").foregroundStyle(.secondary)
                     } else {
                         let count = detail.entries.count
-                        if count < stack.entryCount {
-                            Text("Showing \(count) of \(stack.entryCount) titles")
+                        // The list row that pushed this page and the page's own
+                        // response do not always carry the total, so take whichever knows it.
+                        let total = max(shown.entryCount, stack.entryCount)
+                        if count < total {
+                            Text("Showing \(count) of \(total) titles")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         LazyVStack(alignment: .leading, spacing: 20) {
                             ForEach(detail.entries) { entry in
-                                StackEntryRow(entry: entry, kind: stack.kind, hidesNote: stack.isSpoiler)
+                                StackEntryRow(entry: entry, kind: shown.kind, hidesNote: shown.isSpoiler)
                             }
                         }
                     }
@@ -1059,34 +1062,43 @@ struct StackScreen: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(Palette.background.ignoresSafeArea())
-        .navigationTitle(stack.name)
+        .navigationTitle(shown.name)
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
     }
 
+    /// The stack the page was pushed with, replaced by the one its response
+    /// describes. A page opened from a link carries an id alone, so the header it
+    /// draws before loading is a placeholder.
+    private var shown: InterestStack { detail?.stack ?? stack }
+
+    /// Whether the page knows who wrote the stack and how long it is. A page
+    /// opened from a link does not until its response lands, so it shows none of
+    /// that rather than a placeholder author and a count of zero.
+    private var showsFacts: Bool { detail != nil || shown.entryCount > 0 }
+
     private var header: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text(stack.name)
+            Text(shown.name)
                 .font(.title2.bold())
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            HStack(spacing: 5) {
-                Text("by").foregroundStyle(.secondary)
-                if let authorURL = stack.authorURL {
-                    Link(stack.author, destination: authorURL)
-                } else {
-                    Text(stack.author)
+            if showsFacts {
+                HStack(spacing: 5) {
+                    Text("by").foregroundStyle(.secondary)
+                    if let authorURL = shown.authorURL {
+                        Link(shown.author, destination: authorURL)
+                    } else {
+                        Text(shown.author)
+                    }
                 }
+                .font(.subheadline)
+                StackBadges(stack: shown).font(.caption)
             }
-            .font(.subheadline)
-            StackBadges(stack: stack).font(.caption)
-            if let summary = stack.summary {
-                Text(summary)
-                    .lineSpacing(4)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+            if let summary = shown.summary {
+                StackSummary(text: summary, kind: shown.kind)
             }
-            if let created = stack.created {
+            if let created = shown.created {
                 Text(created.formatted(.dateTime.month(.abbreviated).day().year()))
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -1103,6 +1115,56 @@ struct StackScreen: View {
             detail = try await store.api.stackDetail(stack.id)
         } catch {
             if !Task.isCancelled { failure = error.localizedDescription }
+        }
+    }
+}
+
+/// A stack description with the stack links in it made tappable, so a stack that
+/// numbers the rest of its series opens those stacks here instead of the web.
+private struct StackSummary: View {
+    let text: String
+    let kind: Kind
+
+    private var paragraphs: [String] {
+        text.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(paragraphs.enumerated()), id: \.offset) { _, paragraph in
+                paragraphView(paragraph)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func paragraphView(_ paragraph: String) -> some View {
+        let segments = StackLink.segments(in: paragraph)
+        if segments.count == 1, case .text = segments[0] {
+            Text(paragraph)
+                .lineSpacing(4)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        } else {
+            // A paragraph with a link is laid out as runs so the link can be its
+            // own control while the surrounding text still wraps normally.
+            FlowLayout {
+                ForEach(Array(segments.enumerated()), id: \.offset) { _, segment in
+                    switch segment {
+                    case .text(let value):
+                        Text(value).lineSpacing(4)
+                    case .stack(let value, let id):
+                        NavigationLink(value: StackRoute(stack: InterestStack(id: id, kind: kind))) {
+                            Text(value)
+                                .lineSpacing(4)
+                                .foregroundStyle(.tint)
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityHint("Opens this stack in AniLedger")
+                    }
+                }
+            }
         }
     }
 }

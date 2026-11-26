@@ -46,7 +46,9 @@ biography, their voiced roles with main parts first, and their anime and manga s
 back to its character, a credit to its title. Reviews and friends' title activity appear when entries exist.
 Open **View All** in Reviews to browse and read reviews inside the app, including a spoiler reveal control in
 the reader. Interest stacks open from a title and list their entries with positions, scores and notes; in a
-stack flagged **Spoilers**, each author note stays behind **Reveal note**. A title page you opened before can
+stack flagged **Spoilers**, each author note stays behind **Reveal note**. Many stacks chain themselves together
+with lines like `Part 2: https://myanimelist.net/stacks/6746`; those links open the stack they name inside the
+app rather than in a browser, so the parts can be read one after another. A title page you opened before can
 be drawn from its saved copy without a connection, marked **Showing saved data** with a Retry. Tapping the
 header poster shows it full screen, where a pinch looks closer and a tap closes it. A synopsis with more than
 one paragraph starts with its first paragraph and a **Show more** control. Anime details can also include
@@ -242,7 +244,8 @@ The workflow uses the App ID and team from the provisioning profile and exports 
 - Open a character with a Japanese voice actor and tap one. Confirm the voice actor page shows their roles and
   staff credits, that a role opens its character, and that Back returns to the same voice actor.
 - Open a stack flagged **Spoilers**. Confirm each note shows **Reveal note** until tapped, and that a stack
-  without the flag still shows its notes immediately.
+  without the flag still shows its notes immediately. On a stack whose description links to other stacks,
+  confirm a link opens that stack in the app and Back returns to the first one.
 - Turn off **Show Character List** and **Show Recommendations**, open a fresh title page and confirm both
   sections are absent and the page loads without waiting for them. Turn them back on.
 - Open a title, enable Airplane Mode, and open the same title again. Confirm it draws with a **Showing saved
