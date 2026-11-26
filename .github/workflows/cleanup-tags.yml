@@ -1,0 +1,49 @@
+name: Cleanup tags
+# One-off maintenance: the per-commit `ios-<sha>` prereleases come from the
+# channel that the rolling nightly replaced. Only `nightly` (and any `ios-v*`
+# stable tag someone publishes later) belongs in Releases.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/cleanup-tags.yml
+permissions:
+  contents: write
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Remove every release and tag but nightly
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          kept=nightly
+
+          # A release owns its tag: deleting the release with --cleanup-tag
+          # takes both, so the tag is never left pointing at nothing.
+          gh release list --limit 1000 --json tagName --jq '.[].tagName' \
+            | grep -v -x "$kept" > "$RUNNER_TEMP/releases.txt" || true
+          while read -r tag; do
+            [[ -z "$tag" ]] && continue
+            echo "Removing release $tag"
+            gh release delete "$tag" --yes --cleanup-tag || echo "Could not remove $tag"
+          done < "$RUNNER_TEMP/releases.txt"
+
+          # A tag with no release of its own.
+          git ls-remote --tags --refs origin 'refs/tags/*' \
+            | awk '{print $2}' | sed 's#refs/tags/##' \
+            | grep -v -x "$kept" > "$RUNNER_TEMP/tags.txt" || true
+          while read -r tag; do
+            [[ -z "$tag" ]] && continue
+            echo "Removing tag $tag"
+            git push origin ":refs/tags/$tag" || echo "Could not remove tag $tag"
+          done < "$RUNNER_TEMP/tags.txt"
+
+          echo "Remaining tags:"
+          git ls-remote --tags --refs origin 'refs/tags/*' | awk '{print $2}'
