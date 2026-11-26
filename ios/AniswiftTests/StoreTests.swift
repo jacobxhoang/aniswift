@@ -14,6 +14,12 @@ private final class StubAPI: APIClient {
 
     /// Thrown by every request while it is set.
     var failure: Error?
+    /// The English names a batch answers, by MAL id. A missing key answers
+    /// nothing, like a title whose batch did not name it.
+    var titleNameAnswer: [Int: String] = [:]
+    /// Every batch a screen asked for, so the batching itself can be checked.
+    private(set) var titleNameRequests: [(kind: Kind, ids: [Int])] = []
+
     /// The changes the store sent, in order.
     private(set) var savedChanges: [ListChange?] = []
 
@@ -67,11 +73,18 @@ private final class StubAPI: APIClient {
         return Page(items: [], more: false)
     }
 
-    func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] { [:] }
+    func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] {
+        titleNameRequests.append((kind, ids))
+        return titleNameAnswer.filter { ids.contains($0.key) }
+    }
 
     func resolveTitle(_ title: Title) async -> Title? { nil }
 
-    func cachedTitle(_ title: Title) -> Title? { nil }
+    func cachedTitle(_ title: Title) -> Title? {
+        titleNameAnswer[title.malID].map { title.fillingEnglishName(from: $0) }
+    }
+
+    func isNameResolved(_ title: Title) -> Bool { titleNameAnswer[title.malID] != nil }
 
     func cachedDetail(_ title: Title) -> Fields? { nil }
 
@@ -273,5 +286,57 @@ struct FriendListBatchTests {
         #expect(batch.items.count == 1)
         #expect(batch.nextPage == nil)
         #expect(batch.failure == nil)
+    }
+}
+
+
+@Suite("English titles")
+@MainActor
+struct TitleNameTests {
+    private func row(_ id: Int, kind: Kind) throws -> Title {
+        let fields = try StubAPI.fields("{\"mal_id\": \(id), \"title\": \"Show \(id)\"}")
+        return try #require(Title(fields, kind: kind))
+    }
+
+    @Test("A page of rows is named in one request per kind")
+    func pageNamesInOneRequestPerKind() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        api.titleNameAnswer = [1: "Show One", 2: "Show Two", 3: "Book Three"]
+        let anime = try [1, 2].map { try row($0, kind: .anime) }
+        let manga = try [3].map { try row($0, kind: .manga) }
+
+        await store.resolveNames(in: anime + manga)
+
+        #expect(api.titleNameRequests.count == 2)
+        #expect(store.named(anime[0]).englishName == "Show One")
+        #expect(store.named(manga[0]).englishName == "Book Three")
+    }
+
+    @Test("Rows already named cost no request the next time")
+    func namedRowsSkipTheLookup() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        api.titleNameAnswer = [4: "Show Four"]
+        let rows = [try row(4, kind: .anime)]
+
+        await store.resolveNames(in: rows)
+        await store.resolveNames(in: rows)
+
+        #expect(api.titleNameRequests.count == 1)
+    }
+
+    @Test("A row that already carries its English title asks for nothing")
+    func namedRowAsksForNothing() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        let fields = try StubAPI.fields(
+            #"{"mal_id": 5, "title": "Shingeki no Kyojin", "alternative_titles": {"en": "Attack on Titan"}}"#)
+        let title = try #require(Title(fields, kind: .anime))
+
+        await store.resolveNames(in: [title])
+
+        #expect(api.titleNameRequests.isEmpty)
+        #expect(store.named(title).englishName == "Attack on Titan")
     }
 }

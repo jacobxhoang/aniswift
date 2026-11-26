@@ -73,10 +73,34 @@ struct FriendFeedCache: Codable {
     let historyCursors: [FriendHistoryCursor]
     let page: Int
 
-    let englishNames: [String: String]?
     let savedAt: Date?
 
     private static let file = URL.cachesDirectory.appending(path: "Aniswift-friends-feed-v1.json")
+
+    static func read() -> Self? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    func write() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        SnapshotWriter.write(data, to: Self.file)
+    }
+
+    static func remove() {
+        SnapshotWriter.remove(file)
+    }
+}
+
+/// The English titles resolved so far, by `kind-id`, kept across launches so a
+/// list opens with its names in place instead of a catalog request per row every
+/// time the app starts. `nameless` holds the titles a batch answered as having
+/// no English name, so no row asks for one again.
+struct TitleNameCache: Codable {
+    var names: [String: String] = [:]
+    var nameless: Set<String> = []
+
+    private static let file = URL.cachesDirectory.appending(path: "Aniswift-title-names-v1.json")
 
     static func read() -> Self? {
         guard let data = try? Data(contentsOf: file) else { return nil }

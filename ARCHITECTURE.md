@@ -45,20 +45,20 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | --- | ---: | --- |
 | `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
 | `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 468 | This analysis: structure, APIs, state, caching, settings, CI and risks |
-| `ios/Aniswift/API.swift` | 788 | `APIError`, `Page` (with the provider's total), `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
+| `ARCHITECTURE.md` | 473 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/Aniswift/API.swift` | 888 | `APIError`, `Page` (with the provider's total), `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, batched English titles with the remembered `TitleNameCache`, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
 | `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/Aniswift/Store.swift` | 980 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures (plus an `entries` index, so a poster tile reads its saved row in one step), custom-list organisation, friend feed batching (twelve friends per group, then list pages, until the page holds 30 rows), a friend's public list read in batches of pages (`FriendListBatch`), `openFeed()` (a saved page older than ten minutes is refreshed on open) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics (reusing one formatter per format), `plainMessage` (one plain sentence for every failure) |
-| `ios/Aniswift/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/Aniswift/AniswiftApp.swift` | 1425 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen` (which reads the list to its end and counts the rows it holds), `AboutScreen` |
+| `ios/Aniswift/Store.swift` | 972 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures (plus an `entries` index, so a poster tile reads its saved row in one step), custom-list organisation, friend feed batching (twelve friends per group, then list pages, until the page holds 30 rows), a friend's public list read in batches of pages (`FriendListBatch`), `resolveNames(in:)` (the English titles of one page, batched per kind) and `named(_:)`, `openFeed()` (a saved page older than ten minutes is refreshed on open) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics (reusing one formatter per format), `plainMessage` (one plain sentence for every failure) |
+| `ios/Aniswift/Persistence.swift` | 228 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, `TitleNameCache` (the English titles resolved so far), profile statistics models and `ProfileCache` |
+| `ios/Aniswift/AniswiftApp.swift` | 1429 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `Art`, `PreferredTitle` (which reads the remembered name before it asks for one), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen` (which reads the list to its end and counts the rows it holds), `AboutScreen` |
 | `ios/Aniswift/SettingsScreen.swift` | 605 | `AccentChoice`, `SettingKey`, `DetailSection` (and its `all` list), `DetailPreferences` (the Details Page toggles for one kind, read once), `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
-| `ios/Aniswift/CatalogScreens.swift` | 1348 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a media switch under the search bar + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/Aniswift/TitleScreen.swift` | 2047 | Title detail fan-out and layout, `DetailPreferences` (the Details Page toggles, read once per kind), `TitleFacts` (the payload's studios, authors, genres, themes and serializations, decoded once), collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/Aniswift/CatalogScreens.swift` | 1346 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a media switch under the search bar + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
+| `ios/Aniswift/TitleScreen.swift` | 2052 | Title detail fan-out and layout, `DetailPreferences` (the Details Page toggles, read once per kind), `TitleFacts` (the payload's studios, authors, genres, themes and serializations, decoded once), collapsible summary, details-page preference gating, full-screen poster (which closes from a Liquid Glass button where a back button would sit), stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
 | `ios/Aniswift/CharacterScreen.swift` | 759 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits named in one batched request per kind, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniswiftTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniswiftTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
 | `ios/AniswiftTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
-| `ios/AniswiftTests/StoreTests.swift` | 277 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting, feed-cursor and friend-list batch tests |
+| `ios/AniswiftTests/StoreTests.swift` | 342 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting, feed-cursor, friend-list batch and English-title batching tests |
 | `ios/AniswiftTests/CallbackTests.swift` | 52 | `MALCallback` redirect validation: scheme, host, path, fragment, state and code |
 | `ios/AniswiftTests/StackLinkTests.swift` | 59 | `StackLink` stack-URL parsing and description segmentation |
 | `ios/Aniswift/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
@@ -190,12 +190,15 @@ On top of that:
   romaji from `title_romaji | … | titles[type=romaji] | title | name`; score from `score | mean`;
   count from `episodes | chapters | total | num_episodes | num_chapters`; artwork from
   `images.jpg.large_image_url | images.webp.… | images.large | main_picture | imageUrl | image | avatarUrl | avatar | picture`.
-- `includesEnglishTitleField` marks rows as “sparse”; sparse rows without an English title set `needsTitleLookup`,
-  which `PreferredTitle` resolves through `API.resolveTitle` (6 concurrent lookups, de-duplicated per title) unless
-  the page already named the row. A person page batches its credits through `API.titleNames` — one `ids` request
-  per 50 titles — and passes `knownName`/`nameSettled`, so a mangaka with 26 credits costs one request instead of
-  26; a name the batch did not return means there is no English title, not another lookup. Resolved names are
-  persisted only in the friends-feed cache (`feedEnglishNames`).
+- `includesEnglishTitleField` marks rows as “sparse”; sparse rows without an English title set `needsTitleLookup`.
+  Names are resolved in batches before a screen draws its page: `Store.resolveNames(in:)` groups the sparse titles
+  by kind and asks `API.titleNames`, one Tenrai `ids` request per 50 titles with three chunks in flight, for the
+  feed, the friend's list, the favourites rails of both profiles and a person's credits. A row still sparse after
+  that, and every lone row in `PreferredTitle`, falls back to `API.resolveTitle`: one detail request per title,
+  behind a 6-slot gate and one shared `Task` per id. `API` remembers every answer — the name, or the fact that the
+  batch answered there is none — in `TitleNameCache`, so a title is asked about once per install instead of once
+  per screen or launch. A person page passes `knownName`/`nameSettled` from its own batch, so a mangaka with 26
+  credits costs one request instead of 26.
 - `Title.displayName(for:)` is the single display rule for the stored language preference. It returns the
   original (romaji) name for `Romaji`, the English name for `English`, and falls back to whichever exists.
   `PreferredTitle`, list rows and sorting, title headers, interest-stack entries, review headers and editor
@@ -240,7 +243,8 @@ On top of that:
 | In-flight de-duplication | one shared `Task` per catalog URL |
 | Title lookups | one `Task` per `Title.id`; a 6-slot `CheckedContinuation` gate limits concurrent Tenrai detail fetches |
 | List snapshot | `Aniswift-lists-v1.json`: account + `[Kind: SavedList(items, page, more, needsReconciliation)]` |
-| Friends feed | `Aniswift-friends-feed-v1.json`: account ID, friends, activity, checked count, history cursors, page, English names |
+| Friends feed | `Aniswift-friends-feed-v1.json`: account ID, friends, activity, checked count, history cursors, page |
+| English titles | `Aniswift-title-names-v1.json`: `kind-id` → English name for rows a provider sends without one, plus the ids a batch answered as having none. Capped at 4000 names, written once per burst of resolutions, and dropped by Clear Cache. |
 | Public profiles | `Aniswift-profiles-v1.json`: stats/favorites per user with **15-minute** freshness |
 | Saved-data state | Per-profile and feed `PublicDataStatus` (stale flag, last failure, snapshot time). Public refreshes honour Jikan Edge `meta.stale`/`refreshFailed`, keep the previous snapshot on screen, and back off 15/30/60 s (three automatic attempts, reset by pull-to-refresh or Retry). |
 | Custom lists | UserDefaults `aniswift.organization.v1.<accountID>` |
@@ -388,10 +392,11 @@ its `commits` job are gone: one push is one build, and a release is a tag.
    assume 100/page. A friend's list is read at 100/page in batches of four pages, and the batch ends when a page
    reports no more or repeats rows it already answered, so a page that stops advancing cannot be asked for forever.
    `friendEntry` answers from one `userupdates` request.
-6. **English titles for user lists.** Jikan Edge list rows carry no English title. The friends feed resolves each
-   page through Tenrai's `{kind}?ids=` filter (one 50-title request instead of a detail request per row) before it
-   publishes the rows, and keeps the names in the feed cache. Other list rows still fall back to a per-row detail
-   fetch. The preferred-language setting affects display only, not what is fetched or stored.
+6. **English titles for user lists.** Jikan Edge list and activity rows carry no English title. Every screen that
+   draws a page of them resolves the names in batches of 50 through Tenrai's `{kind}?ids=` filter before it
+   publishes the rows, and `API` remembers each answer — the name, or the fact that the title has none — in
+   `Aniswift-title-names-v1.json`, so a second visit costs no request at all. A lone row still resolves through a
+   detail request. The preferred-language setting affects display only, not what is fetched or stored.
 7. **Date parsing is heuristic** (`Store.activityDate`): ISO8601, ISO8601 with fractional seconds, `yyyy-MM-dd`,
    `MMM d, yyyy`, `MMM d, h:mm a`, `MMM d`, then “today”/“yesterday”. `defaultDate = Date()` can assume the
    current year, and the “future date means last year” rollback only applies to year-less formats.

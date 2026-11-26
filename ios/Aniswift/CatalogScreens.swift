@@ -1157,9 +1157,7 @@ struct FriendsScreen: View {
                         }.padding(rowInsets)
                     }
                     ForEach(store.activity) { item in
-                        PreferredTitle(title: store.friendFeedTitle(item.title),
-                                       showsLoadingTitle: false,
-                                       onEnglishName: { store.rememberFriendFeedEnglishName($1, for: $0) }) { title, name in
+                        PreferredTitle(title: store.named(item.title), showsLoadingTitle: false) { title, name in
                             feedRow(item, title: title, name: name)
                         }
                         .padding(rowInsets)

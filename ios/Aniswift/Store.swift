@@ -27,7 +27,6 @@ final class Store: ObservableObject {
     @Published private(set) var friendFeedPage = 0
     @Published private var checkedFriends = 0
     @Published private var historyCursors: [FriendHistoryCursor] = []
-    @Published private var feedEnglishNames: [String: String] = [:]
     @Published private(set) var profileStatuses: [String: PublicDataStatus] = [:]
     @Published private(set) var feedStatus = PublicDataStatus()
 
@@ -42,7 +41,6 @@ final class Store: ObservableObject {
     private var profileRequests: [String: Task<ProfileFetchOutcome, Never>] = [:]
     private var publicBackoff: [String: PublicBackoff] = [:]
     private var publicRetryTasks: [String: Task<Void, Never>] = [:]
-    private var pendingFeedSave: Task<Void, Never>?
     private static let feedBackoffKey = "feed"
     private static let publicRetryDelays: [TimeInterval] = [15, 30, 60]
     /// One friend answers with a handful of updates, so a page is built from
@@ -223,6 +221,9 @@ final class Store: ObservableObject {
                 let entries: [Fields] = data.read(kind.rawValue) ?? []
                 return (kind, entries.compactMap { Title($0, kind: kind) })
             })
+            // A profile's favorite rails are Edge rows, so their names are
+            // resolved in a batch before the shelves are drawn.
+            await resolveNames(in: favorites.values.flatMap { $0 })
             return .success(ProfileFavoritesFetch(favorites: favorites, freshness: CatalogFreshness(response.read("meta"))))
         } catch {
             return .failure(error)
@@ -333,7 +334,6 @@ final class Store: ObservableObject {
             checkedFriends = 0
             friendFeedPage = 0
             historyCursors = []
-            feedEnglishNames = [:]
             loadingFriends = false
             friendMessage = nil
             profileStatuses = [:]
@@ -363,58 +363,32 @@ final class Store: ObservableObject {
         checkedFriends = cache.checkedFriends
         historyCursors = cache.historyCursors
         friendFeedPage = cache.page
-        feedEnglishNames = cache.englishNames ?? [:]
         feedStatus = PublicDataStatus(savedAt: cache.savedAt)
     }
 
-    func friendFeedTitle(_ title: Title) -> Title {
-        title.fillingEnglishName(from: feedEnglishNames[title.id])
+    /// A row as its English name when one is known, so a list draws the names a
+    /// batch already answered instead of a placeholder or an original title.
+    func named(_ title: Title) -> Title {
+        api.cachedTitle(title) ?? title
     }
 
-    func rememberFriendFeedEnglishName(_ name: String, for title: Title) {
-        rememberFriendFeedEnglishNames([title.id: name])
-    }
-
-    private func rememberFriendFeedEnglishNames(_ names: [String: String]) {
-        guard account != nil else { return }
-        let additions = names.filter { feedEnglishNames[$0.key] != $0.value }
-        guard !additions.isEmpty else { return }
-        feedEnglishNames.merge(additions) { _, new in new }
-        // A page that names a dozen titles used to encode and write the whole
-        // snapshot a dozen times, once per name; the write is coalesced instead.
-        saveFriendFeedSoon()
-    }
-
-    /// Writes the feed snapshot once after a burst of changes.
-    private func saveFriendFeedSoon() {
-        guard pendingFeedSave == nil else { return }
-        pendingFeedSave = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(400))
-            guard !Task.isCancelled, let self else { return }
-            self.pendingFeedSave = nil
-            self.saveFriendFeed()
-        }
-    }
-
-    /// Jikan Edge list rows carry only the original title, so the whole page is
-    /// resolved in grouped Tenrai requests instead of one detail request per row.
-    private func resolveEnglishNames(in updates: [FriendUpdate]) async {
+    /// English names for the rows a screen is about to draw: one request per
+    /// fifty titles and one per kind, instead of a detail request per row as
+    /// each one appears. A row the batch did not name is left to its own
+    /// lookup, because that request answers whether a title has no English name
+    /// at all.
+    func resolveNames(in titles: [Title]) async {
         var pending: [Kind: [Int]] = [:]
-        for title in unique(updates.map(\.title)) where title.needsTitleLookup {
+        for title in unique(titles) where title.needsTitleLookup && !api.isNameResolved(title) {
             pending[title.kind, default: []].append(title.malID)
         }
         guard !pending.isEmpty else { return }
-        // One request per kind, both in flight at once.
-        await withTaskGroup(of: [String: String].self) { group in
+        // One batch per kind, both in flight at once.
+        await withTaskGroup(of: Void.self) { group in
             for (kind, ids) in pending {
-                group.addTask {
-                    let names = await self.api.titleNames(ids, kind: kind)
-                    return names.reduce(into: [String: String]()) { result, entry in
-                        result["\(kind.rawValue)-\(entry.key)"] = entry.value
-                    }
-                }
+                group.addTask { _ = await self.api.titleNames(ids, kind: kind) }
             }
-            for await names in group { rememberFriendFeedEnglishNames(names) }
+            for await _ in group {}
         }
     }
 
@@ -422,7 +396,7 @@ final class Store: ObservableObject {
         guard let account else { return }
         FriendFeedCache(accountID: account.id, friends: friends, activity: activity,
                         checkedFriends: checkedFriends, historyCursors: historyCursors,
-                        page: friendFeedPage, englishNames: feedEnglishNames, savedAt: .now).write()
+                        page: friendFeedPage, savedAt: .now).write()
         feedStatus.savedAt = .now
     }
 
@@ -475,6 +449,10 @@ final class Store: ObservableObject {
                 if listRevisions[kind, default: 0] != revision { break }
                 items.append(contentsOf: result.items)
                 if page == lastPage || !result.more {
+                    // The names are resolved before the list is published, so
+                    // every row shows its English title as it is drawn.
+                    await resolveNames(in: items.map(\.title))
+                    guard accountGeneration == generation else { return }
                     updateList(kind, SavedList(items: unique(items), page: page, more: result.more))
                     return
                 }
@@ -501,6 +479,8 @@ final class Store: ObservableObject {
         let result = try await api.list(kind, page: page)
         guard accountGeneration == generation, listRevisions[kind, default: 0] == revision else { return }
         let previous = savedLists[kind]?.items ?? []
+        await resolveNames(in: result.items.map(\.title))
+        guard accountGeneration == generation else { return }
         updateList(kind, SavedList(items: unique(previous + result.items), page: page, more: result.more))
     }
 
@@ -679,7 +659,7 @@ final class Store: ObservableObject {
             friends = refreshedFriends
             checkedFriends = start
             let sorted = sortedFriendActivity(updates)
-            await resolveEnglishNames(in: sorted)
+            await resolveNames(in: sorted.map(\.title))
             guard !Task.isCancelled, accountGeneration == generation else { return }
             activity = reset ? sorted : unique(activity + sorted)
             friendFeedPage += 1
@@ -804,7 +784,7 @@ final class Store: ObservableObject {
         friendFeedPage += 1
         let older = sortedFriendActivity(batch.updates)
         if !older.isEmpty {
-            await resolveEnglishNames(in: older)
+            await resolveNames(in: older.map(\.title))
             guard !Task.isCancelled, accountGeneration == generation else { return }
             activity = unique(activity + older)
         }
@@ -820,15 +800,27 @@ final class Store: ObservableObject {
         return Page(items: page.items.filter { $0.date != nil }, more: page.more)
     }
 
+    /// A friend's list read in batches of pages, with the English titles of the
+    /// rows resolved before the batch is drawn.
+    func publicListBatch(
+        _ friend: Friend, kind: Kind, from page: Int, pages: Int = 4, limit: Int = 100,
+        refresh: Bool = false
+    ) async -> FriendListBatch {
+        let batch = await loadListBatch(
+            friend, kind: kind, from: page, pages: pages, limit: limit, refresh: refresh)
+        guard !batch.items.isEmpty else { return batch }
+        await resolveNames(in: batch.items.map(\.title))
+        return batch
+    }
+
     /// A friend's list is read in batches of pages, and the whole list is read
     /// rather than one page at a time: a page adds a hundred rows above the
     /// screen's loading row, so a batch that asked for one page per scroll left
     /// a long list at whatever page the reader had reached. A page that fails
     /// keeps the pages read before it, with the page to retry, and a page that
     /// repeats rows already read ends the batch instead of asking forever.
-    func publicListBatch(
-        _ friend: Friend, kind: Kind, from page: Int, pages: Int = 4, limit: Int = 100,
-        refresh: Bool = false
+    private func loadListBatch(
+        _ friend: Friend, kind: Kind, from page: Int, pages: Int, limit: Int, refresh: Bool
     ) async -> FriendListBatch {
         var items: [FriendUpdate] = []
         var next = page

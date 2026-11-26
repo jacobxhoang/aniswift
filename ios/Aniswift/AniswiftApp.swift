@@ -473,7 +473,7 @@ struct PreferredTitle<Content: View>: View {
         let item = current
         let waiting =
             !nameSettled && item.needsTitleLookup && attemptedID != title.id
-            && store.api.cachedTitle(title) == nil
+            && !store.api.isNameResolved(title)
         // A sparse row still carries its original title, so a reader that opts out
         // of the placeholder always has something real to show. Romaji reads the
         // original title instead of the English name.
@@ -488,7 +488,7 @@ struct PreferredTitle<Content: View>: View {
                 guard attemptedID != title.id else { return }
                 // A settled name still leaves the poster to fetch, so either one
                 // can justify the lookup.
-                let needsName = item.needsTitleLookup && !nameSettled
+                let needsName = item.needsTitleLookup && !nameSettled && !store.api.isNameResolved(title)
                 let needsImage = loadMissingImage && item.image == nil
                 guard needsName || needsImage else { return }
                 let result = await store.api.resolveTitle(title)
@@ -892,6 +892,10 @@ struct FriendProfileScreen: View {
             guard !Task.isCancelled else { return }
             let sorted = items.map { (item: $0, date: activityDate($0.date)) }
                 .sorted { $0.date > $1.date }
+            // The rows are Edge rows, so their names are resolved in a batch
+            // before the recent updates are drawn.
+            await store.resolveNames(in: items.map(\.title))
+            guard !Task.isCancelled else { return }
             updates = unique(sorted.map(\.item))
             updatesAreSaved = false
             updatesUnavailable = false
@@ -1013,7 +1017,7 @@ private struct FriendMediaListScreen: View {
     }
 
     private func entryRow(_ entry: FriendUpdate) -> some View {
-        let title = store.friendFeedTitle(entry.title)
+        let title = store.named(entry.title)
         return NavigationLink(value: title) {
             TitleRow(title: title, note: detail(for: entry))
                 .frame(maxWidth: .infinity, alignment: .leading)

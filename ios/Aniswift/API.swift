@@ -118,6 +118,9 @@ protocol APIClient: AnyObject {
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String]
     func resolveTitle(_ title: Title) async -> Title?
     func cachedTitle(_ title: Title) -> Title?
+    /// Whether a title's English name is already known, a batch that answered
+    /// there is none included.
+    func isNameResolved(_ title: Title) -> Bool
     func cachedDetail(_ title: Title) -> Fields?
     func savedDetail(_ title: Title) -> (fields: Fields, savedAt: Date)?
     func clearCatalogCache()
@@ -153,6 +156,15 @@ final class API: APIClient {
     private var activeTitleLookups = 0
     private var titleLookupWaiters: [CheckedContinuation<Void, Never>] = []
     private let titleLookupLimit = 6
+    /// English titles for rows that carry only the original one, by `kind-id`,
+    /// with the titles a batch answered as having none. Both outlive a launch,
+    /// so a list opens named instead of a detail request per row.
+    private var nameCache = TitleNameCache.read() ?? TitleNameCache()
+    private var pendingNameSave: Task<Void, Never>?
+    private static let nameCacheLimit = 4000
+    /// Chunks of fifty ids asked for together, so a long list is named in one
+    /// round of requests rather than one behind another.
+    private static let nameChunks = 3
 
     static func url(_ base: URL, _ path: String, _ query: [URLQueryItem] = []) -> URL {
         let url = base.appending(path: path)
@@ -269,15 +281,61 @@ final class API: APIClient {
         return nil
     }
 
+    /// The title as the name cache knows it: an English name already resolved
+    /// fills the row, and the catalog's own cached detail fills the rest.
     func cachedTitle(_ title: Title) -> Title? {
-        cachedDetail(title).flatMap { Title($0, kind: title.kind) }
+        if let name = nameCache.names[title.id] { return title.fillingEnglishName(from: name) }
+        return cachedDetail(title).flatMap { Title($0, kind: title.kind) }
     }
 
-    /// Drops decoded catalog responses so Clear Cache also refreshes title pages.
+    /// Whether an English name for a title is already known, including a batch
+    /// that answered there is none, so the row is not asked for again.
+    func isNameResolved(_ title: Title) -> Bool {
+        nameCache.names[title.id] != nil || nameCache.nameless.contains(title.id)
+    }
+
+    private func rememberName(_ name: String, key: String) {
+        guard nameCache.names[key] != name else { return }
+        nameCache.names[key] = name
+        nameCache.nameless.remove(key)
+        // A name is cheap to resolve again, so the oldest entries go first
+        // rather than letting the file grow with every list ever opened.
+        let overflow = nameCache.names.count - Self.nameCacheLimit
+        if overflow > 0 {
+            for entry in Array(nameCache.names.keys.prefix(overflow)) {
+                nameCache.names.removeValue(forKey: entry)
+            }
+        }
+        saveNamesSoon()
+    }
+
+    private func rememberNameless(_ key: String) {
+        guard nameCache.names[key] == nil, nameCache.nameless.insert(key).inserted else { return }
+        saveNamesSoon()
+    }
+
+    /// Writes once after a burst, so a page of fifty rows is one encode and one
+    /// write instead of fifty of each.
+    private func saveNamesSoon() {
+        guard pendingNameSave == nil else { return }
+        pendingNameSave = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(600))
+            guard !Task.isCancelled, let self else { return }
+            self.pendingNameSave = nil
+            self.nameCache.write()
+        }
+    }
+
+    /// Drops decoded catalog responses and the remembered English names, so
+    /// Clear Cache also refreshes title pages and names rows from scratch.
     func clearCatalogCache() {
         cached.removeAll()
         cachedUpdates.removeAll()
         cachedListPages.removeAll()
+        nameCache = TitleNameCache()
+        pendingNameSave?.cancel()
+        pendingNameSave = nil
+        TitleNameCache.remove()
         if let directory = Self.detailDirectory() {
             try? FileManager.default.removeItem(at: directory)
         }
@@ -392,24 +450,59 @@ final class API: APIClient {
         return Page(items: entries, more: more, total: total)
     }
 
-    /// English titles for a batch of ids in as few requests as possible.
-    /// Tenrai's `ids` filter answers 50 titles at a time, which replaces a
-    /// detail request per row when a list only carries the original title.
+    /// English titles for a batch of ids in as few requests as possible, and
+    /// remembered. Tenrai's `ids` filter answers full rows fifty at a time,
+    /// which replaces a detail request per row when a list only carries the
+    /// original title; the chunks go out three at a time. A row the filter
+    /// answered without an English name is remembered as having none, and a row
+    /// it did not answer stays open, because the filter also leaves out titles
+    /// it will not show.
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] {
         var names: [Int: String] = [:]
-        var remaining = Array(Set(ids.filter { $0 > 0 })).sorted()
+        var remaining: [Int] = []
+        for id in Set(ids.filter { $0 > 0 }).sorted() {
+            let key = "\(kind.rawValue)-\(id)"
+            if let name = nameCache.names[key] {
+                names[id] = name
+            } else if !nameCache.nameless.contains(key) {
+                remaining.append(id)
+            }
+        }
         while !remaining.isEmpty {
             if Task.isCancelled { return names }
-            let chunk = Array(remaining.prefix(50))
-            remaining.removeFirst(chunk.count)
-            let query = [URLQueryItem(name: "ids", value: chunk.map(String.init).joined(separator: ",")),
-                         URLQueryItem(name: "limit", value: String(chunk.count))]
-            guard let response = try? await catalog(kind.rawValue, query, refresh: false) else { continue }
-            let rows: [Fields] = response.read("data") ?? []
-            for row in rows {
-                guard let id: Int = row.read("mal_id", "malId", "id"),
-                      let name = row.englishTitle else { continue }
-                names[id] = name
+            let batch = Array(remaining.prefix(Self.nameChunks * 50))
+            remaining.removeFirst(batch.count)
+            var chunks: [[Int]] = []
+            var start = 0
+            while start < batch.count {
+                let end = min(start + 50, batch.count)
+                chunks.append(Array(batch[start..<end]))
+                start = end
+            }
+            await withTaskGroup(of: [Fields]?.self) { group in
+                for chunk in chunks {
+                    group.addTask {
+                        let query = [
+                            URLQueryItem(name: "ids", value: chunk.map(String.init).joined(separator: ",")),
+                            URLQueryItem(name: "limit", value: String(chunk.count)),
+                        ]
+                        let response = try? await self.catalog(kind.rawValue, query, refresh: false)
+                        return response?.read("data")
+                    }
+                }
+                for await rows in group {
+                    guard let rows else { continue }
+                    for row in rows {
+                        guard let id: Int = row.read("mal_id", "malId", "id") else { continue }
+                        let key = "\(kind.rawValue)-\(id)"
+                        if let name = row.englishTitle {
+                            rememberName(name, key: key)
+                            names[id] = name
+                        } else {
+                            rememberNameless(key)
+                        }
+                    }
+                }
             }
         }
         return names
@@ -428,7 +521,14 @@ final class API: APIClient {
             let path = "\(title.kind.rawValue)/\(title.malID)"
             guard let response = try? await catalog(path, [], refresh: false),
                   let fields: Fields = response.read("data") else { return nil }
-            return Title(fields, kind: title.kind)
+            let resolved = Title(fields, kind: title.kind)
+            // One row's lookup names every other row that shows the same title.
+            if let name = resolved?.englishName {
+                rememberName(name, key: title.id)
+            } else if resolved != nil {
+                rememberNameless(title.id)
+            }
+            return resolved
         }
         titleLookups[title.id] = lookup
         defer { titleLookups[title.id] = nil }
