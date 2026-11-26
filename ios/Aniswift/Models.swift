@@ -9,6 +9,14 @@ enum Kind: String, CaseIterable, Identifiable, Codable {
         [self == .anime ? "watching" : "reading", "completed", "on_hold", "dropped",
          self == .anime ? "plan_to_watch" : "plan_to_read"]
     }
+    /// The media types MyAnimeList reports for this kind, as a list names them.
+    /// The two kinds share none of them, so a manga list has its own set.
+    var formats: [String] {
+        switch self {
+        case .anime: ["TV", "Movie", "OVA", "ONA", "Special", "Music", "TV Special"]
+        case .manga: ["Manga", "Novel", "Light Novel", "One-shot", "Doujinshi", "Manhwa", "Manhua"]
+        }
+    }
 }
 
 func statusLabel(_ value: String) -> String {
@@ -526,6 +534,59 @@ enum StackLink {
 // appear beneath the destination-pushed screen.
 struct StackRoute: Hashable {
     let stack: InterestStack
+}
+
+/// The weekly slot an airing anime takes, as MyAnimeList publishes it: a
+/// weekday and a time in Japan's zone, which is the one every slot is given
+/// in. The title page turns the slot into the countdown it shows.
+struct AiringSlot: Equatable {
+    /// The weekday, numbered the way `Calendar` numbers it: 1 is Sunday.
+    let weekday: Int
+    let hour: Int
+    let minute: Int
+
+    private static let weekdays = [
+        "sunday": 1, "monday": 2, "tuesday": 3, "wednesday": 4,
+        "thursday": 5, "friday": 6, "saturday": 7,
+    ]
+    private static let names = [
+        "Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday",
+    ]
+
+    init?(_ broadcast: Fields?) {
+        guard let broadcast, let day = broadcast.string("day"), let time = broadcast.string("time") else {
+            return nil
+        }
+        // The payload names a day in the plural ("Sundays") and sometimes in
+        // the singular, so the trailing s is the only difference to read past.
+        let lowered = day.lowercased()
+        let name = lowered.hasSuffix("s") ? String(lowered.dropLast()) : lowered
+        guard let weekday = Self.weekdays[name] else { return nil }
+        let parts = time.split(separator: ":").compactMap { Int($0) }
+        guard parts.count == 2, (0...23).contains(parts[0]), (0...59).contains(parts[1]) else {
+            return nil
+        }
+        self.weekday = weekday
+        hour = parts[0]
+        minute = parts[1]
+    }
+
+    /// The slot as a reader sees it, e.g. "Sunday at 23:15 JST".
+    var label: String {
+        "\(Self.names[weekday - 1]) at \(String(format: "%02d:%02d", hour, minute)) JST"
+    }
+
+    /// When this slot next comes round after `now`. Japan has no daylight
+    /// saving, so one fixed zone is exact for every title MyAnimeList lists.
+    func next(after now: Date = .now) -> Date? {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Asia/Tokyo") ?? .current
+        var components = DateComponents()
+        components.weekday = weekday
+        components.hour = hour
+        components.minute = minute
+        return calendar.nextDate(after: now, matching: components, matchingPolicy: .nextTime)
+    }
 }
 
 struct TitleStacksRoute: Hashable {

@@ -96,19 +96,20 @@ struct ListFilter: Codable, Equatable {
     var details: Set<ListDetailFilter> = []
     var year = ""
 
-    /// The formats a list offers, as MyAnimeList names them.
-    static let allFormats = ["TV", "Movie", "OVA", "ONA", "Special", "Music", "TV Special"]
-
     /// Everything kept: every status, every format, no requirement and no year.
     /// This is what Reset returns to and what a first visit starts on.
     static func defaults(for kind: Kind) -> ListFilter {
-        ListFilter(statuses: Set(kind.statuses), formats: Set(allFormats))
+        ListFilter(statuses: Set(kind.statuses), formats: Set(kind.formats))
     }
+
+    /// The formats a list offers, taken from the kind itself: an anime list has
+    /// TV and movies, a manga list manga and novels, and they share none.
+    static func formats(for kind: Kind) -> [String] { kind.formats }
 
     /// Whether anything narrows the list, so the screen can say so and offer to
     /// clear it. The order the list is read in is not a filter.
     func isFiltering(for kind: Kind) -> Bool {
-        statuses != Set(kind.statuses) || formats != Set(Self.allFormats) || !details.isEmpty
+        statuses != Set(kind.statuses) || formats != Set(kind.formats) || !details.isEmpty
             || !year.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
@@ -128,22 +129,24 @@ struct ListFilter: Codable, Equatable {
         return Int(digits)
     }
 
-    /// MyAnimeList names a format its own way ("tv", "tv_special"), so the
-    /// chips compare the names with the punctuation taken out.
+    /// MyAnimeList names a format its own way ("tv", "tv_special", "lightnovel"),
+    /// so a chip and a title compare with every mark that is not a letter or a
+    /// digit taken out: Light Novel reads as lightnovel either way.
     static func formatName(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "_", with: " ").lowercased()
+        raw.lowercased().filter { $0.isLetter || $0.isNumber }
     }
 
     // MARK: Remembering
 
     /// The filter a list opens with: the one it was last left on, or everything
-    /// kept. A saved set naming a status this build no longer has is dropped
-    /// rather than leaving the list empty with no chip to blame.
+    /// kept. A saved set naming a status or a format this kind does not have is
+    /// dropped rather than leaving the list empty with no chip to blame — which
+    /// is also how a manga list left with anime formats starts over.
     static func remembered(_ kind: Kind) -> ListFilter {
         guard let data = UserDefaults.standard.data(forKey: key(kind)),
             let saved = try? JSONDecoder().decode(ListFilter.self, from: data),
             saved.statuses.isSubset(of: Set(kind.statuses)),
-            saved.formats.isSubset(of: Set(allFormats))
+            saved.formats.isSubset(of: Set(kind.formats))
         else { return .defaults(for: kind) }
         return saved
     }
@@ -192,7 +195,7 @@ struct ListsScreen: View {
     /// entry's own status; the rest read what its title or its row carries.
     private func matchesFilters(_ entry: ListEntry) -> Bool {
         guard filter.statuses.contains(entry.status) else { return false }
-        if filter.formats != Set(ListFilter.allFormats) {
+        if filter.formats != Set(kind.formats) {
             let format = ListFilter.formatName(entry.title.format ?? "")
             guard filter.formats.contains(where: { ListFilter.formatName($0) == format }) else { return false }
         }
@@ -606,7 +609,7 @@ struct ListFilterSheet: View {
                         }
                     }
                     group("Format") {
-                        ForEach(ListFilter.allFormats, id: \.self) { format in
+                        ForEach(ListFilter.formats(for: kind), id: \.self) { format in
                             FilterChip(title: format, isOn: filter.formats.contains(format)) {
                                 toggleFormat(format)
                             }

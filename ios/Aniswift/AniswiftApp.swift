@@ -794,33 +794,21 @@ struct TitleRow: View {
 struct SignInButton: View {
     @EnvironmentObject private var store: Store
     @State private var working = false
-    @State private var configuring = false
-    @State private var clientID = ""
 
     var body: some View {
         Button {
-            if let saved = store.api.configuredClientID { signIn(saved) } else { configure() }
+            // The client ID is the one the build ships: the app has no field for
+            // it, so a build without one says so instead of asking for it.
+            guard let clientID = store.api.configuredClientID else {
+                store.message = "This build has no MyAnimeList client ID. Add one to Info.plist to sign in."
+                return
+            }
+            signIn(clientID)
         } label: {
             if working { ProgressView() } else { Label("Sign in with MyAnimeList", systemImage: "person.crop.circle") }
         }
         .disabled(working)
         .ledgerProminentButton()
-        .alert("MyAnimeList iOS Client ID", isPresented: $configuring) {
-            TextField("Client ID", text: $clientID)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button("Continue") { signIn(clientID) }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI). Enter its Client ID here."
-            )
-        }
-    }
-
-    private func configure() {
-        clientID = store.api.configuredClientID ?? ""
-        configuring = true
     }
 
     private func signIn(_ clientID: String) {
@@ -951,12 +939,54 @@ struct AccountScreen: View {
         }
     }
 
+    /// A friend's portrait follows Dynamic Type with the name under it, and
+    /// stops growing at the accessibility sizes so the row keeps its shape.
+    @ScaledMetric(relativeTo: .footnote) private var scaledFriendAvatar: CGFloat = 72
+
+    private var friendAvatarSize: CGFloat { min(scaledFriendAvatar, 72 * 1.4) }
+    /// The portrait, plus the room a two-line handle needs beside it.
+    private var friendTileWidth: CGFloat { friendAvatarSize + 28 }
+
     @ViewBuilder
     private var friendsShelf: some View {
         if !store.friends.isEmpty {
-            portraitShelf(
-                "Friends", items: store.friends, value: { $0 }, image: { $0.avatar }, name: { $0.name })
+            VStack(alignment: .leading, spacing: 10) {
+                LedgerSectionTitle("Friends").padding(.horizontal, LedgerLayout.inset)
+                LedgerShelf(spacing: 14, inset: LedgerLayout.inset) {
+                    ForEach(store.friends) { friend in
+                        friendTile(friend)
+                    }
+                }
+            }
         }
+    }
+
+    /// A friend reads as a person, not as a poster: a round portrait with the
+    /// hairline the app gives artwork, and the handle under it at reading size,
+    /// centred, so a long one wraps in the middle of its own tile instead of
+    /// running off the end of the row.
+    private func friendTile(_ friend: Friend) -> some View {
+        NavigationLink(value: friend) {
+            VStack(spacing: 8) {
+                Art(url: friend.avatar, symbol: "person.fill")
+                    .frame(width: friendAvatarSize, height: friendAvatarSize)
+                    .clipShape(.circle)
+                    .overlay {
+                        Circle().strokeBorder(Palette.hairline).allowsHitTesting(false)
+                    }
+                Text(friend.name)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2, reservesSpace: true)
+                    .frame(width: friendTileWidth)
+            }
+            .frame(width: friendTileWidth)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Open \(friend.name)’s profile")
+        }
+        .buttonStyle(LedgerTileButtonStyle())
     }
 
     @ViewBuilder

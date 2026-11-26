@@ -55,7 +55,7 @@ struct TitleScreen: View {
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
 
-    /// Every Details Page toggle, read once per kind: the thirty-three `@AppStorage`
+    /// Every Details Page toggle, read once per kind: the thirty-four `@AppStorage`
     /// wrappers this page used each read `UserDefaults` on access, on every pass
     /// of the busiest screen.
     @State private var animePreferences = DetailPreferences(.anime)
@@ -189,6 +189,7 @@ struct TitleScreen: View {
                 TitleSkeleton(kind: title.kind)
             } else {
                 header
+                airingSchedule
                 VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                     actions
                     if let savedAt {
@@ -388,6 +389,45 @@ struct TitleScreen: View {
         .padding(.horizontal, LedgerLayout.inset)
         .frame(maxWidth: .infinity)
     }
+
+    /// The next airing of an anime that is still on the air: its weekly slot
+    /// and how long it is away, in a band under the header. A payload that
+    /// names no slot draws nothing instead of a guess.
+    @ViewBuilder
+    private var airingSchedule: some View {
+        if let airingLine {
+            Text(airingLine)
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.vertical, 8)
+                .background(Palette.surface)
+                .padding(.top, 14)
+        }
+    }
+
+    private var airingLine: String? {
+        guard title.kind == .anime, shows(DetailSection.headerAiringSchedule), let record else {
+            return nil
+        }
+        let airing: Bool? = record.read("airing")
+        let status = (record.string("status") ?? "").lowercased()
+        guard airing == true || status == "currently airing" else { return nil }
+        let broadcast: Fields? = record.read("broadcast")
+        guard let slot = AiringSlot(broadcast), let next = slot.next() else { return nil }
+        let away = Self.relative.localizedString(for: next, relativeTo: .now)
+        return "Next episode \(away) · \(slot.label)"
+    }
+
+    /// One formatter for every countdown the page draws: building one per
+    /// body pass is the cost a relative date would pay.
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        return formatter
+    }()
 
     /// The header's numbers, each only when it has a value: a column of em
     /// dashes under three labels says less than the numbers it does have.

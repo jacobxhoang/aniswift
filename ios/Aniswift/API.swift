@@ -96,7 +96,7 @@ private enum SessionKeychain {
 @MainActor
 protocol APIClient: AnyObject {
     var hasSession: Bool { get }
-    var configuredClientID: String? { get set }
+    var configuredClientID: String? { get }
     var hasCachedCatalog: Bool { get }
 
     func session() async throws -> Account?
@@ -137,7 +137,6 @@ final class API: APIClient {
     static let redirectURI = MALCallback.url
     private static let mal = URL(string: "https://api.myanimelist.net/v2")!
     private static let oauth = URL(string: "https://myanimelist.net/v1/oauth2")!
-    private static let clientIDKey = "aniswift.mal.nativeClientID"
     private let tenrai = URL(string: "https://api.tenrai.org/v1")!
     private let jikan = URL(string: "https://jikan.lucashdo.com/v1")!
     private var malSession = SessionKeychain.read()
@@ -648,24 +647,15 @@ final class API: APIClient {
         return renewed
     }
 
+    /// The MyAnimeList client ID the build ships, read from Info.plist (CI
+    /// injects it from a secret). The app has no field for it: a build signs
+    /// in with the ID it was built with, so nothing has to be typed on a phone.
     var configuredClientID: String? {
-        get {
-            if let saved = UserDefaults.standard.string(forKey: Self.clientIDKey), !saved.isEmpty { return saved }
-            guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniswiftMALClientID") as? String,
-                !bundled.isEmpty
-            else { return nil }
-            return bundled
+        guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniswiftMALClientID") as? String else {
+            return nil
         }
-        set {
-            // A cleared ID falls back to the bundled one, so the app can go back
-            // to the value its build shipped with.
-            let value = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            if value.isEmpty {
-                UserDefaults.standard.removeObject(forKey: Self.clientIDKey)
-            } else {
-                UserDefaults.standard.set(value, forKey: Self.clientIDKey)
-            }
-        }
+        let trimmed = bundled.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
     var hasSession: Bool { malSession != nil }
 
@@ -687,7 +677,7 @@ final class API: APIClient {
         defer { signingIn = false }
         let clientID = rawID.trimmingCharacters(in: .whitespacesAndNewlines)
         guard clientID.range(of: "^[A-Za-z0-9]{32}$", options: .regularExpression) != nil else {
-            throw APIError(status: 0, message: "Enter the 32-character Client ID for your MyAnimeList iOS app.")
+            throw APIError(status: 0, message: "This build's MyAnimeList client ID is not a 32-character ID.")
         }
         let generation = sessionGeneration
         let verifier = try Self.randomProof()
@@ -714,7 +704,6 @@ final class API: APIClient {
         try SessionKeychain.write(next)
         sessionGeneration = UUID()
         malSession = next
-        UserDefaults.standard.set(clientID, forKey: Self.clientIDKey)
         return user
     }
 
@@ -912,7 +901,6 @@ struct AniListSession: Codable {
 /// puts a code in the query, so the two callbacks are read apart.
 enum AniListCallback {
     static let scheme = MALCallback.scheme
-    static let url = "\(scheme)://oauth"
 
     static func session(from url: URL) -> AniListSession? {
         guard url.scheme == scheme, url.host == "oauth", let fragment = url.fragment else { return nil }
@@ -1050,18 +1038,11 @@ final class AniListClient: ObservableObject {
     static let graphql = URL(string: "https://graphql.anilist.co")!
     static let authorize = URL(string: "https://anilist.co/api/v2/oauth/authorize")!
 
-    /// The AniList app's client ID, kept with the app's other settings. The
-    /// build ships one, so Connect works out of the box; a value saved here
-    /// replaces it, and an empty field goes back to the bundled one.
-    @Published var clientID: String {
-        didSet { UserDefaults.standard.set(clientID, forKey: SettingKey.aniListClientID) }
-    }
     @Published private(set) var session: AniListSession?
     @Published private(set) var entries: [AniListEntry] = []
     @Published private(set) var loading = false
     @Published private(set) var connecting = false
     @Published private(set) var message: String?
-    @Published private(set) var syncedAt: Date?
     /// The sign-in sheet, the same browser the MyAnimeList sign-in presents.
     private let browser = LoginBrowser()
     /// The AniList media and list entry ids by `Title.id`, learned from a sync
@@ -1072,8 +1053,8 @@ final class AniListClient: ObservableObject {
     /// order they were made instead of racing each other.
     private var pushQueue: Task<Void, Never>?
 
-    /// The client ID the build ships with, read like the MyAnimeList one. It is
-    /// public: a distributed build's Info.plist is readable.
+    /// The AniList app's client ID the build ships, read from Info.plist. The
+    /// app has no field for it: Connect signs in with the ID it was built with.
     static var bundledClientID: String? {
         guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniswiftAniListClientID") as? String else {
             return nil
@@ -1083,31 +1064,15 @@ final class AniListClient: ObservableObject {
     }
 
     init() {
-        let saved = UserDefaults.standard.string(forKey: SettingKey.aniListClientID) ?? ""
-        clientID = saved.isEmpty ? (Self.bundledClientID ?? "") : saved
         let cached = AniListKeychain.read()
         session = (cached?.expiresAt ?? .distantPast) > .now ? cached : nil
     }
 
     var isSignedIn: Bool { (session?.expiresAt ?? .distantPast) > .now }
 
-    /// What the section says under the account row.
-    var summary: String {
-        if connecting { return "Waiting for AniList sign-in…" }
-        if loading { return "Syncing your lists…" }
-        if let message { return message }
-        if entries.isEmpty { return "Tap to sync your AniList lists" }
-        guard let syncedAt else { return "\(entries.count) entries" }
-        return "\(entries.count) entries · \(displayDate(syncedAt.formatted(.iso8601)))"
-    }
-
     func signIn() async {
-        let saved = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
-        // An empty field goes back to the ID the build ships with, so clearing
-        // it in Settings does not disable Connect.
-        let id = saved.isEmpty ? (Self.bundledClientID ?? "") : saved
-        guard !id.isEmpty else {
-            message = "Add your AniList client ID first."
+        guard let id = Self.bundledClientID else {
+            message = "This build has no AniList client ID."
             return
         }
         guard !connecting else { return }
@@ -1139,7 +1104,6 @@ final class AniListClient: ObservableObject {
     func signOut() {
         session = nil
         entries = []
-        syncedAt = nil
         message = nil
         mediaIDs = [:]
         entryIDs = [:]
@@ -1260,7 +1224,6 @@ final class AniListClient: ObservableObject {
                 mediaIDs[key] = entry.id
                 if entry.entryID > 0 { entryIDs[key] = entry.entryID }
             }
-            syncedAt = .now
         } catch {
             guard !Task.isCancelled else { return }
             message = plainMessage(error, fallback: "Could not read your AniList lists.")

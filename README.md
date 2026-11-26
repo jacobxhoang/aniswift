@@ -12,7 +12,8 @@ its own.
   remove, and a full editor for scores, repeat counts, dates, notes and custom lists.
 - **Discover** — seasonal and ranked shelves, per-kind search, and genre, theme, studio and producer facets.
 - **Title pages** — summary, metadata, relations, characters, recommendations, trailer, theme songs, reviews,
-  interest stacks, and friends’ list activity. Tapping a poster shows it full screen, where it zooms on a
+  interest stacks, and friends’ list activity, plus the countdown to the next episode of an anime that is still
+  on the air. Tapping a poster shows it full screen, where it zooms on a
   double tap or pinch and closes from the glass X. Characters open their own
   profile, their voice actors and a manga’s authors open a page of their roles and staff credits.
 - **Friends feed** — public updates from MyAnimeList friends, older pages, and native friend profiles with
@@ -28,9 +29,11 @@ its own.
 
 - iPhone or iPad running iOS 17 or newer.
 - Xcode 26 and the iOS 26 SDK to build from source.
-- A MyAnimeList API application with the redirect URL `org.aniswift.ios://oauth` for sign-in.
-- No AniList app is needed for the read-only AniList section: the build ships a client ID, and one you register
-  with the same redirect URL replaces it.
+- A MyAnimeList API application with the redirect URL `org.aniswift.ios://oauth` for sign-in. Its 32-character
+  iOS Client ID goes in `Info.plist` (`AniswiftMALClientID`) or the `MAL_IOS_CLIENT_ID` CI secret before a build:
+  the app has no field for it.
+- No AniList app is needed for the read-only AniList section: the build ships a client ID, and you can put your
+  own in `Info.plist` (`AniswiftAniListClientID`) instead.
 
 ## Data sources
 

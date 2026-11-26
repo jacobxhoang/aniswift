@@ -25,7 +25,7 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips, remembered per tab), search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
+| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | View account statistics, friends and public favorites, open custom lists, share your MyAnimeList profile, choose what appears under **Settings → Profile**, and open Settings from the toolbar gear. |
@@ -40,7 +40,9 @@ uses for its **Showing saved data** note, so a failure reads the same everywhere
 
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
-it is missing. The same rule applies to posters and
+it is missing. An anime that is still on the air says when its next episode is due, in a band under its header
+("Next episode in 2 days · Sunday at 23:15 JST"), counted from the weekly slot MyAnimeList publishes for it;
+a title whose payload names no slot shows no band instead of a guess. The same rule applies to posters and
 rows, list sorting, interest-stack entries, review headers, and editor prompts. Genres, themes, producers and
 serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing,
 compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked
@@ -65,9 +67,10 @@ controls use interactive Liquid Glass on iOS 26 and translucent material on earl
 
 ## Settings
 
-Open **Profile → gear → Settings**. Settings also holds About Aniswift and Sign Out; the share button at the top
-left of Profile shares your MyAnimeList profile. Settings apply to the whole app and are stored on this device;
-they are not per account and are never synced to MyAnimeList.
+Open **Profile → gear → Settings**. Every settings row is its title alone: the sections are headings, and the
+screen that explains the app rather than setting it — **About Aniswift** — sits under AniList, with Sign Out
+last. The share button at the top left of Profile shares your MyAnimeList profile. Settings apply to the whole
+app and are stored on this device; they are not per account and are never synced to MyAnimeList.
 
 ### Accent Color
 
@@ -84,7 +87,6 @@ checkmark, or updates without animation when Reduce Motion is on.
 | Ask for Score After Watching an Anime | On | After an anime is marked completed with no score — from the title's completion action, the quick status editor or the full editor — presents a score sheet. It never appears for manga or from the score editor itself; the editor path also skips an entry that was already completed. |
 | Enable Preferred Launch Screen | Off | When on, the app opens the selected screen (Anime, Manga, Discover, Feed or Profile) on every cold launch. When off, it restores the last tab you used. |
 | Preferred Screen | Anime | The tab used when preferred launch is enabled. |
-| MyAnimeList Client ID | The ID the build ships with | Sets the 32-character iOS app ID used to sign in. The row shows only its last four characters; an empty field goes back to the bundled ID. |
 | Tab Bar Behavior (iOS 26) | Always Visible | Keeps the tab bar visible or lets it minimize while scrolling down. Earlier iOS versions always show the tab bar. |
 | Clear Cache | — | Clears Kingfisher's memory and disk image cache, the shared URL cache, the in-memory catalog response cache and the saved title pages. Sign-in, lists, feed/profile snapshots, custom lists and settings are kept. The row reports the measured image and URL cache size, or notes when only catalog responses are cached. |
 
@@ -109,6 +111,7 @@ and the groups are configured separately.
 - Show MAL Rank
 - Show Popularity
 - Show Studios (anime) or Show Authors (manga)
+- Show Airing Schedule (anime)
 
 **Content** (Anime)
 
@@ -158,11 +161,10 @@ Profile settings, under **Settings → Profile**, choose what the Profile tab dr
 Changes you make on MyAnimeList are carried over to AniList; nothing is read back from AniList.
 
 1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer) with the redirect URL
-   `org.aniswift.ios://oauth`, and copy its client ID. The build already ships one (ending in **8162**), so you
-   can skip this and connect straight away; your own ID replaces it.
-2. Tap **AniList Client ID** only to use your own app: paste the number and save. Clearing the field goes back to
-   the ID the build ships with.
-3. Tap **Connect AniList** and finish the sign-in sheet. The section then lists the account's anime and manga
+   `org.aniswift.ios://oauth`. The build already ships a client ID (ending in **8162**), so you can skip this and
+   connect straight away. To use your own app, put its ID in `Info.plist` (`AniswiftAniListClientID`) and rebuild:
+   the app has no field for it.
+2. Tap **Connect AniList** and finish the sign-in sheet. The section then lists the account's anime and manga
    entries grouped by status, with posters, progress and scores, and **Sign Out of AniList** ends the session
    without touching the MyAnimeList one.
 
@@ -204,8 +206,9 @@ stored on the device.
 
 1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create an application with App Type `iOS`.
 2. Register the exact redirect URL `org.aniswift.ios://oauth`.
-3. In Aniswift, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser
-   sign-in. To change it later, open **Settings → Behavior → MyAnimeList Client ID**.
+3. Put that iOS app's Client ID in `Info.plist` (`AniswiftMALClientID`) and build; CI fills it from a secret. The
+   app has no field for it, so nothing is typed on the device. Then tap **Sign in with MyAnimeList** and complete
+   the browser sign-in.
 
 The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in
 the device-only Keychain. Sign-in, live list sync, and catalog updates require an internet connection.
@@ -216,12 +219,12 @@ TestFlight requires signing with an Apple developer team.
 ## GitHub Actions IPA
 
 To preconfigure sign-in in builds from `main`, add a repository Actions secret named `MAL_IOS_CLIENT_ID` with
-your native MyAnimeList iOS Client ID. The workflow embeds it in the IPA so users can sign in without entering
-an ID. If the secret is absent, the app prompts for an ID on first sign-in.
+your native MyAnimeList iOS Client ID. The workflow embeds it in the IPA, which is now the only way the ID
+reaches a build: if the secret is absent, the app says the build has no client ID instead of prompting for one.
 
 GitHub keeps the secret out of the repository and build logs. The Client ID is readable from a distributed IPA.
-If your registration requires the Client ID to remain undisclosed, leave the secret unset for public releases
-and enter it on the device. Use the iOS Client ID only.
+If your registration requires the Client ID to remain undisclosed, leave the secret unset for public releases;
+a build without it cannot sign in. Use the iOS Client ID only.
 
 The **Build Aniswift IPA** workflow runs on pushes to `main`, on tags matching `ios-v*`, on pull requests
 touching `ios/**` or the workflow, and manually. Each run builds one tree — the tip of the push, the tagged

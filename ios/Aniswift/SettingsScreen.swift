@@ -51,7 +51,6 @@ enum SettingKey {
     static let launchTab = "aniswift.settings.launchTab"
     static let lastTab = "aniswift.settings.lastTab"
     static let tabBarBehavior = "aniswift.settings.tabBarBehavior"
-    static let aniListClientID = "aniswift.settings.aniListClientID"
 
     static func detail(_ kind: Kind, _ section: String) -> String {
         "aniswift.settings.details.\(kind.rawValue).\(section)"
@@ -77,6 +76,8 @@ enum DetailSection {
     static let headerRank = "header.rank"
     static let headerPopularity = "header.popularity"
     static let headerCreators = "header.creators"
+    /// The next airing of an anime that is still on the air.
+    static let headerAiringSchedule = "header.airing"
     static let infoSeries = "info.series"
     static let infoAlternatives = "info.alternatives"
     static let infoGenres = "info.genres"
@@ -86,17 +87,17 @@ enum DetailSection {
 
 extension DetailSection {
     /// Every section key, so a page reads them once instead of through
-    /// thirty-three separate property wrappers.
+    /// thirty-four separate property wrappers.
     static let all = [
         sections, characters, trailer, related, source, openings, endings, recommendations,
-        headerPoster, headerScore, headerRank, headerPopularity, headerCreators,
+        headerPoster, headerScore, headerRank, headerPopularity, headerCreators, headerAiringSchedule,
         infoSeries, infoAlternatives, infoGenres, infoThemes, infoCreators,
     ]
 }
 
 /// Every Details Page toggle for one kind, read once: an `@AppStorage` wrapper
 /// reads `UserDefaults` on each access, and a title page asked for all
-/// thirty-three of them on every body pass. Defaults are on, as before.
+/// thirty-four of them on every body pass. Defaults are on, as before.
 struct DetailPreferences: Equatable {
     private var values: [String: Bool] = [:]
 
@@ -155,25 +156,17 @@ struct SettingsScreen: View {
     /// entries the read-only lists screen draws, and the store sends it the
     /// changes made on MyAnimeList.
     @StateObject private var aniList = AniListClient.shared
-    @State private var editingAniListID = false
-    @State private var aniListIDDraft = ""
 
     var body: some View {
         List {
-            Section {
+            Section("Accent Color") {
                 accentRow
-            } header: {
-                Text("Accent Color")
-            } footer: {
-                Text("Used for controls, links and highlights across Aniswift.")
             }
             Section {
                 NavigationLink {
                     BehaviorSettingsScreen()
                 } label: {
-                    SettingsRow(
-                        icon: "slider.horizontal.3", title: "Behavior",
-                        detail: "Title language, links, launch screen and cache")
+                    SettingsRow(icon: "slider.horizontal.3", title: "Behavior")
                 }
                 .settingsRow()
             }
@@ -181,27 +174,13 @@ struct SettingsScreen: View {
                 NavigationLink {
                     DetailsSettingsScreen()
                 } label: {
-                    SettingsRow(
-                        icon: "list.bullet.rectangle", title: "Details Page",
-                        detail: "Choose what appears on anime and manga pages")
+                    SettingsRow(icon: "list.bullet.rectangle", title: "Details Page")
                 }
                 .settingsRow()
                 NavigationLink {
                     ProfileSettingsScreen()
                 } label: {
-                    SettingsRow(
-                        icon: "person.crop.circle", title: "Profile",
-                        detail: "Choose what appears on your profile")
-                }
-                .settingsRow()
-            }
-            Section {
-                NavigationLink {
-                    AboutScreen()
-                } label: {
-                    SettingsRow(
-                        icon: "info.circle", title: "About Aniswift",
-                        detail: "Version, services and open-source libraries")
+                    SettingsRow(icon: "person.crop.circle", title: "Profile")
                 }
                 .settingsRow()
             }
@@ -212,37 +191,26 @@ struct SettingsScreen: View {
                     } label: {
                         SettingsRow(
                             icon: "list.bullet.rectangle",
-                            title: session.name.isEmpty ? "AniList Lists" : session.name,
-                            detail: aniList.summary)
+                            title: session.name.isEmpty ? "AniList Lists" : session.name)
                     }
                     .settingsRow()
                     Button {
                         aniList.signOut()
                     } label: {
                         SettingsRow(
-                            icon: "rectangle.portrait.and.arrow.right", title: "Sign Out of AniList",
-                            detail: "Keeps your MyAnimeList session")
+                            icon: "rectangle.portrait.and.arrow.right", title: "Sign Out of AniList")
                     }
                     .settingsRow()
                 } else {
                     Button {
-                        aniListIDDraft = aniList.clientID
-                        editingAniListID = true
-                    } label: {
-                        SettingsRow(
-                            icon: "person.badge.key", title: "AniList Client ID",
-                            detail: aniList.clientID.isEmpty
-                                ? "Not set" : "Ending in \(aniList.clientID.suffix(4))")
-                    }
-                    .settingsRow()
-                    Button {
                         Task { await aniList.signIn() }
                     } label: {
                         // A settings action reads as a settings row, like every
-                        // other action here, and says it is busy while it waits.
+                        // other action here, and names its busy state in the
+                        // title rather than in a line under it.
                         SettingsRow(
-                            icon: "person.crop.circle.badge.plus", title: "Connect AniList",
-                            detail: aniList.connecting ? "Waiting for AniList…" : "Sign in to AniList")
+                            icon: "person.crop.circle.badge.plus",
+                            title: aniList.connecting ? "Connecting to AniList…" : "Connect AniList")
                     }
                     .settingsRow()
                     .disabled(aniList.connecting)
@@ -253,21 +221,25 @@ struct SettingsScreen: View {
                 }
             } header: {
                 Text("AniList")
-            } footer: {
-                Text("Your MyAnimeList changes are copied to AniList; AniList is never read back into MyAnimeList. Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
+            }
+            // About sits under AniList: it explains the app rather than what the
+            // app is connected to, so the version and the services come after.
+            Section {
+                NavigationLink {
+                    AboutScreen()
+                } label: {
+                    SettingsRow(icon: "info.circle", title: "About Aniswift")
+                }
+                .settingsRow()
             }
             if store.account != nil {
                 Section {
                     Button {
                         confirmSignOut = true
                     } label: {
-                        SettingsRow(
-                            icon: "rectangle.portrait.and.arrow.right", title: "Sign Out",
-                            detail: "End this device's MyAnimeList session")
+                        SettingsRow(icon: "rectangle.portrait.and.arrow.right", title: "Sign Out")
                     }
                     .settingsRow()
-                } footer: {
-                    Text("Your lists stay on MyAnimeList.")
                 }
             }
         }
@@ -282,14 +254,6 @@ struct SettingsScreen: View {
                 if store.account == nil { dismiss() }
             }
             Button("Cancel", role: .cancel) {}
-        }
-        .alert("AniList Client ID", isPresented: $editingAniListID) {
-            TextField("Client ID", text: $aniListIDDraft)
-                .keyboardType(.numberPad)
-            Button("Save") { aniList.clientID = aniListIDDraft }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
         }
     }
 
@@ -332,15 +296,12 @@ struct SettingsScreen: View {
 }
 
 struct BehaviorSettingsScreen: View {
-    @EnvironmentObject private var store: Store
     @AppStorage(SettingKey.titleLanguage) private var language = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
     @AppStorage(SettingKey.preferredLaunch) private var usesPreferredLaunch = false
     @AppStorage(SettingKey.launchTab) private var launchTab = "anime"
     @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
-    @State private var editingClientID = false
-    @State private var clientIDDraft = ""
 
     private let launchTabs = [
         (id: "anime", label: "Anime"),
@@ -362,18 +323,11 @@ struct BehaviorSettingsScreen: View {
                 Toggle("Open Links In-App", isOn: $openLinksInApp)
                     .sensoryFeedback(.selection, trigger: openLinksInApp)
                     .settingsRow()
-            } footer: {
-                Text(
-                    "Titles are shown in Romaji or in English when a translation exists. "
-                        + "Links open in a browser sheet inside Aniswift; turn this off to use your default browser."
-                )
             }
             Section {
                 Toggle("Ask for Score After Watching an Anime", isOn: $asksForScore)
                     .sensoryFeedback(.selection, trigger: asksForScore)
                     .settingsRow()
-            } footer: {
-                Text("When an anime is marked completed without a score, Aniswift asks for one.")
             }
             Section {
                 Toggle("Enable Preferred Launch Screen", isOn: $usesPreferredLaunch)
@@ -389,11 +343,6 @@ struct BehaviorSettingsScreen: View {
                     .sensoryFeedback(.selection, trigger: launchTab)
                     .settingsRow()
                 }
-            } footer: {
-                Text(
-                    "When on, Aniswift always opens your preferred screen. "
-                        + "When off, it opens the last tab you used."
-                )
             }
             if #available(iOS 26.0, *) {
                 Section {
@@ -404,27 +353,10 @@ struct BehaviorSettingsScreen: View {
                     .pickerStyle(.menu)
                     .sensoryFeedback(.selection, trigger: tabBarBehavior)
                     .settingsRow()
-                } footer: {
-                    Text("Choose whether the tab bar stays visible or minimizes as you scroll down.")
                 }
-            }
-            Section {
-                Button {
-                    clientIDDraft = store.api.configuredClientID ?? ""
-                    editingClientID = true
-                } label: {
-                    SettingsRow(
-                        icon: "key", title: "MyAnimeList Client ID",
-                        detail: store.api.configuredClientID.map { "Ending in \($0.suffix(4))" } ?? "Not set")
-                }
-                .settingsRow()
-            } footer: {
-                Text("The iOS app ID from myanimelist.net/apiconfig, registered with \(API.redirectURI).")
             }
             Section {
                 CacheRow()
-            } footer: {
-                Text("Removes downloaded posters and catalog responses. Sign-in, your lists and settings are kept.")
             }
         }
         .listStyle(.insetGrouped)
@@ -432,23 +364,6 @@ struct BehaviorSettingsScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Behavior")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("MyAnimeList Client ID", isPresented: $editingClientID) {
-            TextField("Client ID", text: $clientIDDraft)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-            Button("Save") { store.api.configuredClientID = clientIDDraft }
-                .disabled(!clientIDDraft.isEmpty && !Self.isClientID(clientIDDraft))
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI).")
-        }
-    }
-
-    /// MyAnimeList iOS client IDs are 32 letters and digits. An empty field
-    /// clears the saved ID, so the app falls back to the one its build ships with.
-    private static func isClientID(_ value: String) -> Bool {
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.count == 32 && trimmed.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 }
 
@@ -461,7 +376,7 @@ struct DetailsSettingsScreen: View {
                 NavigationLink {
                     HeaderSettingsScreen(kind: .anime)
                 } label: {
-                    SettingsRow(icon: "photo.on.rectangle", title: "Header", detail: "Poster, score, rank and studios")
+                    SettingsRow(icon: "photo.on.rectangle", title: "Header")
                 }
                 .settingsRow()
                 PreferenceToggle("Show Character List", key: SettingKey.detail(.anime, DetailSection.characters))
@@ -475,13 +390,11 @@ struct DetailsSettingsScreen: View {
                 NavigationLink {
                     InfoSettingsScreen(kind: .anime)
                 } label: {
-                    SettingsRow(icon: "list.bullet", title: "Information", detail: "Genres, themes and studios")
+                    SettingsRow(icon: "list.bullet", title: "Information")
                 }
                 .settingsRow()
             } header: {
                 Text("Anime")
-            } footer: {
-                Text("“Show Sections Below Summary” hides everything under a title's summary.")
             }
             Section {
                 PreferenceToggle(
@@ -489,7 +402,7 @@ struct DetailsSettingsScreen: View {
                 NavigationLink {
                     HeaderSettingsScreen(kind: .manga)
                 } label: {
-                    SettingsRow(icon: "photo.on.rectangle", title: "Header", detail: "Poster, score, rank and authors")
+                    SettingsRow(icon: "photo.on.rectangle", title: "Header")
                 }
                 .settingsRow()
                 PreferenceToggle("Show Character List", key: SettingKey.detail(.manga, DetailSection.characters))
@@ -500,13 +413,11 @@ struct DetailsSettingsScreen: View {
                 NavigationLink {
                     InfoSettingsScreen(kind: .manga)
                 } label: {
-                    SettingsRow(icon: "list.bullet", title: "Information", detail: "Genres, themes and serialization")
+                    SettingsRow(icon: "list.bullet", title: "Information")
                 }
                 .settingsRow()
             } header: {
                 Text("Manga")
-            } footer: {
-                Text("“Show Sections Below Summary” hides everything under a title's summary.")
             }
         }
         .listStyle(.insetGrouped)
@@ -532,8 +443,6 @@ private struct ProfileSettingsScreen: View {
                 PreferenceToggle("Favorite People", key: SettingKey.profile(ProfileSection.favoritePeople))
             } header: {
                 Text("Appearance")
-            } footer: {
-                Text("Choose what appears on your profile.")
             }
         }
         .listStyle(.insetGrouped)
@@ -557,8 +466,13 @@ private struct HeaderSettingsScreen: View {
                 PreferenceToggle(
                     kind == .anime ? "Show Studios" : "Show Authors",
                     key: SettingKey.detail(kind, DetailSection.headerCreators))
-            } footer: {
-                Text("Choose which parts of the \(kind.rawValue) header stay visible.")
+                // A manga never airs, so the countdown has nothing to say on
+                // its page and the toggle is left out of its header settings.
+                if kind == .anime {
+                    PreferenceToggle(
+                        "Show Airing Schedule",
+                        key: SettingKey.detail(kind, DetailSection.headerAiringSchedule))
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -582,8 +496,6 @@ private struct InfoSettingsScreen: View {
                 PreferenceToggle(
                     kind == .anime ? "Studios and Producers" : "Serialization",
                     key: SettingKey.detail(kind, DetailSection.infoCreators))
-            } footer: {
-                Text("Choose which information groups appear under the title.")
             }
         }
         .listStyle(.insetGrouped)
@@ -679,20 +591,17 @@ private struct CacheRow: View {
     }
 }
 
+/// A settings row: its badge and its title. A row names what it opens or sets
+/// and nothing more, so the list scans as a set of titles instead of a wall of
+/// lines that repeat the title under it.
 private struct SettingsRow: View {
     var icon: String? = nil
     let title: String
-    var detail: String?
 
     var body: some View {
         HStack(spacing: 12) {
             if let icon { SettingsIcon(symbol: icon) }
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                if let detail {
-                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
+            Text(title)
             Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
