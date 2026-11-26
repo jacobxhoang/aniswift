@@ -2,13 +2,20 @@ import SwiftUI
 
 @MainActor
 final class Store: ObservableObject {
-    let api = API()
+    /// The catalog and MyAnimeList client. It is injected so list sync, feed
+    /// paging and the cache paths can run against a stub in tests.
+    let api: any APIClient
     @Published var account: Account?
     @Published var checking = true
     @Published var message: String?
     @Published private(set) var organization = ListOrganization()
     @Published private var savedLists: [Kind: SavedList] = [:]
     @Published private(set) var refreshingLists: Set<Kind> = []
+    /// Why a kind's list could not be synced, so the list screen can offer a
+    /// retry instead of drawing an empty list.
+    @Published private(set) var listFailures: [Kind: String] = [:]
+    /// Kinds whose first page has been requested but has not finished loading.
+    @Published private(set) var pendingListLoads: Set<Kind> = []
     @Published var friends: [Friend] = []
     @Published var activity: [FriendUpdate] = []
     @Published var friendMessage: String?
@@ -17,68 +24,230 @@ final class Store: ObservableObject {
     @Published private var checkedFriends = 0
     @Published private var historyCursors: [FriendHistoryCursor] = []
     @Published private var feedEnglishNames: [String: String] = [:]
+    @Published private(set) var profileStatuses: [String: PublicDataStatus] = [:]
+    @Published private(set) var feedStatus = PublicDataStatus()
 
-    var hasMoreFriendActivity: Bool { checkedFriends < friends.count || !historyCursors.isEmpty }
+    /// Set when a page of the feed could not be read, so the feed stops asking
+    /// for a page that will not arrive until the reader refreshes it.
+    @Published private(set) var feedPageStalled = false
+    var hasMoreFriendActivity: Bool {
+        (checkedFriends < friends.count || !historyCursors.isEmpty) && !feedPageStalled
+    }
+
     @Published private var profiles = ProfileCache.read()
-    private var profileRequests: [String: Task<Bool, Never>] = [:]
-    let previousLocalFavorites: [Title] = {
-        guard let data = UserDefaults.standard.data(forKey: "aniledger.localFavorites.v1") else { return [] }
-        return (try? JSONDecoder().decode([Title].self, from: data)) ?? []
-    }()
+    private var profileRequests: [String: Task<ProfileFetchOutcome, Never>] = [:]
+    private var publicBackoff: [String: PublicBackoff] = [:]
+    private var publicRetryTasks: [String: Task<Void, Never>] = [:]
+    private static let feedBackoffKey = "feed"
+    private static let publicRetryDelays: [TimeInterval] = [15, 30, 60]
+
+    init() {
+        api = API()
+    }
+
+    init(api: any APIClient) {
+        self.api = api
+    }
 
     var malFavorites: [Kind: [Title]] {
         account.flatMap { profile(for: $0.name).favorites?.value } ?? [:]
-    }
-
-    func isMALFavorite(_ title: Title) -> Bool {
-        malFavorites[title.kind]?.contains { $0.id == title.id } ?? false
     }
 
     func profile(for name: String) -> ProfileSnapshot {
         profiles[name.lowercased()] ?? ProfileSnapshot()
     }
 
+    func profileStatus(for name: String) -> PublicDataStatus? {
+        profileStatuses[name.lowercased()]
+    }
+
     func loadProfile(_ name: String, refresh: Bool = false) async -> Bool {
+        await loadProfile(name, refresh: refresh, userInitiated: refresh)
+    }
+
+    private func loadProfile(_ name: String, refresh: Bool, userInitiated: Bool) async -> Bool {
         let key = name.lowercased()
-        if let pending = profileRequests[key] { return await pending.value }
+        let backoffKey = "profile:\(key)"
+        if let pending = profileRequests[key] { return await pending.value.loaded }
 
         let cached = profile(for: name)
         let needsStats = refresh || cached.stats?.isFresh != true || cached.stats?.value.hasDetailedStatistics != true
         let needsFavorites = refresh || cached.favorites?.isFresh != true
         guard needsStats || needsFavorites else { return true }
 
+        if userInitiated {
+            clearPublicBackoff(backoffKey)
+        } else if !canAttemptPublicRefresh(backoffKey) {
+            // A backoff can only exist after a failure, so the note is already up.
+            return false
+        }
+
         let task = Task {
-            async let stats = needsStats ? fetchProfileStats(name, refresh: refresh) : nil
-            async let favorites = needsFavorites ? fetchProfileFavorites(name, refresh: refresh) : nil
-            let (newStats, newFavorites) = await (stats, favorites)
-            if newStats != nil || newFavorites != nil {
-                var updated = cached
-                if let newStats { updated.stats = CachedProfileValue(value: newStats, savedAt: .now) }
-                if let newFavorites { updated.favorites = CachedProfileValue(value: newFavorites, savedAt: .now) }
-                profiles[key] = updated
-                ProfileCache.write(profiles)
-            }
-            return (!needsStats || newStats != nil) && (!needsFavorites || newFavorites != nil)
+            await profileOutcome(for: name, refresh: refresh,
+                                 needsStats: needsStats, needsFavorites: needsFavorites)
         }
         profileRequests[key] = task
-        let loaded = await task.value
+        let outcome = await task.value
         profileRequests[key] = nil
-        return loaded
+
+        if outcome.loaded, !outcome.stale {
+            clearPublicBackoff(backoffKey)
+            profileStatuses[key] = nil
+        } else {
+            var status = profileStatuses[key] ?? PublicDataStatus()
+            status.isShowingSavedData = true
+            status.failure = outcome.failure
+            status.savedAt = outcome.savedAt ?? status.savedAt
+            profileStatuses[key] = status
+            schedulePublicRetry(backoffKey) { [weak self] in
+                _ = await self?.loadProfile(name, refresh: true, userInitiated: false)
+            }
+        }
+        return outcome.loaded
     }
 
-    private func fetchProfileStats(_ name: String, refresh: Bool) async -> ProfileStats? {
-        let response = try? await api.catalog("users/\(name)/statistics", refresh: refresh)
-        guard let data: Fields = response?.read("data") else { return nil }
-        return ProfileStats(data)
+    private func profileOutcome(for name: String, refresh: Bool,
+                                needsStats: Bool, needsFavorites: Bool) async -> ProfileFetchOutcome {
+        async let statsResult = loadProfileStatsIfNeeded(name, refresh: refresh, needed: needsStats)
+        async let favoritesResult = loadProfileFavoritesIfNeeded(name, refresh: refresh, needed: needsFavorites)
+        let (stats, favorites) = await (statsResult, favoritesResult)
+
+        var updated = profile(for: name)
+        var loaded = true
+        var stale = false
+        var failure: String?
+        var providerFetchedAt: Date?
+        var wrote = false
+
+        switch stats {
+        case .success(.some(let fetch)):
+            updated.stats = CachedProfileValue(value: fetch.stats, savedAt: .now)
+            stale = stale || fetch.freshness.isStale
+            providerFetchedAt = fetch.freshness.fetchedAt ?? providerFetchedAt
+            wrote = true
+        case .success(.none):
+            break
+        case .failure(let error):
+            loaded = false
+            failure = failureMessage(error)
+        }
+
+        switch favorites {
+        case .success(.some(let fetch)):
+            updated.favorites = CachedProfileValue(value: fetch.favorites, savedAt: .now)
+            stale = stale || fetch.freshness.isStale
+            providerFetchedAt = fetch.freshness.fetchedAt ?? providerFetchedAt
+            wrote = true
+        case .success(.none):
+            break
+        case .failure(let error):
+            loaded = false
+            failure = failureMessage(error)
+        }
+
+        if wrote {
+            profiles[name.lowercased()] = updated
+            ProfileCache.write(profiles)
+        }
+        let savedAt = [updated.stats?.savedAt, updated.favorites?.savedAt].compactMap { $0 }.min()
+        return ProfileFetchOutcome(loaded: loaded, stale: stale,
+                                   savedAt: providerFetchedAt ?? savedAt, failure: failure)
     }
 
-    private func fetchProfileFavorites(_ name: String, refresh: Bool) async -> [Kind: [Title]]? {
-        let response = try? await api.catalog("users/\(name)/favorites", refresh: refresh)
-        guard let data: Fields = response?.read("data") else { return nil }
-        return Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
-            let entries: [Fields] = data.read(kind.rawValue) ?? []
-            return (kind, entries.compactMap { Title($0, kind: kind) })
-        })
+    private struct ProfileStatsFetch {
+        let stats: ProfileStats
+        let freshness: CatalogFreshness
+    }
+
+    private struct ProfileFavoritesFetch {
+        let favorites: [Kind: [Title]]
+        let freshness: CatalogFreshness
+    }
+
+    private struct ProfileFetchOutcome {
+        let loaded: Bool
+        let stale: Bool
+        let savedAt: Date?
+        let failure: String?
+    }
+
+    private struct PublicBackoff {
+        var attempts = 0
+        var nextAttempt: Date?
+    }
+
+    private func loadProfileStatsIfNeeded(_ name: String, refresh: Bool, needed: Bool) async -> Result<ProfileStatsFetch?, Error> {
+        guard needed else { return .success(nil) }
+        return await loadProfileStats(name, refresh: refresh)
+    }
+
+    private func loadProfileFavoritesIfNeeded(_ name: String, refresh: Bool, needed: Bool) async -> Result<ProfileFavoritesFetch?, Error> {
+        guard needed else { return .success(nil) }
+        return await loadProfileFavorites(name, refresh: refresh)
+    }
+
+    private func loadProfileStats(_ name: String, refresh: Bool) async -> Result<ProfileStatsFetch?, Error> {
+        do {
+            let response = try await api.catalog("users/\(name)/statistics", [], refresh: refresh)
+            guard let data: Fields = response.read("data"), let stats = ProfileStats(data) else {
+                return .failure(APIError(status: 0, message: "The profile statistics could not be read."))
+            }
+            return .success(ProfileStatsFetch(stats: stats, freshness: CatalogFreshness(response.read("meta"))))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func loadProfileFavorites(_ name: String, refresh: Bool) async -> Result<ProfileFavoritesFetch?, Error> {
+        do {
+            let response = try await api.catalog("users/\(name)/favorites", [], refresh: refresh)
+            guard let data: Fields = response.read("data") else {
+                return .failure(APIError(status: 0, message: "The profile favorites could not be read."))
+            }
+            let favorites = Dictionary(uniqueKeysWithValues: Kind.allCases.map { kind in
+                let entries: [Fields] = data.read(kind.rawValue) ?? []
+                return (kind, entries.compactMap { Title($0, kind: kind) })
+            })
+            return .success(ProfileFavoritesFetch(favorites: favorites, freshness: CatalogFreshness(response.read("meta"))))
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    private func failureMessage(_ error: Error) -> String {
+        if let apiError = error as? APIError { return apiError.message }
+        return error.localizedDescription
+    }
+
+    private func canAttemptPublicRefresh(_ key: String) -> Bool {
+        guard let next = publicBackoff[key]?.nextAttempt else { return true }
+        // Let a scheduled retry run even if its sleep wakes a moment early.
+        return Date() >= next.addingTimeInterval(-1)
+    }
+
+    private func clearPublicBackoff(_ key: String) {
+        publicBackoff[key] = nil
+        publicRetryTasks[key]?.cancel()
+        publicRetryTasks[key] = nil
+    }
+
+    private func schedulePublicRetry(_ key: String, retry: @escaping @MainActor () async -> Void) {
+        var backoff = publicBackoff[key] ?? PublicBackoff()
+        backoff.attempts += 1
+        guard backoff.attempts <= Self.publicRetryDelays.count else {
+            backoff.nextAttempt = .distantFuture
+            publicBackoff[key] = backoff
+            return
+        }
+        let delay = Self.publicRetryDelays[backoff.attempts - 1]
+        backoff.nextAttempt = Date().addingTimeInterval(delay)
+        publicBackoff[key] = backoff
+        publicRetryTasks[key]?.cancel()
+        publicRetryTasks[key] = Task { @MainActor in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled else { return }
+            await retry()
+        }
     }
 
     private var accountGeneration = UUID()
@@ -140,6 +309,8 @@ final class Store: ObservableObject {
             listRevisions = [:]
             pagingLists = []
             refreshingLists = []
+            listFailures = [:]
+            pendingListLoads = []
             savedLists = [:]
             activity = []
             friends = []
@@ -149,6 +320,12 @@ final class Store: ObservableObject {
             feedEnglishNames = [:]
             loadingFriends = false
             friendMessage = nil
+            profileStatuses = [:]
+            feedStatus = PublicDataStatus()
+            feedPageStalled = false
+            publicBackoff = [:]
+            for task in publicRetryTasks.values { task.cancel() }
+            publicRetryTasks = [:]
             ListCache.remove()
             if let user {
                 restoreFriendFeed(for: user)
@@ -171,6 +348,7 @@ final class Store: ObservableObject {
         historyCursors = cache.historyCursors
         friendFeedPage = cache.page
         feedEnglishNames = cache.englishNames ?? [:]
+        feedStatus = PublicDataStatus(savedAt: cache.savedAt)
     }
 
     func friendFeedTitle(_ title: Title) -> Title {
@@ -178,33 +356,71 @@ final class Store: ObservableObject {
     }
 
     func rememberFriendFeedEnglishName(_ name: String, for title: Title) {
-        guard account != nil, feedEnglishNames[title.id] != name else { return }
-        feedEnglishNames[title.id] = name
+        rememberFriendFeedEnglishNames([title.id: name])
+    }
+
+    private func rememberFriendFeedEnglishNames(_ names: [String: String]) {
+        guard account != nil else { return }
+        let additions = names.filter { feedEnglishNames[$0.key] != $0.value }
+        guard !additions.isEmpty else { return }
+        feedEnglishNames.merge(additions) { _, new in new }
         saveFriendFeed()
+    }
+
+    /// Jikan Edge list rows carry only the original title, so the whole page is
+    /// resolved in grouped Tenrai requests instead of one detail request per row.
+    private func resolveEnglishNames(in updates: [FriendUpdate]) async {
+        var pending: [Kind: [Int]] = [:]
+        for title in unique(updates.map(\.title)) where title.needsTitleLookup {
+            pending[title.kind, default: []].append(title.malID)
+        }
+        guard !pending.isEmpty else { return }
+        // One request per kind, both in flight at once.
+        await withTaskGroup(of: [String: String].self) { group in
+            for (kind, ids) in pending {
+                group.addTask {
+                    let names = await self.api.titleNames(ids, kind: kind)
+                    return names.reduce(into: [String: String]()) { result, entry in
+                        result["\(kind.rawValue)-\(entry.key)"] = entry.value
+                    }
+                }
+            }
+            for await names in group { rememberFriendFeedEnglishNames(names) }
+        }
     }
 
     private func saveFriendFeed() {
         guard let account else { return }
         FriendFeedCache(accountID: account.id, friends: friends, activity: activity,
                         checkedFriends: checkedFriends, historyCursors: historyCursors,
-                        page: friendFeedPage, englishNames: feedEnglishNames).write()
+                        page: friendFeedPage, englishNames: feedEnglishNames, savedAt: .now).write()
+        feedStatus.savedAt = .now
     }
 
     func handle(_ error: Error) {
+        Haptics.error()
         if (error as? APIError)?.status == 401 { disconnect() }
         message = error.localizedDescription
     }
 
     func loadLists(force: Bool = false) async {
         let generation = accountGeneration
-        for kind in Kind.allCases {
+        let pending = Kind.allCases.filter { force || savedLists[$0] == nil }
+        guard !pending.isEmpty else { return }
+        pendingListLoads.formUnion(pending)
+        defer { if accountGeneration == generation { pendingListLoads.subtract(pending) } }
+        for kind in pending {
             guard accountGeneration == generation else { return }
-            guard force || savedLists[kind] == nil else { continue }
+            defer { if accountGeneration == generation { pendingListLoads.remove(kind) } }
             do { try await refreshList(kind) }
             catch {
-                if accountGeneration == generation,
-                   ((error as? APIError)?.status == 401 || savedLists[kind] == nil) {
-                    handle(error)
+                // A list refresh cancelled by navigation is not a failure worth alerting.
+                guard !Task.isCancelled, !(error is CancellationError) else { return }
+                if accountGeneration == generation {
+                    listFailures[kind] = failureMessage(error)
+                    if (error as? APIError)?.status == 401 || savedLists[kind] == nil {
+                        handle(error)
+                    }
                 }
             }
         }
@@ -305,17 +521,32 @@ final class Store: ObservableObject {
     }
 
     private func updateList(_ kind: Kind, _ snapshot: SavedList) {
-        guard let account, savedLists[kind] != snapshot else { return }
+        guard let account else { return }
+        // Reaching here means the provider answered, so an earlier failure is stale.
+        listFailures[kind] = nil
+        guard savedLists[kind] != snapshot else { return }
         savedLists[kind] = snapshot
         ListCache(account: account, lists: savedLists).write()
     }
 
     func loadFriends(reset: Bool = false) async {
+        await loadFriends(reset: reset, userInitiated: reset)
+    }
+
+    private func loadFriends(reset: Bool, userInitiated: Bool) async {
         guard let user = account, !loadingFriends else { return }
         let generation = accountGeneration
         loadingFriends = true
         defer { if accountGeneration == generation { loadingFriends = false } }
+
+        if userInitiated {
+            clearPublicBackoff(Self.feedBackoffKey)
+        } else if !canAttemptPublicRefresh(Self.feedBackoffKey) {
+            friendMessage = feedStatus.failure
+            return
+        }
         friendMessage = nil
+        if reset { feedPageStalled = false }
 
         if !reset, friendFeedPage > 0, checkedFriends >= friends.count {
             await loadOlderFriendActivity(generation: generation)
@@ -323,18 +554,34 @@ final class Store: ObservableObject {
         }
 
         do {
-            let refreshedFriends = reset || friends.isEmpty
-                ? try await friendList(user, refresh: reset)
-                : friends
+            let refreshedFriends: [Friend]
+            var stale = false
+            var providerFetchedAt: Date?
+            if reset || friends.isEmpty {
+                let loaded = try await friendList(user, refresh: reset)
+                refreshedFriends = loaded.friends
+                stale = loaded.freshness.isStale
+                providerFetchedAt = loaded.freshness.fetchedAt
+            } else {
+                refreshedFriends = friends
+            }
             guard !Task.isCancelled, accountGeneration == generation else { return }
             let start = reset ? 0 : checkedFriends
             let batch = Array(refreshedFriends.dropFirst(start).prefix(8))
-            let results = await loadRecentFriendActivity(batch, refresh: reset)
+            let batchResult = await loadRecentFriendActivity(batch, refresh: reset)
             guard !Task.isCancelled, accountGeneration == generation else { return }
-            if reset && !batch.isEmpty && results.isEmpty && !activity.isEmpty {
-                friendMessage = "Could not refresh the feed."
+
+            // Keep the snapshot the user is already reading instead of replacing it
+            // with a partial result when any friend's activity could not be fetched.
+            if reset, batchResult.failures > 0, !activity.isEmpty {
+                // The page did not land, so the feed must not keep asking for one.
+                feedPageStalled = true
+                markFeedSavedData(message: "Could not refresh the feed.",
+                                  savedAt: providerFetchedAt ?? feedStatus.savedAt)
                 return
             }
+
+            if reset { friendFeedPage = 0 }
             if reset || friendFeedPage == 0 {
                 historyCursors = refreshedFriends.flatMap { friend in
                     Kind.allCases.map { FriendHistoryCursor(friend: friend, kind: $0, page: 1) }
@@ -342,56 +589,114 @@ final class Store: ObservableObject {
             }
             friends = refreshedFriends
             checkedFriends = start + batch.count
-            let updates = results.flatMap { $0 }
-            let sorted = sortedFriendActivity(updates)
+            let sorted = sortedFriendActivity(batchResult.updates)
+            await resolveEnglishNames(in: sorted)
+            guard !Task.isCancelled, accountGeneration == generation else { return }
             activity = reset ? sorted : unique(activity + sorted)
             friendFeedPage += 1
+            feedPageStalled = false
             saveFriendFeed()
+
+            if stale || batchResult.stale || batchResult.failures > 0 {
+                markFeedSavedData(message: batchResult.failures > 0 ? "Could not refresh the feed." : nil,
+                                  savedAt: batchResult.fetchedAt ?? providerFetchedAt ?? feedStatus.savedAt)
+            } else {
+                clearFeedSavedData()
+            }
         } catch {
-            if !Task.isCancelled, accountGeneration == generation { friendMessage = error.localizedDescription }
+            guard !Task.isCancelled, accountGeneration == generation else { return }
+            feedPageStalled = true
+            markFeedSavedData(message: failureMessage(error), savedAt: feedStatus.savedAt)
         }
     }
 
-    private func loadRecentFriendActivity(_ batch: [Friend], refresh: Bool) async -> [[FriendUpdate]] {
-        var results: [[FriendUpdate]] = []
+    private func markFeedSavedData(message: String?, savedAt: Date?) {
+        var status = feedStatus
+        status.isShowingSavedData = true
+        status.failure = message
+        status.savedAt = savedAt ?? status.savedAt
+        feedStatus = status
+        friendMessage = activity.isEmpty ? message : nil
+        // Heal the feed on its own only while there is nothing on screen: a
+        // scheduled retry reloads the first page, which would replace the page
+        // the reader is in. With rows showing, the note's Retry is their call.
+        guard activity.isEmpty else { return }
+        schedulePublicRetry(Self.feedBackoffKey) { [weak self] in
+            _ = await self?.loadFriends(reset: true, userInitiated: false)
+        }
+    }
+
+    private func clearFeedSavedData() {
+        feedStatus = PublicDataStatus(savedAt: Date())
+        clearPublicBackoff(Self.feedBackoffKey)
+    }
+
+    private struct FriendActivityBatch {
+        var updates: [FriendUpdate] = []
+        var failures = 0
+        var stale = false
+        var fetchedAt: Date?
+    }
+
+    private func loadRecentFriendActivity(_ batch: [Friend], refresh: Bool) async -> FriendActivityBatch {
+        var result = FriendActivityBatch()
         let concurrency = 4
         for start in stride(from: 0, to: batch.count, by: concurrency) {
-            guard !Task.isCancelled else { return results }
+            guard !Task.isCancelled else { return result }
             let friends = batch[start..<min(start + concurrency, batch.count)]
-            await withTaskGroup(of: [FriendUpdate]?.self) { group in
+            await withTaskGroup(of: (updates: [FriendUpdate]?, freshness: CatalogFreshness).self) { group in
                 for friend in friends {
-                    group.addTask { try? await self.publicUpdates(friend, refresh: refresh) }
+                    group.addTask {
+                        let response = try? await self.publicUpdatesResponse(friend, refresh: refresh)
+                        return (response?.items, response?.freshness ?? CatalogFreshness())
+                    }
                 }
-                for await updates in group {
-                    if let updates { results.append(updates) }
+                for await item in group {
+                    if let updates = item.updates { result.updates += updates } else { result.failures += 1 }
+                    result.stale = result.stale || item.freshness.isStale
+                    result.fetchedAt = item.freshness.fetchedAt ?? result.fetchedAt
                 }
             }
         }
-        return results
+        return result
     }
 
     private func loadOlderFriendActivity(generation: UUID) async {
         let batch = Array(historyCursors.prefix(4))
         guard !batch.isEmpty else { return }
-        let results = await withTaskGroup(of: (FriendHistoryCursor, Page<FriendUpdate>?).self) { group in
+        let answered = await withTaskGroup(of: (FriendHistoryCursor, Page<FriendUpdate>?).self) { group in
             for cursor in batch {
                 group.addTask { (cursor, try? await self.historyPage(cursor)) }
             }
-            var results: [(FriendHistoryCursor, Page<FriendUpdate>)] = []
-            for await (cursor, page) in group {
-                if let page { results.append((cursor, page)) }
+            // Every cursor answers, with nil for a page that could not be read, so
+            // the bookkeeping below can tell a finished list from a failed request.
+            var pages: [(cursor: FriendHistoryCursor, page: Page<FriendUpdate>?)] = []
+            for await answer in group {
+                pages.append((cursor: answer.0, page: answer.1))
             }
-            return results
+            return pages
         }
 
         guard !Task.isCancelled, accountGeneration == generation else { return }
-        historyCursors.removeFirst(batch.count)
-        for (cursor, page) in results where page.more {
-            historyCursors.append(FriendHistoryCursor(friend: cursor.friend, kind: cursor.kind, page: cursor.page + 1))
+        let updatedCursors = advancedHistoryCursors(historyCursors, answered: answered)
+        guard updatedCursors != historyCursors else {
+            // Nothing answered. Keep the cursors queued for the next refresh and
+            // stop the feed from asking for a page that is not coming.
+            feedPageStalled = true
+            friendMessage = "Could not load older activity."
+            return
         }
-        let older = sortedFriendActivity(results.flatMap { $0.1.items })
-        activity = unique(activity + older)
+        feedPageStalled = false
+        historyCursors = updatedCursors
+        // The batch was consumed even when it held nothing this feed can show, so
+        // the page advances and the next batch is asked for.
         friendFeedPage += 1
+        let older = sortedFriendActivity(answered.flatMap { $0.page?.items ?? [] })
+        if !older.isEmpty {
+            await resolveEnglishNames(in: older)
+            guard !Task.isCancelled, accountGeneration == generation else { return }
+            activity = unique(activity + older)
+        }
         saveFriendFeed()
     }
 
@@ -401,10 +706,12 @@ final class Store: ObservableObject {
     }
 
     func publicListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int = 50) async throws -> Page<FriendUpdate> {
-        let result = try await api.catalog("users/\(friend.name)/\(kind.rawValue)list", [
-            URLQueryItem(name: "page", value: String(page)),
-            URLQueryItem(name: "limit", value: String(limit))
-        ])
+        let result = try await api.catalog(
+            "users/\(friend.name)/\(kind.rawValue)list",
+            [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "limit", value: String(limit)),
+            ], refresh: false)
         let data: Fields? = result.read("data")
         guard let rows: [Fields] = result.read("data") ?? data?.read("entries") else {
             throw APIError(status: 0, message: "Could not load this list.")
@@ -436,27 +743,39 @@ final class Store: ObservableObject {
         let generation = accountGeneration
         let loaded = try await friendList(user, refresh: refresh)
         guard !Task.isCancelled, accountGeneration == generation, account == user else { return }
-        friends = loaded
+        friends = loaded.friends
     }
 
-    private func friendList(_ user: Account, refresh: Bool) async throws -> [Friend] {
-        let response = try await api.catalog("users/\(user.name)/friends", refresh: refresh)
+    private func friendList(_ user: Account, refresh: Bool) async throws -> (friends: [Friend], freshness: CatalogFreshness) {
+        let response = try await api.catalog("users/\(user.name)/friends", [], refresh: refresh)
         guard let entries: [Fields] = response.read("data") else {
             throw APIError(status: 0, message: "Could not load friends.")
         }
-        return unique(entries.compactMap(Friend.init).filter { $0.id != user.name.lowercased() })
+        return (unique(entries.compactMap(Friend.init).filter { $0.id != user.name.lowercased() }),
+                CatalogFreshness(response.read("meta")))
     }
 
     func publicUpdates(_ friend: Friend, refresh: Bool = false) async throws -> [FriendUpdate] {
-        let result = try await api.catalog("users/\(friend.name)/userupdates", refresh: refresh)
+        try await publicUpdatesResponse(friend, refresh: refresh).items
+    }
+
+    private func publicUpdatesResponse(_ friend: Friend, refresh: Bool) async throws -> (items: [FriendUpdate], freshness: CatalogFreshness) {
+        let result = try await api.catalog("users/\(friend.name)/userupdates", [], refresh: refresh)
         let body: Fields? = result.read("data")
-        return Kind.allCases.flatMap { kind -> [FriendUpdate] in
+        let items = Kind.allCases.flatMap { kind -> [FriendUpdate] in
             let entries: [Fields] = body?.read(kind.rawValue) ?? []
             return entries.compactMap { entry -> FriendUpdate? in
                 guard let info: Fields = entry.read("entry"), let title = Title(info, kind: kind) else { return nil }
                 return FriendUpdate(friend: friend, title: title, fields: entry)
             }
         }
+        return (items, CatalogFreshness(result.read("meta")))
+    }
+
+    /// Activity already cached by the friends feed, used when a friend profile
+    /// cannot reach Jikan Edge.
+    func savedUpdates(for friend: Friend) -> [FriendUpdate] {
+        activity.filter { $0.friend.id == friend.id }
     }
 
     func friendEntry(_ friend: Friend, _ title: Title) async throws -> FriendUpdate? {
@@ -465,9 +784,12 @@ final class Store: ObservableObject {
         }
         for page in 1...10 {
             try Task.checkCancellation()
-            let response = try await api.catalog("users/\(friend.name)/\(title.kind.rawValue)list", [
-                URLQueryItem(name: "limit", value: "300"), URLQueryItem(name: "page", value: String(page))
-            ])
+            let response = try await api.catalog(
+                "users/\(friend.name)/\(title.kind.rawValue)list",
+                [
+                    URLQueryItem(name: "limit", value: "300"),
+                    URLQueryItem(name: "page", value: String(page)),
+                ], refresh: false)
             let body: Fields? = response.read("data")
             let entries: [Fields] = response.read("data") ?? body?.read("entries") ?? []
             if let match = entries.first(where: { ($0.read("malId", "mal_id", "mediaId", "id") as Int?) == title.malID }) {
@@ -478,156 +800,6 @@ final class Store: ObservableObject {
             if !(pagination?.read("hasNextPage") ?? (entries.count == 300)) { break }
         }
         return nil
-    }
-}
-
-private struct FriendHistoryCursor: Codable {
-    let friend: Friend
-    let kind: Kind
-    let page: Int
-}
-
-private struct FriendFeedCache: Codable {
-    let accountID: Int
-    let friends: [Friend]
-    let activity: [FriendUpdate]
-    let checkedFriends: Int
-    let historyCursors: [FriendHistoryCursor]
-    let page: Int
-
-    let englishNames: [String: String]?
-
-    private static let file = URL.cachesDirectory.appending(path: "AniLedger-friends-feed-v1.json")
-
-    static func read() -> Self? {
-        guard let data = try? Data(contentsOf: file) else { return nil }
-        return try? JSONDecoder().decode(Self.self, from: data)
-    }
-
-    func write() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        try? data.write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-    }
-
-    static func remove() {
-        try? FileManager.default.removeItem(at: file)
-    }
-}
-
-private struct SavedList: Codable, Equatable {
-    var items: [ListEntry]
-    let page: Int
-    let more: Bool
-    var needsReconciliation = false
-}
-
-struct ProfileStats: Codable {
-    let animeCount: Int?
-    let mangaCount: Int?
-    let daysWatched: Double?
-    let chaptersRead: Int?
-    let animeDetails: ProfileMediaStats?
-    let mangaDetails: ProfileMediaStats?
-
-    var hasDetailedStatistics: Bool { animeDetails != nil || mangaDetails != nil }
-
-    func details(for kind: Kind) -> ProfileMediaStats? {
-        kind == .anime ? animeDetails : mangaDetails
-    }
-
-    func isListEmpty(for kind: Kind) -> Bool {
-        if let count = kind == .anime ? animeCount : mangaCount {
-            return count == 0
-        }
-        guard let details = details(for: kind) else { return false }
-        return kind.statuses.allSatisfy { details.statusCounts[$0] == 0 }
-    }
-
-    init?(_ fields: Fields) {
-        let anime: Fields? = fields.read("anime")
-        let manga: Fields? = fields.read("manga")
-        guard anime != nil || manga != nil else { return nil }
-        animeCount = anime?.read("totalEntries", "total_entries")
-        mangaCount = manga?.read("totalEntries", "total_entries")
-        daysWatched = anime?.read("daysWatched", "days_watched")
-        chaptersRead = manga?.read("chaptersRead", "chapters_read", "chapters")
-        animeDetails = anime.map { ProfileMediaStats($0, kind: .anime) }
-        mangaDetails = manga.map { ProfileMediaStats($0, kind: .manga) }
-    }
-}
-
-struct ProfileMediaStats: Codable {
-    let statusCounts: [String: Int]
-    let meanScore: Double?
-    let days: Double?
-    let progress: Int?
-    let volumes: Int?
-
-    init(_ fields: Fields, kind: Kind) {
-        let planKey = kind.statuses.last!
-        let values: [String: Int?] = [
-            kind.statuses[0]: fields.read(kind.statuses[0]),
-            "completed": fields.read("completed"),
-            "on_hold": fields.read("onHold", "on_hold"),
-            "dropped": fields.read("dropped"),
-            planKey: fields.read(kind == .anime ? "planToWatch" : "planToRead", planKey)
-        ]
-        statusCounts = values.compactMapValues { count in count.flatMap { $0 >= 0 ? $0 : nil } }
-        meanScore = fields.read("meanScore", "mean_score")
-        days = kind == .anime ? fields.read("daysWatched", "days_watched") : fields.read("daysRead", "days_read")
-        progress = kind == .anime
-            ? fields.read("episodesWatched", "episodes_watched", "episodes")
-            : fields.read("chaptersRead", "chapters_read", "chapters")
-        volumes = fields.read("volumesRead", "volumes_read", "volumes")
-    }
-}
-
-struct CachedProfileValue<Value: Codable>: Codable {
-    let value: Value
-    let savedAt: Date
-
-    var isFresh: Bool { Date.now.timeIntervalSince(savedAt) < 15 * 60 }
-}
-
-struct ProfileSnapshot: Codable {
-    var stats: CachedProfileValue<ProfileStats>?
-    var favorites: CachedProfileValue<[Kind: [Title]]>?
-}
-
-private enum ProfileCache {
-    private static let file = URL.cachesDirectory.appending(path: "AniLedger-profiles-v1.json")
-
-    static func read() -> [String: ProfileSnapshot] {
-        guard let data = try? Data(contentsOf: file) else { return [:] }
-        return (try? JSONDecoder().decode([String: ProfileSnapshot].self, from: data)) ?? [:]
-    }
-
-    static func write(_ profiles: [String: ProfileSnapshot]) {
-        guard let data = try? JSONEncoder().encode(profiles) else { return }
-        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-    }
-}
-
-private struct ListCache: Codable {
-    let account: Account
-    let lists: [Kind: SavedList]
-
-    private static var file: URL {
-        URL.cachesDirectory.appending(path: "AniLedger-lists-v1.json")
-    }
-
-    static func read() -> Self? {
-        guard let data = try? Data(contentsOf: file) else { return nil }
-        return try? JSONDecoder().decode(Self.self, from: data)
-    }
-
-    func write() {
-        guard let data = try? JSONEncoder().encode(self) else { return }
-        try? data.write(to: Self.file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-    }
-
-    static func remove() {
-        try? FileManager.default.removeItem(at: file)
     }
 }
 

@@ -1,115 +1,5 @@
 import SwiftUI
 
-struct HomeScreen: View {
-    @EnvironmentObject private var store: Store
-    @State private var season: [Title] = []
-    @State private var airing: [Title] = []
-    @State private var upcoming: [Title] = []
-    @State private var anime: [Title] = []
-    @State private var manga: [Title] = []
-    @State private var animeHint = "Loading suggestions…"
-
-    private var suggestionsKey: String { "\(store.checking)-\(store.account?.id ?? 0)-\(store.lists[.manga, default: []].count)" }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                VStack(alignment: .leading, spacing: 10) {
-                    LedgerSectionTitle("Recent updates")
-                    if store.checking {
-                        ProgressView("Checking session")
-                    } else if store.account == nil {
-                        SignInButton()
-                    } else if store.recent.isEmpty {
-                        Text("Your latest list updates will appear here.").foregroundStyle(.secondary)
-                    } else {
-                        ForEach(Array(store.recent.prefix(4))) { item in
-                            NavigationLink(value: item.title) {
-                                TitleRow(title: item.title, note: "\(statusLabel(item.status)) · \(item.progress) \(item.title.kind.unit.lowercased())")
-                            }.buttonStyle(.plain)
-                        }
-                    }
-                }
-                .padding()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .ledgerPanel()
-                .padding(.horizontal)
-                Rail(name: "This season", titles: season)
-                Rail(name: store.account == nil ? "Anime suggestions" : "My AnimeList suggestions", titles: anime, empty: animeHint)
-                Rail(name: "AniLedger manga suggestions", titles: manga)
-                ranking("Top airing anime", titles: airing)
-                ranking("Top upcoming anime", titles: upcoming)
-            }.padding(.vertical)
-        }
-        .background(Palette.canvas)
-        .navigationTitle("AniLedger")
-        .task { await loadCatalog() }
-        .task(id: suggestionsKey) { if !store.checking { await loadSuggestions() } }
-        .refreshable {
-            await store.loadLists(force: true)
-            await loadCatalog()
-            await loadSuggestions()
-        }
-    }
-
-    private func ranking(_ label: String, titles: [Title]) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            LedgerSectionTitle(label)
-            if titles.isEmpty { Text("No rankings available.").foregroundStyle(.secondary) }
-            ForEach(Array(unique(titles).prefix(4).enumerated()), id: \.element.id) { rank, title in
-                NavigationLink(value: title) {
-                    HStack(spacing: 12) {
-                        Text(String(rank + 1)).monospacedDigit().foregroundStyle(.secondary)
-                        TitleRow(title: title, note: title.format ?? "Anime")
-                    }
-                }.buttonStyle(.plain)
-            }
-        }.padding(.horizontal)
-    }
-
-    private func loadCatalog() async {
-        async let seasonal = store.api.catalog("seasons/now")
-        async let current = store.api.catalog("top/anime", [URLQueryItem(name: "filter", value: "airing")])
-        async let later = store.api.catalog("top/anime", [URLQueryItem(name: "filter", value: "upcoming")])
-        if let result = try? await seasonal { season = catalogPage(result, kind: .anime).items }
-        if let result = try? await current { airing = catalogPage(result, kind: .anime).items }
-        if let result = try? await later { upcoming = catalogPage(result, kind: .anime).items }
-        else if let result = try? await store.api.catalog("seasons/upcoming") {
-            upcoming = catalogPage(result, kind: .anime).items.sorted { ($0.members ?? 0) > ($1.members ?? 0) }
-        }
-    }
-
-    private func loadSuggestions() async {
-        let user = store.account
-        anime = []
-        animeHint = "Loading suggestions…"
-        do {
-            let items: [Title]
-            if user != nil { items = try await store.api.suggestions() }
-            else { items = recommendations(try await store.api.catalog("recommendations/anime"), kind: .anime) }
-            guard !Task.isCancelled, store.account == user else { return }
-            anime = items
-            animeHint = "No anime suggestions available."
-        } catch {
-            guard !Task.isCancelled, store.account == user else { return }
-            animeHint = "Could not load anime suggestions. Pull to retry."
-        }
-        var suggestions: [Title] = []
-        let sources = store.lists[.manga, default: []].filter { $0.rating >= 7 || $0.status == "completed" }.prefix(2)
-        for source in sources {
-            if let result = try? await store.api.catalog("manga/\(source.title.malID)/recommendations") {
-                suggestions += recommendations(result, kind: .manga)
-            }
-        }
-        if let result = try? await store.api.catalog("recommendations/manga") {
-            suggestions += recommendations(result, kind: .manga)
-        }
-        guard !Task.isCancelled, store.account == user else { return }
-        let saved = Set(store.lists[.manga, default: []].map(\.id))
-        manga = Array(unique(suggestions).filter { !saved.contains($0.id) }.prefix(20))
-    }
-}
-
 private struct ListStatusGlass: ViewModifier {
     let isInteractive: Bool
 
@@ -169,6 +59,7 @@ struct ListStatusHeader: View {
 
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
@@ -195,6 +86,8 @@ struct ListsScreen: View {
         return searchTerm.isEmpty ? entries.filter { !store.organization.hidden.contains($0.id) } : entries
     }
     private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    private func displayName(_ title: Title) -> String { title.displayName(for: titleLanguage) }
     private var removalPresented: Binding<Bool> {
         Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
     }
@@ -213,6 +106,30 @@ struct ListsScreen: View {
                 ProgressView("Checking session").listRowBackground(Color.clear)
             } else if store.account == nil {
                 SignInButton().listRowBackground(Color.clear)
+            } else if store.lists[kind] == nil, store.pendingListLoads.contains(kind) {
+                ListSkeleton(kind: kind)
+                    .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            } else if store.lists[kind] == nil, let failure = store.listFailures[kind] {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(failure).foregroundStyle(.secondary)
+                    Button("Retry") { Task { await store.loadLists(force: true) } }
+                        .ledgerGlassButton()
+                }
+                .padding(.vertical, 12)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
+            } else if store.lists[kind]?.isEmpty == true, searchTerm.isEmpty, store.nextList[kind] == nil,
+                !store.refreshingLists.contains(kind)
+            {
+                ContentUnavailableView {
+                    Label("No \(kind.label.lowercased()) yet", systemImage: kind == .anime ? "tv" : "books.vertical")
+                } description: {
+                    Text("Titles you add from Discover or a title page appear here.")
+                }
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else {
                 ForEach(kind.statuses, id: \.self) { status in
                     let group = entries.filter { $0.status == status }
@@ -258,11 +175,13 @@ struct ListsScreen: View {
                         Picker("Sort by", selection: $sort) {
                             ForEach(ListSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
                         }
+                        .sensoryFeedback(.selection, trigger: sort)
                     } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
                 }
             }
         }
         .scrollDismissesKeyboard(.interactively)
+        .prefetchingPosters(entries) { $0.title.image }
         .onChange(of: store.account?.id) { _, _ in
             query = ""
             listPageError = nil
@@ -274,7 +193,7 @@ struct ListsScreen: View {
         .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
             Button("Remove", role: .destructive) { update(item, change: nil) }
             Button("Cancel", role: .cancel) {}
-        } message: { item in Text(item.title.name) }
+        } message: { item in Text(displayName(item.title)) }
     }
 
     private func groupHeader(_ status: String, count: Int) -> some View {
@@ -294,7 +213,10 @@ struct ListsScreen: View {
         }
         switch sort {
         case .recent: return matches.sorted { $0.updated > $1.updated }
-        case .title: return matches.sorted { $0.title.name.localizedStandardCompare($1.title.name) == .orderedAscending }
+        case .title:
+            return matches.sorted {
+                displayName($0.title).localizedStandardCompare(displayName($1.title)) == .orderedAscending
+            }
         case .rating: return matches.sorted { $0.rating == $1.rating ? $0.updated > $1.updated : $0.rating > $1.rating }
         }
     }
@@ -306,7 +228,7 @@ struct ListsScreen: View {
                     .frame(width: 80, height: 116)
                     .clipShape(.rect(cornerRadius: 7))
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(item.title.name)
+                    Text(displayName(item.title))
                         .font(.body)
                         .foregroundStyle(.primary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -384,7 +306,7 @@ struct ListsScreen: View {
     }
 }
 
-private enum DiscoverShelf: String, CaseIterable, Identifiable {
+enum DiscoverShelf: String, CaseIterable, Identifiable {
     case airing = "Currently airing anime"
     case current = "Current season"
     case upcoming = "Upcoming season"
@@ -433,7 +355,7 @@ private enum DiscoverShelf: String, CaseIterable, Identifiable {
     }
 
     @MainActor
-    func page(_ page: Int, api: API, refresh: Bool = false) async throws -> Page<Title> {
+    func page(_ page: Int, api: any APIClient, refresh: Bool = false) async throws -> Page<Title> {
         let pageQuery = [URLQueryItem(name: "page", value: String(page))]
         do {
             return catalogPage(try await api.catalog(path, query + pageQuery, refresh: refresh), kind: kind)
@@ -510,6 +432,7 @@ struct DiscoverScreen: View {
                     ForEach(Kind.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
+                .sensoryFeedback(.selection, trigger: searchKind)
                 .padding(.horizontal, LedgerLayout.inset)
                 .padding(.vertical, 6)
                 .background(Palette.background)
@@ -519,7 +442,7 @@ struct DiscoverScreen: View {
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
-                NavigationLink { CatalogBrowser() } label: {
+                NavigationLink(value: CatalogBrowserRoute()) {
                     Label("Browse catalog", systemImage: "line.3.horizontal.decrease")
                 }
             }
@@ -530,35 +453,39 @@ struct DiscoverScreen: View {
     private var browse: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 32) {
-                ForEach(DiscoverShelf.allCases) { shelf in
-                    if let titles = shelves[shelf], !titles.isEmpty {
-                        PosterShelf(heading: shelf.heading, titles: Array(titles.prefix(14)), isDiscoverShelf: true) {
-                            NavigationLink {
-                                PosterResults(name: shelf.heading, shelf: shelf, query: "", kind: shelf.kind)
-                                    .navigationTitle(shelf.heading)
-                            } label: {
-                                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                                    .foregroundStyle(.secondary)
-                                    .frame(width: 44, height: 36, alignment: .trailing)
-                                    .contentShape(Rectangle())
+                if loading && shelves.isEmpty {
+                    DiscoverSkeleton()
+                } else {
+                    ForEach(DiscoverShelf.allCases) { shelf in
+                        if let titles = shelves[shelf], !titles.isEmpty {
+                            PosterShelf(
+                                heading: shelf.heading, titles: Array(titles.prefix(14)), isDiscoverShelf: true
+                            ) {
+                                NavigationLink(value: CatalogResultsRoute(
+                                    name: shelf.heading, shelf: shelf, query: "", kind: shelf.kind)) {
+                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 44, height: 36, alignment: .trailing)
+                                        .contentShape(Rectangle())
+                                }
+                                .accessibilityLabel("View all \(shelf.rawValue.lowercased())")
                             }
-                            .accessibilityLabel("View all \(shelf.rawValue.lowercased())")
                         }
                     }
-                }
-                if loading {
-                    ProgressView("Loading Discover").frame(maxWidth: .infinity)
-                } else {
-                    if shelves.values.allSatisfy(\.isEmpty) {
-                        VStack(spacing: 12) {
-                            Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
-                            Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
-                        }
-                        .frame(maxWidth: .infinity)
-                    } else if !failedShelves.isEmpty {
-                        Button("Retry unavailable sections") { Task { await loadShelves() } }
-                            .ledgerGlassButton()
+                    if loading {
+                        ProgressView("Loading Discover").frame(maxWidth: .infinity)
+                    } else {
+                        if shelves.values.allSatisfy(\.isEmpty) {
+                            VStack(spacing: 12) {
+                                Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
+                                Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
+                            }
                             .frame(maxWidth: .infinity)
+                        } else if !failedShelves.isEmpty {
+                            Button("Retry unavailable sections") { Task { await loadShelves() } }
+                                .ledgerGlassButton()
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                 }
             }
@@ -641,7 +568,7 @@ struct CatalogFacet: Hashable, Identifiable {
     var id: String { name.lowercased() }
 
     @MainActor
-    func page(_ page: Int, query: String, sort: CatalogFacetSort, api: API) async throws -> Page<Title> {
+    func page(_ page: Int, query: String, sort: CatalogFacetSort, api: any APIClient) async throws -> Page<Title> {
         let id: Int
         if let malID, malID > 0 {
             id = malID
@@ -656,17 +583,17 @@ struct CatalogFacet: Hashable, Identifiable {
             filters.append(URLQueryItem(name: "nulls", value: "first"))
         }
         if !query.isEmpty { filters.append(URLQueryItem(name: "q", value: query)) }
-        return catalogPage(try await api.catalog(kind.rawValue, filters), kind: kind)
+        return catalogPage(try await api.catalog(kind.rawValue, filters, refresh: false), kind: kind)
     }
 
     @MainActor
-    private func resolveID(api: API) async throws -> Int {
+    private func resolveID(api: any APIClient) async throws -> Int {
         let usesGenreIndex = category.usesGenreIndex
         let path = usesGenreIndex ? "genres/\(kind.rawValue)" : "producers"
         let query = usesGenreIndex
             ? URLQueryItem(name: "filter", value: category == .theme ? "themes" : "genres")
             : URLQueryItem(name: "q", value: name)
-        let response = try await api.catalog(path, [query])
+        let response = try await api.catalog(path, [query], refresh: false)
         let entries: [Fields] = response.read("data") ?? []
         for entry in entries {
             let aliases: [Fields] = entry.read("titles") ?? []
@@ -711,6 +638,7 @@ struct CatalogFacetScreen: View {
                                 Text(option.rawValue).tag(option)
                             }
                         }
+                        .sensoryFeedback(.selection, trigger: sort)
                     } label: {
                         Label("Sort titles", systemImage: "arrow.up.arrow.down")
                     }
@@ -731,11 +659,24 @@ struct NextPageIndicator: View {
     let label: String
     let page: Int
     let load: () async -> Void
+    /// A page request that answers without advancing its counter would otherwise
+    /// leave this row spinning for as long as the screen is open.
+    @State private var finished = false
 
     var body: some View {
-        ProgressView().accessibilityLabel(label)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .task(id: page) { await load() }
+        Group {
+            if finished {
+                EmptyView()
+            } else {
+                ProgressView().accessibilityLabel(label)
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+        }
+        .task(id: page) {
+            finished = false
+            await load()
+            finished = true
+        }
     }
 }
 
@@ -881,7 +822,7 @@ private struct ProducerTitleRow: View {
     }
 }
 
-private struct PosterResults: View {
+struct PosterResults: View {
     @EnvironmentObject private var store: Store
     let name: String
     let shelf: DiscoverShelf?
@@ -923,7 +864,10 @@ private struct PosterResults: View {
                 } else if loading {
                     ProgressView().accessibilityLabel("Loading \(name)")
                 } else if titles.isEmpty {
-                    Text("No titles found.").foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        "No titles found",
+                        systemImage: "magnifyingglass",
+                        description: Text("Try another search or section."))
                 }
             }
             .scrollTargetLayout(isEnabled: !query.isEmpty && !showsProducerRows)
@@ -984,7 +928,7 @@ private struct PosterResults: View {
             else if let facet { result = try await facet.page(page, query: query, sort: sort, api: store.api) }
             else {
                 let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]
-                result = catalogPage(try await store.api.catalog(kind.rawValue, filters), kind: kind)
+                result = catalogPage(try await store.api.catalog(kind.rawValue, filters, refresh: false), kind: kind)
             }
             guard !Task.isCancelled, current == generation else { return }
             titles = unique(titles + result.items)
@@ -999,6 +943,15 @@ private struct PosterResults: View {
 private enum BrowseMode: String, CaseIterable, Identifiable {
     case popular = "Top rated", season = "Seasonal", airing = "Airing", upcoming = "Upcoming"
     var id: Self { self }
+}
+
+struct CatalogBrowserRoute: Hashable {}
+
+struct CatalogResultsRoute: Hashable {
+    let name: String
+    let shelf: DiscoverShelf
+    let query: String
+    let kind: Kind
 }
 
 struct CatalogBrowser: View {
@@ -1024,21 +977,27 @@ struct CatalogBrowser: View {
             LazyVStack(alignment: .leading, spacing: 16) {
                 Picker("Media type", selection: $kind) {
                     ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                }.pickerStyle(.segmented)
+                }
+                .pickerStyle(.segmented)
+                .sensoryFeedback(.selection, trigger: kind)
                 if search.isEmpty && kind == .anime {
                     Picker("Catalog", selection: $mode) {
                         ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
-                    }.pickerStyle(.segmented)
+                    }
+                    .pickerStyle(.segmented)
+                    .sensoryFeedback(.selection, trigger: mode)
                     if mode == .season {
                         HStack {
                             Picker("Season", selection: $season) {
                                 ForEach(["winter", "spring", "summer", "fall"], id: \.self) { Text($0.capitalized).tag($0) }
                             }
+                            .sensoryFeedback(.selection, trigger: season)
                             Picker("Year", selection: $year) {
                                 ForEach((1917...(Calendar.current.component(.year, from: Date()) + 2)).reversed(), id: \.self) {
                                     Text(String($0)).tag($0)
                                 }
                             }
+                            .sensoryFeedback(.selection, trigger: year)
                         }
                     }
                 }
@@ -1062,7 +1021,10 @@ struct CatalogBrowser: View {
                 } else if loading {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if titles.isEmpty {
-                    Text("No matching titles.").foregroundStyle(.secondary)
+                    ContentUnavailableView(
+                        "No matching titles",
+                        systemImage: "magnifyingglass",
+                        description: Text("Adjust the filters or search for another title."))
                 }
             }.padding()
         }
@@ -1100,11 +1062,11 @@ struct CatalogBrowser: View {
         do {
             if !query.isEmpty { try await Task.sleep(for: .milliseconds(350)) }
             let response: Fields
-            do { response = try await store.api.catalog(path, params) }
+            do { response = try await store.api.catalog(path, params, refresh: false) }
             catch {
                 try Task.checkCancellation()
                 guard query.isEmpty, selected == .anime, mode == .upcoming else { throw error }
-                response = try await store.api.catalog("seasons/upcoming", [params[0]])
+                response = try await store.api.catalog("seasons/upcoming", [params[0]], refresh: false)
             }
             guard !Task.isCancelled, activeQuery == request else { return }
             let result = catalogPage(response, kind: selected)
@@ -1135,7 +1097,13 @@ struct FriendsScreen: View {
                         SignInButton()
                     }.padding(rowInsets)
                 } else {
-                    if let message = store.friendMessage {
+                    if store.feedStatus.isShowingSavedData, !store.activity.isEmpty {
+                        SavedDataNote(savedAt: store.feedStatus.savedAt, message: store.feedStatus.failure,
+                                      isBusy: store.loadingFriends) {
+                            await store.loadFriends(reset: true)
+                        }
+                        .padding(rowInsets)
+                    } else if let message = store.friendMessage {
                         VStack(alignment: .leading, spacing: 8) {
                             Text(message).foregroundStyle(.secondary)
                             Button("Retry") { Task { await store.loadFriends(reset: true) } }
@@ -1143,6 +1111,7 @@ struct FriendsScreen: View {
                     }
                     ForEach(store.activity) { item in
                         PreferredTitle(title: store.friendFeedTitle(item.title),
+                                       showsLoadingTitle: false,
                                        onEnglishName: { store.rememberFriendFeedEnglishName($1, for: $0) }) { title, name in
                             feedRow(item, title: title, name: name)
                         }
@@ -1154,10 +1123,17 @@ struct FriendsScreen: View {
                         NextPageIndicator(label: "Loading friend activity", page: store.friendFeedPage) {
                             await store.loadFriends()
                         }.padding(rowInsets)
-                    } else if store.loadingFriends {
-                        ProgressView("Loading friend activity").padding(rowInsets)
-                    } else if store.activity.isEmpty {
-                        Text("No public friend updates loaded.").foregroundStyle(.secondary).padding(rowInsets)
+                    } else if store.activity.isEmpty,
+                        store.loadingFriends
+                            || (store.friendFeedPage == 0 && store.friendMessage == nil)
+                    {
+                        FeedSkeleton().padding(rowInsets)
+                    } else if store.activity.isEmpty, store.friendMessage == nil {
+                        ContentUnavailableView(
+                            "No friend activity yet",
+                            systemImage: "person.2",
+                            description: Text("Recent updates from your MyAnimeList friends appear here."))
+                        .padding(rowInsets)
                     }
                 }
             }
@@ -1175,6 +1151,7 @@ struct FriendsScreen: View {
             }
         }
         .task(id: store.account?.id) { if store.friendFeedPage == 0 { await store.loadFriends() } }
+        .prefetchingPosters(store.activity) { $0.title.image }
         .refreshable { await store.loadFriends(reset: true) }
     }
 
@@ -1226,4 +1203,99 @@ struct FriendsScreen: View {
         }
     }
 
+}
+
+/// First-load placeholders so a list paints its shape instead of a spinner.
+private struct ListSkeleton: View {
+    let kind: Kind
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                SkeletonBlock(height: 14, width: 120)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 10)
+            ForEach(0..<7, id: \.self) { index in
+                if index > 0 { Divider().padding(.leading, 96) }
+                HStack(alignment: .top, spacing: 10) {
+                    SkeletonBlock(height: 116, width: 80, radius: 7)
+                    VStack(alignment: .leading, spacing: 8) {
+                        SkeletonBlock(height: 14, width: 200)
+                        SkeletonBlock(height: 12, width: 110)
+                        SkeletonBlock(height: 12, width: 64)
+                    }
+                    .padding(.top, 4)
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading \(kind.label.lowercased())")
+    }
+}
+
+/// The Discover page before its first shelf batch answers.
+private struct DiscoverSkeleton: View {
+    private var posterWidth: CGFloat { LedgerLayout.detailPosterWidth }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 32) {
+            ForEach(0..<4, id: \.self) { _ in
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        SkeletonBlock(height: 16, width: 170)
+                        Spacer(minLength: 0)
+                        SkeletonBlock(height: 16, width: 16, radius: 4)
+                    }
+                    .frame(height: 36)
+                    HStack(alignment: .top, spacing: 8) {
+                        ForEach(0..<3, id: \.self) { _ in
+                            VStack(alignment: .leading, spacing: 6) {
+                                SkeletonBlock(
+                                    height: posterWidth / LedgerLayout.posterRatio, width: posterWidth,
+                                    radius: LedgerLayout.posterRadius)
+                                SkeletonBlock(height: 12, width: posterWidth - 18)
+                                SkeletonBlock(height: 12, width: posterWidth - 52)
+                            }
+                            .frame(width: posterWidth)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, LedgerLayout.inset)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading Discover")
+    }
+}
+
+/// Feed rows before the first batch of friend activity answers.
+private struct FeedSkeleton: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            ForEach(0..<4, id: \.self) { index in
+                if index > 0 { Divider().overlay(Color.white.opacity(0.12)) }
+                HStack(alignment: .top, spacing: 10) {
+                    SkeletonBlock(height: 46, width: 46, radius: 7)
+                    VStack(alignment: .leading, spacing: 7) {
+                        SkeletonBlock(height: 12, width: 110)
+                        SkeletonBlock(height: 14, width: 190)
+                        SkeletonBlock(height: 12, width: 90)
+                    }
+                    .padding(.top, 3)
+                    Spacer(minLength: 0)
+                    SkeletonBlock(height: 68, width: 48, radius: 5)
+                }
+                .padding(.vertical, 10)
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading friend activity")
+    }
 }

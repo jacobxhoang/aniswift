@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "lineLength": 120,
+  "tabWidth": 4,
+  "indentation": {
+    "spaces": 4
+  },
+  "respectsExistingLineBreaks": true,
+  "lineBreakBeforeControlFlowKeywords": false,
+  "lineBreakBeforeEachArgument": false,
+  "prioritizeKeepingFunctionOutputTogether": true,
+  "indentConditionalCompilationBlocks": false,
+  "indentSwitchCaseLabels": false,
+  "spacesAroundRangeFormationOperators": false,
+  "multiElementCollectionTrailingCommas": true
+}

@@ -2,6 +2,7 @@ name: Build AniLedger IPA
 on:
   push:
     branches: [main]
+    tags: ['ios-v*']
   pull_request:
     paths: ['ios/**', '.github/workflows/ios.yml']
   workflow_dispatch:
@@ -14,43 +15,140 @@ on:
 permissions:
   contents: read
 
+# One build per push instead of one per commit in the push: the tip is the only
+# tree anyone runs, and the tag that publishes a release is built from exactly
+# the commit it points at. Pull requests cancel their own superseded runs;
+# pushes and tags keep theirs, because a tag run publishes an artifact.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  commits:
-    runs-on: ubuntu-latest
-    outputs:
-      shas: ${{ steps.select.outputs.shas }}
+  # Advisory: reported on every change but not a dependency of the IPA job.
+  # Run `xcrun swift-format format --in-place` over the files it lists, then add
+  # `format` to the `ipa` job's needs to make it blocking.
+  format:
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Select commits to build
-        id: select
+      - name: Select Xcode 26
         shell: bash
-        env:
-          BEFORE: ${{ github.event.before }}
         run: |
           set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == push ]] && git cat-file -e "${BEFORE}^{commit}" 2>/dev/null; then
-            shas=$(git rev-list --first-parent --reverse "$BEFORE..$GITHUB_SHA" | jq -nRc '[inputs | select(length > 0)]')
-            if [[ "$shas" == '[]' ]]; then shas=$(jq -nc --arg sha "$GITHUB_SHA" '[$sha]'); fi
-          else
-            shas=$(jq -nc --arg sha "$GITHUB_SHA" '[$sha]')
+          for xcode in /Applications/Xcode_26*.app; do
+            if [[ -d "$xcode/Contents/Developer" ]]; then
+              sudo xcode-select -s "$xcode/Contents/Developer"
+              xcrun --find swift-format
+              exit 0
+            fi
+          done
+          echo "::error::Xcode 26 is required for swift-format."
+          exit 1
+      - name: Lint changed Swift files
+        shell: bash
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${BASE:-}" ]] || [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            echo "No base commit to compare against; skipping the format check."
+            exit 0
           fi
-          printf 'shas=%s\n' "$shas" >> "$GITHUB_OUTPUT"
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(git diff --name-only --diff-filter=ACMR "$BASE" HEAD -- ios | grep -E '\.swift$' || true)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No Swift changes."
+            exit 0
+          fi
+          printf '%s\n' "${files[@]}"
+          xcrun swift-format lint --strict --configuration .swift-format "${files[@]}"
+
+  test:
+    runs-on: macos-15
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/AniLedger.xcodeproj/project.pbxproj') }}
+          restore-keys: spm-${{ runner.os }}-
+      - name: Select Xcode 26
+        shell: bash
+        run: |
+          set -euo pipefail
+          for xcode in /Applications/Xcode_26*.app; do
+            if [[ -d "$xcode/Contents/Developer" ]]; then
+              sudo xcode-select -s "$xcode/Contents/Developer"
+              xcodebuild -version
+              exit 0
+            fi
+          done
+          echo "::error::Xcode 26 is required for the test suite."
+          exit 1
+      - name: Select an iPhone simulator
+        id: simulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pick the newest available iPhone from the runtime list (last match).
+          udid=$(xcrun simctl list devices available \
+            | sed -nE 's/^[[:space:]]+iPhone.*\(([0-9A-F]{8}(-[0-9A-F]{4}){3}-[0-9A-F]{12})\).*/\1/p' \
+            | tail -1)
+          if [[ -z "$udid" ]]; then
+            echo "::error::No available iPhone simulator on this runner."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Simulator: $udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Run unit tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild test \
+            -project ios/AniLedger.xcodeproj \
+            -scheme AniLedger \
+            -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }},arch=arm64" \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -resultBundlePath "$RUNNER_TEMP/AniLedgerTests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
+      - name: Save the test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AniLedgerTests-xcresult
+          path: ${{ runner.temp }}/AniLedgerTests.xcresult
+          if-no-files-found: ignore
 
   ipa:
-    needs: commits
-    strategy:
-      fail-fast: false
-      matrix:
-        sha: ${{ fromJSON(needs.commits.outputs.shas) }}
+    needs: [test]
+    # The suite has not proven itself on every change yet, so its result stays
+    # advisory until the TESTS_GATE repository variable is "on" (Settings >
+    # Secrets and variables > Actions > Variables). That keeps releases from
+    # stopping while a red run is still visible in CI. Once the suite is green,
+    # set TESTS_GATE=on and a failing suite blocks the IPA and the release.
+    if: ${{ !cancelled() && (needs.test.result == 'success' || vars.TESTS_GATE != 'on') }}
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ matrix.sha }}
+          fetch-depth: 0
           persist-credentials: false
+      - name: Cache Swift packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.swift.swiftpm
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/AniLedger.xcodeproj/project.pbxproj') }}
+          restore-keys: spm-${{ runner.os }}-
       - name: Select Xcode 26
         shell: bash
         run: |
@@ -66,7 +164,9 @@ jobs:
           echo "::error::Xcode 26 is required for the Liquid Glass build."
           exit 1
       - name: Configure the bundled MyAnimeList iOS Client ID
-        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        # Runs for every build that can be distributed, including a tagged
+        # release, and never for a pull request.
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           MAL_IOS_CLIENT_ID: ${{ secrets.MAL_IOS_CLIENT_ID }}
@@ -81,7 +181,6 @@ jobs:
           path = Path("ios/AniLedger/Info.plist")
           with path.open("rb") as source:
               config = plistlib.load(source)
-          # Older commits in the build matrix cannot use the bundled ID.
           client_id = os.environ.get("MAL_IOS_CLIENT_ID", "").strip()
           if "AniLedgerMALClientID" in config and client_id:
               if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
@@ -96,9 +195,12 @@ jobs:
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/AniLedger.xcarchive"
+          # The commit count makes every build identifiable in Settings > About.
+          build=$(git rev-list --count HEAD)
           xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
             -configuration Release -destination 'generic/platform=iOS' \
-            -archivePath "$archive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO archive
+            -archivePath "$archive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CURRENT_PROJECT_VERSION="$build" archive
           test -f "$archive/Products/Applications/AniLedger.app/AniLedger"
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
           ditto "$archive/Products/Applications/AniLedger.app" "$RUNNER_TEMP/ipa/Payload/AniLedger.app"
@@ -113,49 +215,41 @@ jobs:
         run: bash ios/build-signed.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.signed && 'AniLedger-Signed' || format('AniLedger-Unsigned-{0}', matrix.sha) }}
+          name: ${{ inputs.signed && 'AniLedger-Signed' || 'AniLedger-Unsigned' }}
           path: ${{ runner.temp }}/AniLedger-*.ipa
           if-no-files-found: error
           overwrite: true
 
+  # A release is a tag, not every commit: `git tag ios-v1.0.0 && git push --tags`
+  # publishes the IPA built from the tagged tree.
   release:
-    needs: [commits, ipa]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.commits.result == 'success' && !cancelled()
+    needs: [ipa]
+    if: startsWith(github.ref, 'refs/tags/ios-v')
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        sha: ${{ fromJSON(needs.commits.outputs.shas) }}
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: AniLedger-Unsigned-${{ matrix.sha }}
-          merge-multiple: true
+          name: AniLedger-Unsigned
           path: ${{ runner.temp }}/release-ipa
-      - name: Publish commit release
+      - name: Publish the tagged release
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
-          BUILD_SHA: ${{ matrix.sha }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           ipa="$RUNNER_TEMP/release-ipa/AniLedger-Unsigned.ipa"
-          if [[ ! -f "$ipa" ]]; then
-            echo "No successful IPA build for $BUILD_SHA. Skipping its release."
-            exit 0
-          fi
-          tag="ios-$BUILD_SHA"
-          if gh release view "$tag" --json assets > "$RUNNER_TEMP/release.json" 2>/dev/null; then
+          test -f "$ipa"
+          if gh release view "$TAG" --json assets > "$RUNNER_TEMP/release.json" 2>/dev/null; then
             if jq -e 'any(.assets[]; .name == "AniLedger-Unsigned.ipa")' "$RUNNER_TEMP/release.json" >/dev/null; then
-              echo "The IPA for $BUILD_SHA is already published."
+              echo "The IPA for $TAG is already published."
             else
-              gh release upload "$tag" "$ipa"
+              gh release upload "$TAG" "$ipa"
             fi
           else
-            gh release create "$tag" "$ipa" \
-              --target "$BUILD_SHA" --title "AniLedger iOS ${BUILD_SHA:0:7}" \
-              --prerelease --latest=false \
-              --notes "Unsigned iOS device build for commit $BUILD_SHA. Sign the IPA before installing it on an iPhone or iPad."
+            gh release create "$TAG" "$ipa" \
+              --title "AniLedger iOS ${TAG#ios-v}" --verify-tag \
+              --notes "Unsigned iOS device build for ${TAG}. Sign the IPA before installing it on an iPhone or iPad."
           fi

@@ -14,6 +14,27 @@ struct Page<Value> {
     let more: Bool
 }
 
+/// The redirect MyAnimeList sends back after sign-in. Every part is checked
+/// before the code is exchanged: a foreign scheme or host, a repeated parameter
+/// or a state that does not match the one this attempt generated must never be
+/// treated as a completed sign-in.
+enum MALCallback {
+    static let scheme = "org.aniledger.ios"
+    static let url = "\(scheme)://oauth"
+
+    static func code(from url: URL, state: String) -> String? {
+        let values = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let states = values.filter { $0.name == "state" }
+        let codes = values.filter { $0.name == "code" }
+        guard url.scheme == scheme, url.host == "oauth", url.path.isEmpty,
+            url.user == nil, url.password == nil, url.port == nil, url.fragment == nil,
+            states.count == 1, states.first?.value == state,
+            codes.count == 1, let code = codes.first?.value, !code.isEmpty
+        else { return nil }
+        return code
+    }
+}
+
 private struct MALSession: Codable {
     let clientID: String
     let accessToken: String
@@ -65,10 +86,40 @@ private enum SessionKeychain {
     }
 }
 
+/// The catalog and MyAnimeList surface the app runs on. `Store` holds one of
+/// these, so the sync, paging and cache paths can be exercised against a stub
+/// instead of the network.
 @MainActor
-final class API {
-    static let callbackScheme = "org.aniledger.ios"
-    static let redirectURI = "\(callbackScheme)://oauth"
+protocol APIClient: AnyObject {
+    var hasSession: Bool { get }
+    var configuredClientID: String? { get }
+    var hasCachedCatalog: Bool { get }
+
+    func session() async throws -> Account?
+    func signIn(clientID: String) async throws -> Account
+    func signOut() throws
+
+    func list(_ kind: Kind, page: Int) async throws -> Page<ListEntry>
+    func listEntry(_ title: Title) async throws -> ListEntry?
+    func save(_ title: Title, change: ListChange?) async throws -> Fields?
+
+    func catalog(_ path: String, _ query: [URLQueryItem], refresh: Bool) async throws -> Fields
+    func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String]
+    func resolveTitle(_ title: Title) async -> Title?
+    func cachedTitle(_ title: Title) -> Title?
+    func cachedDetail(_ title: Title) -> Fields?
+    func savedDetail(_ title: Title) -> (fields: Fields, savedAt: Date)?
+    func clearCatalogCache()
+
+    func interestStacks(for title: Title, page: Int) async throws -> Page<InterestStack>
+    func stackDetail(_ id: Int) async throws -> StackDetail
+    func titleReviews(_ title: Title, page: Int) async throws -> Page<TitleReview>
+}
+
+@MainActor
+final class API: APIClient {
+    static let callbackScheme = MALCallback.scheme
+    static let redirectURI = MALCallback.url
     private static let mal = URL(string: "https://api.myanimelist.net/v2")!
     private static let oauth = URL(string: "https://myanimelist.net/v1/oauth2")!
     private static let clientIDKey = "aniledger.mal.nativeClientID"
@@ -80,8 +131,11 @@ final class API {
     private let transport = URLSession(configuration: .ephemeral, delegate: MALTransport(), delegateQueue: nil)
     private var privateQueue: Task<Void, Never>?
     private var cached: [URL: (Date, Fields)] = [:]
-    private var catalogRequests: [URL: Task<Fields, Error>] = [:]
+    private var catalogRequests: [URL: Task<(Fields, Data), Error>] = [:]
     private let catalogCacheLimit = 160
+    private static let catalogLifetime: TimeInterval = 300
+    /// User lists and friend activity change while the app is open, so they keep the short lifetime.
+    private static let userLifetime: TimeInterval = 60
     private var titleLookups: [String: Task<Title?, Never>] = [:]
     private var activeTitleLookups = 0
     private var titleLookupWaiters: [CheckedContinuation<Void, Never>] = []
@@ -94,7 +148,7 @@ final class API {
         return parts.url!
     }
 
-    private func request(_ request: URLRequest) async throws -> (Fields, HTTPURLResponse) {
+    private func request(_ request: URLRequest) async throws -> (Fields, Data) {
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw APIError(status: 0, message: "The server did not respond.")
@@ -103,16 +157,17 @@ final class API {
         guard (200..<300).contains(http.statusCode), let fields else {
             throw APIError(status: http.statusCode, message: fields?.string("error") ?? "The request could not be completed.")
         }
-        return (fields, http)
+        return (fields, data)
     }
 
     func catalog(_ path: String, _ query: [URLQueryItem] = [], refresh: Bool = false) async throws -> Fields {
         try Task.checkCancellation()
         let publicUserData = path.hasPrefix("users/")
         let cacheKey = Self.url(publicUserData ? jikan : tenrai, path, query)
-        if !refresh, let (date, result) = cached[cacheKey], Date().timeIntervalSince(date) < 60 { return result }
+        let lifetime = publicUserData ? Self.userLifetime : Self.catalogLifetime
+        if !refresh, let (date, result) = cached[cacheKey], Date().timeIntervalSince(date) < lifetime { return result }
         if let pending = catalogRequests[cacheKey] {
-            let result = try await pending.value
+            let (result, _) = try await pending.value
             try Task.checkCancellation()
             return result
         }
@@ -122,7 +177,8 @@ final class API {
         }
         catalogRequests[cacheKey] = request
         defer { catalogRequests[cacheKey] = nil }
-        let result = try await request.value
+        let (result, data) = try await request.value
+        if Self.isDetailPath(path) { Self.writeDetail(data, path: path) }
         cached[cacheKey] = (.now, result)
         if cached.count > catalogCacheLimit {
             let oldest = cached.sorted { $0.value.0 < $1.value.0 }
@@ -134,11 +190,12 @@ final class API {
         return result
     }
 
-    private func fetchCatalog(_ path: String, _ query: [URLQueryItem], publicUserData: Bool) async throws -> Fields {
+    private func fetchCatalog(_ path: String, _ query: [URLQueryItem],
+                              publicUserData: Bool) async throws -> (Fields, Data) {
         for base in publicUserData ? [jikan] : [tenrai, jikan] {
             do {
                 let url = Self.url(base, path, query)
-                return try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 5 : 10)).0
+                return try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 5 : 10))
             } catch {
                 try Task.checkCancellation()
                 if base == jikan { throw error }
@@ -147,12 +204,94 @@ final class API {
         throw APIError(status: 0, message: "Catalog unavailable.")
     }
 
-    func cachedTitle(_ title: Title) -> Title? {
+    /// Only the bundled `/full` payload is kept: it is the one a title page
+    /// draws, and it also carries the relations, links and theme songs, so a
+    /// page opened without a connection is not left half empty.
+    private static func isDetailPath(_ path: String) -> Bool {
+        path.hasSuffix("/full") && (path.hasPrefix("anime/") || path.hasPrefix("manga/"))
+    }
+
+    private static func detailDirectory() -> URL? {
+        guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        let directory = base.appending(path: "AniLedgerDetailCache", directoryHint: .isDirectory)
+        if !FileManager.default.fileExists(atPath: directory.path) {
+            try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        return directory
+    }
+
+    private static func detailFile(_ path: String) -> URL? {
+        detailDirectory()?.appending(path: path.replacingOccurrences(of: "/", with: "-") + ".json")
+    }
+
+    private static func writeDetail(_ data: Data, path: String) {
+        guard data.count < 2_000_000, let file = detailFile(path) else { return }
+        SnapshotWriter.write(data, to: file)
+    }
+
+    /// The saved `/full` payload for a title page and the time it was written,
+    /// for when the live request fails.
+    func savedDetail(_ title: Title) -> (fields: Fields, savedAt: Date)? {
+        guard let file = Self.detailFile("\(title.kind.rawValue)/\(title.malID)/full"),
+              let data = try? Data(contentsOf: file),
+              let decoded = try? JSONDecoder().decode(Fields.self, from: data),
+              let fields: Fields = decoded.read("data") else { return nil }
+        let written = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate ?? Date()
+        return (fields, written)
+    }
+
+    /// The most recent detail payload for a title, used to paint its page
+    /// before the network answers. `/full` carries the same `data` node.
+    func cachedDetail(_ title: Title) -> Fields? {
         let path = "\(title.kind.rawValue)/\(title.malID)"
-        let key = Self.url(tenrai, path)
-        guard let (date, response) = cached[key], Date().timeIntervalSince(date) < 60,
-              let fields: Fields = response.read("data") else { return nil }
-        return Title(fields, kind: title.kind)
+        for key in [Self.url(tenrai, path), Self.url(tenrai, path + "/full")] {
+            guard let (date, response) = cached[key],
+                  Date().timeIntervalSince(date) < Self.catalogLifetime,
+                  let fields: Fields = response.read("data") else { continue }
+            return fields
+        }
+        return nil
+    }
+
+    func cachedTitle(_ title: Title) -> Title? {
+        cachedDetail(title).flatMap { Title($0, kind: title.kind) }
+    }
+
+    /// Drops decoded catalog responses so Clear Cache also refreshes title pages.
+    func clearCatalogCache() {
+        cached.removeAll()
+        if let directory = Self.detailDirectory() {
+            try? FileManager.default.removeItem(at: directory)
+        }
+    }
+
+    /// Whether a decoded catalog response is still available to title pages.
+    var hasCachedCatalog: Bool { !cached.isEmpty }
+
+    /// English titles for a batch of ids in as few requests as possible.
+    /// Tenrai's `ids` filter answers 50 titles at a time, which replaces a
+    /// detail request per row when a list only carries the original title.
+    func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] {
+        var names: [Int: String] = [:]
+        var remaining = Array(Set(ids.filter { $0 > 0 })).sorted()
+        while !remaining.isEmpty {
+            if Task.isCancelled { return names }
+            let chunk = Array(remaining.prefix(50))
+            remaining.removeFirst(chunk.count)
+            let query = [URLQueryItem(name: "ids", value: chunk.map(String.init).joined(separator: ",")),
+                         URLQueryItem(name: "limit", value: String(chunk.count))]
+            guard let response = try? await catalog(kind.rawValue, query, refresh: false) else { continue }
+            let rows: [Fields] = response.read("data") ?? []
+            for row in rows {
+                guard let id: Int = row.read("mal_id", "malId", "id"),
+                      let name = row.englishTitle else { continue }
+                names[id] = name
+            }
+        }
+        return names
     }
 
     func resolveTitle(_ title: Title) async -> Title? {
@@ -166,7 +305,7 @@ final class API {
 
             if let cached = cachedTitle(title) { return cached }
             let path = "\(title.kind.rawValue)/\(title.malID)"
-            guard let response = try? await catalog(path),
+            guard let response = try? await catalog(path, [], refresh: false),
                   let fields: Fields = response.read("data") else { return nil }
             return Title(fields, kind: title.kind)
         }
@@ -324,14 +463,10 @@ final class API {
             .init(name: "code_challenge", value: verifier), .init(name: "code_challenge_method", value: "plain"),
         ])
         let callback = try await LoginBrowser().authenticate(start, scheme: Self.callbackScheme)
-        let values = URLComponents(url: callback, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        let states = values.filter { $0.name == "state" }
-        let codes = values.filter { $0.name == "code" }
-        guard callback.scheme == Self.callbackScheme, callback.host == "oauth", callback.path.isEmpty,
-              callback.user == nil, callback.password == nil, callback.port == nil, callback.fragment == nil,
-              states.count == 1, states.first?.value == state,
-              codes.count == 1, let code = codes.first?.value, !code.isEmpty else {
-            throw APIError(status: 0, message: "MyAnimeList sign-in did not complete. Check the registered redirect URL and try again.")
+        guard let code = MALCallback.code(from: callback, state: state) else {
+            throw APIError(
+                status: 0,
+                message: "MyAnimeList sign-in did not complete. Check the registered redirect URL and try again.")
         }
         let next = try await exchange([
             "grant_type": "authorization_code", "code": code,
@@ -395,19 +530,6 @@ final class API {
         return Page(items: items, more: paging?.string("next") != nil)
     }
 
-    func suggestions() async throws -> [Title] {
-        let result = try await privateRequest("anime/suggestions", [
-            .init(name: "limit", value: "24"), .init(name: "fields", value: titleFields(.anime)),
-        ])
-        guard let rows: [Fields] = result?.read("data") else {
-            throw APIError(status: 0, message: "MyAnimeList returned invalid suggestions.")
-        }
-        return rows.compactMap { row in
-            guard let node: Fields = row.read("node") else { return nil }
-            return Title(node, kind: .anime)
-        }
-    }
-
     func listEntry(_ title: Title) async throws -> ListEntry? {
         guard let result = try await privateRequest("\(title.kind.rawValue)/\(title.malID)", [
             .init(name: "fields", value: "my_list_status{\(statusFields(title.kind))}"),
@@ -437,6 +559,49 @@ final class API {
             throw APIError(status: 0, message: "MyAnimeList did not confirm the update.")
         }
         return response
+    }
+}
+
+extension API {
+    /// Stacks that contain this title. Tenrai answers 25 per page.
+    func interestStacks(for title: Title, page: Int) async throws -> Page<InterestStack> {
+        let response = try await catalog(
+            "\(title.kind.rawValue)/\(title.malID)/stacks", [URLQueryItem(name: "page", value: String(page))],
+            refresh: false)
+        let rows: [Fields] = response.read("data") ?? []
+        let pagination: Fields? = response.read("pagination")
+        let more: Bool = pagination?.read("has_next_page", "hasNextPage") ?? false
+        return Page(items: unique(rows.compactMap(InterestStack.init)), more: more)
+    }
+
+    func stackDetail(_ id: Int) async throws -> StackDetail {
+        let response = try await catalog("stacks/\(id)", [], refresh: false)
+        guard let detail = StackDetail(response) else {
+            throw APIError(status: 0, message: "This stack could not be read.")
+        }
+        return detail
+    }
+
+    func titleReviews(_ title: Title, page: Int) async throws -> Page<TitleReview> {
+        let path = "\(title.kind.rawValue)/\(title.malID)/reviews"
+        let response = try await catalog(
+            path,
+            [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "spoilers", value: "true"),
+                URLQueryItem(name: "preliminary", value: "true"),
+            ], refresh: false)
+        let data: Fields? = response.read("data")
+        guard let rows: [Fields] = response.read("data") ?? data?.read("reviews", "items") else {
+            throw APIError(status: 0, message: "Could not load reviews.")
+        }
+        let pagination: Fields? = response.read("pagination")
+        let meta: Fields? = response.read("meta")
+        let metaPagination: Fields? = meta?.read("pagination")
+        let hasMore: Bool =
+            pagination?.read("has_next_page", "hasNextPage")
+            ?? metaPagination?.read("hasNextPage", "has_next_page") ?? false
+        return Page(items: unique(rows.compactMap(TitleReview.init)), more: hasMore)
     }
 }
 

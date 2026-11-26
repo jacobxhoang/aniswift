@@ -1,3 +1,4 @@
+import Kingfisher
 import SwiftUI
 
 struct TitleScreen: View {
@@ -5,17 +6,20 @@ struct TitleScreen: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var quickSheetExtra: CGFloat = 32
     let title: Title
-    @State private var record: Fields?
+    @State private var payload: Fields?
     @State private var related: [Title] = []
     @State private var suggested: [Title] = []
-    @State private var episodes: [Fields] = []
     @State private var relationNames: [String: String] = [:]
     @State private var characters: [CastMember] = []
     @State private var themes: Fields?
     @State private var reviews: Page<TitleReview>?
     @State private var reviewsUnavailable = false
-    @State private var external: [TitleExternalLink] = []
+    @State private var stacks: [InterestStack] = []
+    @State private var stacksMore = false
+    @State private var showingPoster = false
+    @State private var summaryExpanded = false
     @State private var failure: String?
+    @State private var savedAt: Date?
     @State private var editor: ListEditor.Mode?
     @State private var confirmRemoval = false
     @State private var changingList = false
@@ -23,51 +27,125 @@ struct TitleScreen: View {
     @State private var friendOffset = 0
     @State private var completedFriendBatches = 0
     @State private var checkingFriends = false
+    /// A title page checks a bounded set of friends: the row is a bonus on the
+    /// page, and every friend can cost a request or two.
+    private static let friendScanLimit = 18
+
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+    @AppStorage(SettingKey.askForScore) private var asksForScore = true
+
+    @AppStorage(SettingKey.detail(.anime, DetailSection.characters)) private var animeCharacters = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.trailer)) private var animeTrailer = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.related)) private var animeRelated = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.source)) private var animeSource = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.openings)) private var animeOpenings = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.endings)) private var animeEndings = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.recommendations)) private var animeRecommendations = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.characters)) private var mangaCharacters = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.related)) private var mangaRelated = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.source)) private var mangaSource = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.recommendations)) private var mangaRecommendations = true
+
+    @AppStorage(SettingKey.detail(.anime, DetailSection.headerPoster)) private var animeHeaderPoster = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.headerScore)) private var animeHeaderScore = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.headerRank)) private var animeHeaderRank = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.headerPopularity)) private var animeHeaderPopularity = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.headerCreators)) private var animeHeaderCreators = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.headerPoster)) private var mangaHeaderPoster = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.headerScore)) private var mangaHeaderScore = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.headerRank)) private var mangaHeaderRank = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.headerPopularity)) private var mangaHeaderPopularity = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.headerCreators)) private var mangaHeaderCreators = true
+
+    @AppStorage(SettingKey.detail(.anime, DetailSection.infoSeries)) private var animeInfoSeries = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.infoAlternatives)) private var animeInfoAlternatives = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.infoGenres)) private var animeInfoGenres = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.infoThemes)) private var animeInfoThemes = true
+    @AppStorage(SettingKey.detail(.anime, DetailSection.infoCreators)) private var animeInfoCreators = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.infoSeries)) private var mangaInfoSeries = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.infoAlternatives)) private var mangaInfoAlternatives = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.infoGenres)) private var mangaInfoGenres = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.infoThemes)) private var mangaInfoThemes = true
+    @AppStorage(SettingKey.detail(.manga, DetailSection.infoCreators)) private var mangaInfoCreators = true
 
     private var current: Title {
         let detail = record.flatMap { Title($0, kind: title.kind) } ?? store.api.cachedTitle(title) ?? title
         return detail.fillingTitleAndImage(from: title).fillingTitleAndImage(from: saved?.title)
     }
 
-    private var displayName: String {
-        if record == nil, failure == nil, current.needsTitleLookup, store.api.cachedTitle(title) == nil {
-            return "Loading title…"
-        }
-        return current.name
+    private var displayName: String { current.displayName(for: titleLanguage) }
+
+    private func chosen(_ anime: Bool, _ manga: Bool) -> Bool { title.kind == .anime ? anime : manga }
+
+    private var showsCharacters: Bool { chosen(animeCharacters, mangaCharacters) }
+    private var showsRelated: Bool { chosen(animeRelated, mangaRelated) }
+    private var showsSource: Bool { chosen(animeSource, mangaSource) }
+    private var showsRecommendations: Bool { chosen(animeRecommendations, mangaRecommendations) }
+    private var showsTrailer: Bool { title.kind == .anime && animeTrailer }
+    private var showsOpenings: Bool { title.kind == .anime && animeOpenings }
+    private var showsEndings: Bool { title.kind == .anime && animeEndings }
+    private var showsHeaderPoster: Bool { chosen(animeHeaderPoster, mangaHeaderPoster) }
+    private var showsHeaderScore: Bool { chosen(animeHeaderScore, mangaHeaderScore) }
+    private var showsHeaderRank: Bool { chosen(animeHeaderRank, mangaHeaderRank) }
+    private var showsHeaderPopularity: Bool { chosen(animeHeaderPopularity, mangaHeaderPopularity) }
+    private var showsHeaderCreators: Bool { chosen(animeHeaderCreators, mangaHeaderCreators) }
+    private var showsSeriesInfo: Bool { chosen(animeInfoSeries, mangaInfoSeries) }
+    private var showsAlternatives: Bool { chosen(animeInfoAlternatives, mangaInfoAlternatives) }
+    private var showsGenres: Bool { chosen(animeInfoGenres, mangaInfoGenres) }
+    private var showsThemes: Bool { chosen(animeInfoThemes, mangaInfoThemes) }
+    private var showsCreators: Bool { chosen(animeInfoCreators, mangaInfoCreators) }
+    private var showsMetadata: Bool {
+        showsSeriesInfo || showsAlternatives || showsGenres || showsThemes || showsCreators
     }
+    /// What the page can draw right now: the fetched payload, or the cached one.
+    /// Reading the cache here means a title you already opened is complete on
+    /// the first frame instead of flashing the skeleton until `.task` runs.
+    private var record: Fields? { payload ?? store.api.cachedDetail(title) }
+
+    /// The page stops scanning when it has checked its share of the friend list.
+    private var friendScanComplete: Bool {
+        friendOffset >= min(store.friends.count, Self.friendScanLimit)
+    }
+
     private var saved: ListEntry? { store.lists[title.kind, default: []].first { $0.id == title.id } }
 
     var body: some View {
         ScrollView {
-            header
-            VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
-                actions
-                if let failure {
-                    Text(failure).foregroundStyle(.secondary)
-                    Button("Reload details") { Task { await load() } }
+            if record == nil, failure == nil {
+                TitleSkeleton(kind: title.kind)
+            } else {
+                header
+                VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
+                    actions
+                    if let savedAt {
+                        SavedDataNote(savedAt: savedAt, retry: { await load() })
+                    }
+                    if let failure {
+                        Text(failure).foregroundStyle(.secondary)
+                        Button("Reload details") { Task { await load() } }
+                    }
+                    if let description = record?.string("synopsis") {
+                        block("Summary") { summary(description) }
+                    }
+                    if showsMetadata { metadata }
+                    if let background = record?.string("background") { block("Background") { Text(background) } }
+                    if showsRelated, !related.isEmpty { relations }
+                    if showsCharacters, !characters.isEmpty { cast }
+                    if showsRecommendations, !suggested.isEmpty { mediaRail("Recommended", titles: suggested) }
+                    if !stacks.isEmpty { interestStacks }
+                    if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
+                    if title.kind == .anime { themeRows }
+                    if !friendRows.isEmpty { friends }
+                    if let reviews, !reviews.items.isEmpty || reviews.more {
+                        reviewRows(reviews)
+                    } else if reviewsUnavailable {
+                        reviewRows(nil)
+                    }
                 }
-                if let description = record?.string("synopsis") {
-                    block("Summary") { Text(description).lineSpacing(4).textSelection(.enabled) }
-                }
-                metadata
-                if let background = record?.string("background") { block("Background") { Text(background) } }
-                if !related.isEmpty { relations }
-                if !characters.isEmpty { cast }
-                if !suggested.isEmpty { mediaRail("Recommended", titles: suggested) }
-                if let trailer = trailerURL { trailerCard(trailer) }
-                if !episodes.isEmpty { episodeRail }
-                if title.kind == .anime { themeRows }
-                if !friendRows.isEmpty { friends }
-                if let reviews, !reviews.items.isEmpty || reviews.more {
-                    reviewRows(reviews)
-                } else if reviewsUnavailable {
-                    reviewRows(nil)
-                }
-                if !external.isEmpty { externalLinks }
+                .padding(LedgerLayout.inset)
+                .frame(maxWidth: 800)
+                .frame(maxWidth: .infinity)
             }
-            .padding(LedgerLayout.inset)
-            .frame(maxWidth: 800)
-            .frame(maxWidth: .infinity)
         }
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle(displayName)
@@ -118,6 +196,11 @@ struct TitleScreen: View {
             Button("Remove", role: .destructive) { updateList(nil) }
             Button("Cancel", role: .cancel) {}
         }
+        .fullScreenCover(isPresented: $showingPoster) {
+            PosterScreen(
+                url: current.image ?? title.image,
+                symbol: title.kind == .anime ? "film" : "book")
+        }
     }
 
     private func editorDetents(_ mode: ListEditor.Mode) -> Set<PresentationDetent> {
@@ -134,10 +217,16 @@ struct TitleScreen: View {
         guard !changingList else { return }
         changingList = true
         let item = current
+        let completedWithoutScore =
+            item.kind == .anime && change?.status == "completed" && (change?.rating ?? 0) == 0
+            && (saved?.rating ?? 0) == 0
         Task {
             defer { changingList = false }
-            do { try await store.change(item, change) }
-            catch { store.handle(error) }
+            do {
+                try await store.change(item, change)
+                Haptics.success()
+                if completedWithoutScore, asksForScore { editor = .score }
+            } catch { store.handle(error) }
         }
     }
 
@@ -155,47 +244,65 @@ struct TitleScreen: View {
 
     private var header: some View {
         VStack(spacing: 12) {
-            Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
-                .frame(width: 144, height: 208)
-                .clipShape(.rect(cornerRadius: 10))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.14))
-                        .allowsHitTesting(false)
+            if showsHeaderPoster {
+                Button { showingPoster = true } label: {
+                    Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
+                        .frame(width: 144, height: 208)
+                        .clipShape(.rect(cornerRadius: 10))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.14))
+                                .allowsHitTesting(false)
+                        }
+                        .contentShape(.rect(cornerRadius: 10))
                 }
-                .padding(.top, 12)
+                .buttonStyle(.plain)
                 .padding(.bottom, 4)
+                .accessibilityLabel("Poster")
+                .accessibilityHint("Shows the poster full screen")
+            }
             Text(displayName)
                 .font(.title2.bold())
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
-            let studios = catalogFacets("studios", category: .studio)
-            let authors = fieldNames("authors").joined(separator: " · ")
-            if title.kind == .anime, !studios.isEmpty {
-                FlowLayout {
-                    ForEach(studios) { studio in
-                        NavigationLink(value: studio) {
-                            Text(studio.name.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+            if showsHeaderCreators {
+                let studios = catalogFacets("studios", category: .studio)
+                let authors = fieldNames("authors").joined(separator: " · ")
+                if title.kind == .anime, !studios.isEmpty {
+                    FlowLayout {
+                        ForEach(studios) { studio in
+                            NavigationLink(value: studio) {
+                                Text(studio.name.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
+                    }
+                } else if title.kind == .manga, !authors.isEmpty {
+                    Text(authors.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                } else if current.original != current.name {
+                    Text(current.original).font(.subheadline).foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                }
+            }
+            if showsHeaderScore || showsHeaderRank || showsHeaderPopularity {
+                HStack(alignment: .top, spacing: 6) {
+                    let score = current.score.flatMap {
+                        $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil
+                    }
+                    let rank: Int? = record?.read("rank")
+                    let popularity: Int? = record?.read("popularity")
+                    if showsHeaderScore { statistic("Average score", score) }
+                    if showsHeaderRank { statistic("MAL rank", rank.flatMap { $0 > 0 ? "#\($0)" : nil }) }
+                    if showsHeaderPopularity {
+                        statistic("Popularity", popularity.flatMap { $0 > 0 ? "#\($0)" : nil })
                     }
                 }
-            } else if title.kind == .manga, !authors.isEmpty {
-                Text(authors.uppercased()).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            } else if current.original != current.name {
-                Text(current.original).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                .frame(maxWidth: 480)
+                .padding(.top, 8)
             }
-            HStack(alignment: .top, spacing: 6) {
-                let score = current.score.flatMap { $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil }
-                let rank: Int? = record?.read("rank")
-                let popularity: Int? = record?.read("popularity")
-                statistic("Average score", score)
-                statistic("MAL rank", rank.flatMap { $0 > 0 ? "#\($0)" : nil })
-                statistic("Popularity", popularity.flatMap { $0 > 0 ? "#\($0)" : nil })
-            }
-            .frame(maxWidth: 480)
-            .padding(.top, 8)
         }
+        .padding(.top, 12)
         .padding(.horizontal, LedgerLayout.inset)
         .frame(maxWidth: .infinity)
     }
@@ -228,12 +335,13 @@ struct TitleScreen: View {
 
     @ViewBuilder
     private func listControls(_ item: ListEntry?) -> some View {
-        let unit = title.kind == .anime ? "ep" : "ch"
+        let unit = title.kind == .anime ? "EP" : "CH"
         let total = (current.total ?? item?.title.total).flatMap { $0 > 0 ? String($0) : nil } ?? "?"
-        editControl("Status", item.map { statusLabel($0.status) } ?? "Add to list", mode: item == nil ? .full : .status)
+        editControl(
+            "Status", item.map { statusLabel($0.status) } ?? "ADD TO LIST", mode: item == nil ? .full : .status)
         editControl("Progress", "\(item.map { String($0.progress) } ?? "—") / \(total) \(unit)", mode: .progress)
         let rating = item?.rating ?? 0
-        editControl("My score", rating > 0 ? "\(rating) / 10" : "Unscored", mode: .score)
+        editControl("My score", rating > 0 ? "\(rating) / 10" : "UNSCORED", mode: .score)
     }
 
     private func editControl(_ label: String, _ value: String, mode: ListEditor.Mode) -> some View {
@@ -263,43 +371,87 @@ struct TitleScreen: View {
         return (record?.read(key) as [String]?) ?? rows.compactMap { $0.string("name") }
     }
 
+    /// A synopsis longer than one paragraph starts collapsed. MAL puts its
+    /// editor's note on a line of its own, so a long summary is the common case
+    /// and should not push the rest of the page below the fold.
+    private func summary(_ text: String) -> some View {
+        let paragraphs = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let rest = Array(paragraphs.dropFirst())
+        return VStack(alignment: .leading, spacing: 10) {
+            Text(paragraphs.first ?? text).lineSpacing(4).textSelection(.enabled)
+            if summaryExpanded {
+                ForEach(Array(rest.enumerated()), id: \.offset) { _, paragraph in
+                    Text(paragraph).lineSpacing(4).textSelection(.enabled)
+                }
+            }
+            if !rest.isEmpty {
+                ShowAllButton(title: summaryExpanded ? "Show less" : "Show more") {
+                    summaryExpanded.toggle()
+                }
+                .accessibilityHint(
+                    summaryExpanded ? "Collapses the summary" : "Shows the rest of the summary")
+            }
+        }
+    }
+
     private var metadata: some View {
         VStack(alignment: .leading, spacing: 20) {
             if let record {
-                block("Series info") {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 134), alignment: .topLeading)],
-                              alignment: .leading, spacing: 14) {
-                        if let format = current.format { infoCell("Type", format) }
-                        if let status = record.string("status") { infoCell("Status", status) }
-                        if let total = current.total, total > 0 { infoCell(title.kind.unit, String(total)) }
-                        if let volumes: Int = record.read("volumes"), volumes > 0 { infoCell("Volumes", String(volumes)) }
-                        if let aired = record.string("aired", "published") ?? (record.read("aired", "published") as Fields?)?.string("string") {
-                            infoCell(title.kind == .anime ? "Aired" : "Published", aired)
+                if showsSeriesInfo {
+                    block("Series info") {
+                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 134), alignment: .topLeading)],
+                                  alignment: .leading, spacing: 14) {
+                            if let format = current.format { infoCell("Type", format) }
+                            if let status = record.string("status") { infoCell("Status", status) }
+                            if let total = current.total, total > 0 { infoCell(title.kind.unit, String(total)) }
+                            if let volumes: Int = record.read("volumes"), volumes > 0 {
+                                infoCell("Volumes", String(volumes))
+                            }
+                            if let aired = record.string("aired", "published")
+                                ?? (record.read("aired", "published") as Fields?)?.string("string")
+                            {
+                                infoCell(title.kind == .anime ? "Aired" : "Published", aired)
+                            }
+                            if let duration = record.string("duration") { infoCell("Runtime", duration) }
+                            if let season = record.string("season") {
+                                let year: Int? = record.read("year")
+                                infoCell(
+                                    "Season",
+                                    [season.capitalized, year.map { String($0) }].compactMap { $0 }
+                                        .joined(separator: " "))
+                            }
+                            if showsSource, let source = record.string("source") {
+                                infoCell("Source", source)
+                            }
+                            if let rating = record.string("rating") { infoCell("Rating", rating) }
+                            if let members = current.members { infoCell("Members", members.formatted()) }
+                            if let favorites: Int = record.read("favorites") {
+                                infoCell("Favorites", favorites.formatted())
+                            }
                         }
-                        if let duration = record.string("duration") { infoCell("Runtime", duration) }
-                        if let season = record.string("season") {
-                            let year: Int? = record.read("year")
-                            infoCell("Season", [season.capitalized, year.map { String($0) }].compactMap { $0 }.joined(separator: " "))
-                        }
-                        if let source = record.string("source") { infoCell("Source", source) }
-                        if let rating = record.string("rating") { infoCell("Rating", rating) }
-                        if let members = current.members { infoCell("Members", members.formatted()) }
-                        if let favorites: Int = record.read("favorites") { infoCell("Favorites", favorites.formatted()) }
                     }
                 }
-                block("Alternative titles") {
-                    if let english = current.englishName { infoCell("English", english) }
-                    infoCell("Romaji", current.original)
-                    if let japanese = record.string("title_japanese", "titleJapanese") { infoCell("Japanese", japanese) }
-                    let aliases: [String] = record.read("title_synonyms", "titleSynonyms") ?? []
-                    if !aliases.isEmpty { infoCell("Also known as", aliases.joined(separator: "\n")) }
+                if showsAlternatives {
+                    block("Alternative titles") {
+                        if let english = current.englishName { infoCell("English", english) }
+                        infoCell("Romaji", current.original)
+                        if let japanese = record.string("title_japanese", "titleJapanese") {
+                            infoCell("Japanese", japanese)
+                        }
+                        let aliases: [String] = record.read("title_synonyms", "titleSynonyms") ?? []
+                        if !aliases.isEmpty { infoCell("Also known as", aliases.joined(separator: "\n")) }
+                    }
                 }
-                facetChips("Themes", catalogFacets("themes", category: .theme))
-                facetChips("Genres", catalogFacets("genres", category: .genre))
+                if showsThemes { facetChips("Themes", catalogFacets("themes", category: .theme)) }
+                if showsGenres { facetChips("Genres", catalogFacets("genres", category: .genre)) }
                 if title.kind == .anime {
-                    facetChips("Studios", catalogFacets("studios", category: .studio))
-                    facetChips("Producers", catalogFacets("producers", category: .producer))
-                } else {
+                    if showsCreators {
+                        facetChips("Studios", catalogFacets("studios", category: .studio))
+                        facetChips("Producers", catalogFacets("producers", category: .producer))
+                    }
+                } else if showsCreators {
                     chips("Serialization", fieldNames("serializations"))
                 }
             }
@@ -361,23 +513,38 @@ struct TitleScreen: View {
 
     private var relations: some View { mediaRail("Relations", titles: related, notes: relationNames) }
 
+    private var interestStacks: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                shelfHeading("Interest Stacks")
+                Spacer(minLength: 8)
+                NavigationLink(value: TitleStacksRoute(title: title, stacks: stacks, more: stacksMore)) {
+                    viewAllLabel("stacks")
+                }
+                .buttonStyle(.plain)
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                ForEach(Array(stacks.prefix(3))) { stack in
+                    NavigationLink(value: StackRoute(stack: stack)) {
+                        StackCard(stack: stack, showsDescription: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(.top, 12)
+        .overlay(alignment: .top) { Divider() }
+    }
+
     private func mediaRail(_ label: String, titles: [Title], notes: [String: String] = [:]) -> some View {
         let items = unique(titles)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 shelfHeading(label)
                 Spacer(minLength: 8)
-                NavigationLink {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 18) {
-                            ForEach(items) { item in shelfCover(item, note: notes[item.id]) }
-                        }
-                        .padding(LedgerLayout.inset)
-                    }
-                    .background(Palette.background.ignoresSafeArea())
-                    .navigationTitle(label)
-                    .navigationBarTitleDisplayMode(.inline)
-                } label: { viewAllLabel(label) }
+                NavigationLink(value: TitleCollectionRoute(label: label, titles: items, notes: notes)) {
+                    viewAllLabel(label)
+                }
                 .buttonStyle(.plain)
             }
             LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
@@ -404,9 +571,9 @@ struct TitleScreen: View {
             HStack {
                 shelfHeading("Characters")
                 Spacer(minLength: 8)
-                NavigationLink {
-                    CharactersScreen(members: characters)
-                } label: { viewAllLabel("characters") }
+                NavigationLink(value: CharactersRoute(members: characters)) {
+                    viewAllLabel("characters")
+                }
                 .buttonStyle(.plain)
             }
             LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
@@ -448,46 +615,35 @@ struct TitleScreen: View {
         }
     }
 
-    private var episodeRail: some View {
-        block("Episodes") {
-            LedgerShelf {
-                ForEach(Array(episodes.enumerated()), id: \.offset) { index, item in
-                    let number: Int = item.read("mal_id", "malId", "episode", "number") ?? index + 1
-                    let name = item.englishTitle ?? item.string("title") ?? item.romajiTitle ?? "Episode \(number)"
-                    let url = publicURL(item.string("url")) ?? title.malURL.appending(path: "episode/\(number)")
-                    Link(destination: url) {
-                        VStack(alignment: .leading, spacing: 7) {
-                            if let image = item.image {
-                                Art(url: image).frame(width: 150, height: 84)
-                                    .clipShape(.rect(cornerRadius: 8))
-                            }
-                            Text("Episode \(number)").font(.caption).foregroundStyle(.secondary)
-                            Text(name).font(.subheadline.weight(.medium)).lineLimit(2)
-                        }
-                        .frame(width: 150, alignment: .leading)
-                        .padding(10)
-                        .background(Palette.surface, in: .rect(cornerRadius: 10))
-                    }.buttonStyle(.plain)
-                }
-            }
-        }
+    private var themeKeys: [String] {
+        var keys: [String] = []
+        if showsOpenings { keys.append("openings") }
+        if showsEndings { keys.append("endings") }
+        return keys
     }
 
+    @ViewBuilder
     private var themeRows: some View {
-        block("Theme songs") {
-            if let themes {
-                ForEach(["openings", "endings"], id: \.self) { key in
-                    Text(key.capitalized).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                    let structured: [Fields] = themes.read(key) ?? []
-                    let names: [String] = themes.read(key) ?? structured.compactMap { song in
-                        guard let name = song.string("title") else { return nil }
-                        if let artist = song.string("artist") { return "\(name) · \(artist)" }
-                        return name
+        if !themeKeys.isEmpty {
+            block("Theme songs") {
+                if let themes {
+                    ForEach(themeKeys, id: \.self) { key in
+                        Text(key.capitalized).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        let structured: [Fields] = themes.read(key) ?? []
+                        let names: [String] = themes.read(key) ?? structured.compactMap { song in
+                            guard let name = song.string("title") else { return nil }
+                            if let artist = song.string("artist") { return "\(name) · \(artist)" }
+                            return name
+                        }
+                        if names.isEmpty { Text("No themes listed.").foregroundStyle(.secondary) }
+                        ForEach(Array(names.enumerated()), id: \.offset) { index, name in
+                            Text("\(index + 1). \(name)")
+                        }
                     }
-                    if names.isEmpty { Text("No themes listed.").foregroundStyle(.secondary) }
-                    ForEach(Array(names.enumerated()), id: \.offset) { index, name in Text("\(index + 1). \(name)") }
+                } else {
+                    Text("Theme information is unavailable.").foregroundStyle(.secondary)
                 }
-            } else { Text("Theme information is unavailable.").foregroundStyle(.secondary) }
+            }
         }
     }
 
@@ -507,7 +663,7 @@ struct TitleScreen: View {
                     .strokeBorder(.white.opacity(0.08))
                     .allowsHitTesting(false)
             }
-            if friendOffset < store.friends.count || checkingFriends {
+            if !friendScanComplete {
                 NextPageIndicator(label: "Checking friends", page: completedFriendBatches) {
                     await loadFriendBatch()
                 }
@@ -520,17 +676,16 @@ struct TitleScreen: View {
             HStack {
                 shelfHeading("Reviews")
                 Spacer()
-                NavigationLink {
-                    TitleReviewsScreen(title: current, firstPage: firstPage)
-                } label: { viewAllLabel("reviews") }
+                NavigationLink(value: TitleReviewsRoute(
+                    title: current, reviews: firstPage?.items, more: firstPage?.more ?? false)) {
+                    viewAllLabel("reviews")
+                }
                 .buttonStyle(.plain)
             }
             if let firstPage, !firstPage.items.isEmpty {
                 LedgerShelf {
                     ForEach(firstPage.items.prefix(3)) { review in
-                        NavigationLink {
-                            TitleReviewReader(title: current, review: review)
-                        } label: {
+                        NavigationLink(value: TitleReviewRoute(title: current, review: review)) {
                             TitleReviewPreview(review: review)
                                 .frame(width: 220, alignment: .leading)
                                 .padding(12)
@@ -545,30 +700,6 @@ struct TitleScreen: View {
         .overlay(alignment: .top) { Divider() }
     }
 
-    private var externalLinks: some View {
-        block("External links") {
-            FlowLayout {
-                ForEach(external) { item in
-                    Link(destination: item.url) {
-                        HStack(spacing: 7) {
-                            item.appearance.icon
-                                .accessibilityHidden(true)
-                            Text(item.name).fixedSize(horizontal: false, vertical: true)
-                        }
-                        .font(.subheadline)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 11)
-                        .padding(.vertical, 6)
-                        .background(item.appearance.fill, in: .capsule)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
     private func block<Content: View>(_ name: String, @ViewBuilder content: () -> Content) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             LedgerSectionTitle(name)
@@ -581,39 +712,45 @@ struct TitleScreen: View {
 
     private func load() async {
         failure = nil
+        // Repaint the shelves from the last payload while the refresh runs. The
+        // page body already reads that payload through `record`.
+        if let cached = store.api.cachedDetail(title) {
+            loadBundledSections(cached)
+        }
         let path = "\(title.kind.rawValue)/\(title.malID)"
-        async let detail = store.api.catalog(path)
-        async let relatedData = store.api.catalog(path + "/relations")
-        async let castData = store.api.catalog(path + "/characters")
+        // `/full` bundles the summary, relations and theme songs, so the page needs
+        // one request instead of four. A section the reader hid from the Details
+        // Page settings is never requested, not just hidden: the settings shape
+        // the fan-out.
+        async let detail = store.api.catalog(path + "/full", [], refresh: false)
         async let reviewData = store.api.titleReviews(title, page: 1)
-        async let links = loadExternalLinks(path)
-        async let songs = loadThemes(path)
-        async let recs = store.api.catalog(path + "/recommendations")
-        async let episodeData = loadEpisodes(path)
+        async let stackData = store.api.interestStacks(for: title, page: 1)
+        async let castData = loadSection(showsCharacters, path + "/characters")
+        async let recsData = loadSection(showsRecommendations, path + "/recommendations")
         do {
             let result = try await detail
-            record = result.read("data")
-            if record == nil { failure = "Title details are unavailable." }
-        } catch { if !Task.isCancelled { failure = error.localizedDescription } }
-        if let result = try? await relatedData {
-            let groups: [Fields] = result.read("data") ?? []
-            var items: [Title] = []
-            var names: [String: String] = [:]
-            for group in groups {
-                let entries: [Fields] = group.read("entry", "entries") ?? [group]
-                for entry in entries {
-                    let type = entry.string("type") ?? "anime"
-                    let kind: Kind = ["manga", "novel", "light novel"].contains(type.lowercased()) ? .manga : .anime
-                    if let item = Title(entry, kind: kind) {
-                        items.append(item)
-                        names[item.id] = group.string("relation") ?? "Related"
-                    }
+            if let full: Fields = result.read("data") {
+                payload = full
+                savedAt = nil
+                loadBundledSections(full)
+            } else if record == nil {
+                failure = "Title details are unavailable."
+            }
+        } catch {
+            // A page opened without a connection falls back to the last payload
+            // written to disk, labelled so an old synopsis is never passed off
+            // as current.
+            if !Task.isCancelled, record == nil {
+                if let saved = store.api.savedDetail(title) {
+                    payload = saved.fields
+                    loadBundledSections(saved.fields)
+                    savedAt = saved.savedAt
+                } else {
+                    failure = error.localizedDescription
                 }
             }
-            relationNames = names
-            related = unique(items)
         }
-        if let result = try? await castData {
+        if let result = await castData {
             let items: [Fields] = result.read("data") ?? []
             let cast = unique(items.compactMap(CastMember.init))
             characters = cast.filter { $0.role?.lowercased() == "main" }
@@ -628,48 +765,42 @@ struct TitleScreen: View {
         } catch {
             if !Task.isCancelled { reviewsUnavailable = true }
         }
-        external = await links
-        if let result = try? await recs {
+        if let result = await recsData {
             suggested = unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }
         }
-        episodes = await episodeData
-        themes = await songs
+        if let page = try? await stackData {
+            stacks = page.items
+            stacksMore = page.more
+        }
     }
 
-    private func loadExternalLinks(_ path: String) async -> [TitleExternalLink] {
-        async let officialLinks = loadLinkRows(path + "/external", key: "externalLinks")
-        async let services = title.kind == .anime
-            ? loadLinkRows(path + "/streaming", key: "streaming") : []
-        let rows = await (officialLinks, services)
-        let websites = rows.0.compactMap { TitleExternalLink($0, streaming: false) }
-        let streaming = rows.1.compactMap { TitleExternalLink($0, streaming: true) }
-        let links = unique(websites + streaming)
-        return links.sorted { $0.priority < $1.priority }
-    }
-
-    private func loadLinkRows(_ path: String, key: String) async -> [Fields] {
-        guard let response = try? await store.api.catalog(path) else { return [] }
-        let data: Fields? = response.read("data")
-        return response.read("data") ?? data?.read(key) ?? []
-    }
-
-    private func loadEpisodes(_ path: String) async -> [Fields] {
-        guard title.kind == .anime,
-              let response = try? await store.api.catalog(path + "/episodes") else { return [] }
-        let rows: [Fields] = response.read("data") ?? []
-        return Array(rows.prefix(12))
-    }
-
-    private func loadThemes(_ path: String) async -> Fields? {
-        guard title.kind == .anime else { return nil }
-        for suffix in ["/themes", "/full"] {
-            if let response = try? await store.api.catalog(path + suffix),
-               let data: Fields = response.read("data") {
-                if let themes: Fields = data.read("themeSongs", "theme") { return themes }
-                if suffix == "/themes" { return data }
+    /// Reads the related titles and theme songs that `/full` returns with the details.
+    private func loadBundledSections(_ detail: Fields) {
+        let groups: [Fields] = detail.read("relations") ?? []
+        var items: [Title] = []
+        var names: [String: String] = [:]
+        for group in groups {
+            let entries: [Fields] = group.read("entry", "entries") ?? [group]
+            for entry in entries {
+                let type = entry.string("type") ?? "anime"
+                let kind: Kind = ["manga", "novel", "light novel"].contains(type.lowercased()) ? .manga : .anime
+                if let item = Title(entry, kind: kind) {
+                    items.append(item)
+                    names[item.id] = group.string("relation") ?? "Related"
+                }
             }
         }
-        return nil
+        relationNames = names
+        related = unique(items)
+
+        if let songs: Fields = detail.read("themeSongs", "theme") { themes = songs }
+    }
+
+    /// A catalog request for a section the reader may have hidden. The hidden
+    /// case answers without touching the network.
+    private func loadSection(_ wanted: Bool, _ path: String) async -> Fields? {
+        guard wanted else { return nil }
+        return try? await store.api.catalog(path, [], refresh: false)
     }
 
     private func loadFriendBatch() async {
@@ -680,45 +811,451 @@ struct TitleScreen: View {
             do { try await store.fetchFriends(user) }
             catch { return }
         }
+        let ledger = store
+        let item = current
+        let limit = min(store.friends.count, Self.friendScanLimit)
+        guard friendOffset < limit else { return }
         repeat {
-            let batch = Array(store.friends.dropFirst(friendOffset).prefix(6))
-            for friend in batch {
-                guard !Task.isCancelled, user == store.account else { return }
-                let row = try? await store.friendEntry(friend, current)
-                guard !Task.isCancelled, user == store.account else { return }
-                if let row {
-                    friendRows = unique(friendRows + [row]).sorted { activityDate($0.date) > activityDate($1.date) }
+            guard friendOffset < limit else { break }
+            let batch = Array(store.friends[friendOffset..<min(friendOffset + 6, limit)])
+            guard !batch.isEmpty else { break }
+            // Look the whole batch up at once: each friend can cost two requests.
+            let found = await withTaskGroup(of: FriendUpdate?.self) { group in
+                for friend in batch {
+                    group.addTask { try? await ledger.friendEntry(friend, item) }
                 }
-                friendOffset += 1
+                var rows: [FriendUpdate] = []
+                for await row in group {
+                    if let row { rows.append(row) }
+                }
+                return rows
             }
-        } while friendRows.isEmpty && friendOffset < store.friends.count
+            guard !Task.isCancelled, user == store.account else { return }
+            friendOffset += batch.count
+            guard !found.isEmpty else { continue }
+            friendRows = unique(friendRows + found).sorted { activityDate($0.date) > activityDate($1.date) }
+        } while friendRows.isEmpty && friendOffset < limit
         completedFriendBatches += 1
     }
 }
 
-private extension API {
-    func titleReviews(_ title: Title, page: Int) async throws -> Page<TitleReview> {
-        let path = "\(title.kind.rawValue)/\(title.malID)/reviews"
-        let response = try await catalog(path, [
-            URLQueryItem(name: "page", value: String(page)),
-            URLQueryItem(name: "spoilers", value: "true"),
-            URLQueryItem(name: "preliminary", value: "true")
-        ])
-        let data: Fields? = response.read("data")
-        guard let rows: [Fields] = response.read("data") ?? data?.read("reviews", "items") else {
-            throw APIError(status: 0, message: "Could not load reviews.")
+/// The poster on its own, filling the screen. Tap to close; pinch to look closer.
+private struct PosterScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let url: URL?
+    let symbol: String
+    @State private var zoom: CGFloat = 1
+    @State private var pinch: CGFloat = 1
+
+    private var scale: CGFloat { min(max(zoom * pinch, 1), 4) }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            KFImage.url(url)
+                .placeholder { placeholder }
+                .onFailureView { placeholder }
+                .resizable()
+                .scaledToFit()
+                .scaleEffect(scale)
+                .animation(reduceMotion ? nil : .snappy(duration: 0.2), value: zoom)
+                .gesture(
+                    MagnifyGesture()
+                        .onChanged { pinch = $0.magnification }
+                        .onEnded { _ in
+                            zoom = scale
+                            pinch = 1
+                        }
+                )
+                .accessibilityLabel("Poster")
         }
-        let pagination: Fields? = response.read("pagination")
-        let meta: Fields? = response.read("meta")
-        let metaPagination: Fields? = meta?.read("pagination")
-        let hasMore: Bool = pagination?.read("has_next_page", "hasNextPage")
-            ?? metaPagination?.read("hasNextPage", "has_next_page") ?? false
-        return Page(items: unique(rows.compactMap(TitleReview.init)), more: hasMore)
+        .overlay(alignment: .topTrailing) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark").font(.body.weight(.semibold))
+                    .padding(12)
+                    .ledgerGlassBadge()
+                    .frame(minWidth: 44, minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Close poster")
+            .padding(12)
+        }
+        .onTapGesture { dismiss() }
+        .statusBarHidden(true)
+    }
+
+    private var placeholder: some View {
+        ZStack {
+            Color.black
+            Image(systemName: symbol).font(.largeTitle).foregroundStyle(.secondary)
+        }
     }
 }
 
-private struct TitleReviewsScreen: View {
+/// The shape of a title page before its payload lands: poster, title, action
+/// pills and a few section blocks. It replaces the partial page that used to
+/// paint itself and then reflow as each request answered.
+private struct TitleSkeleton: View {
+    let kind: Kind
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
+            VStack(spacing: 12) {
+                SkeletonBlock(height: 208, width: 144, radius: 10)
+                SkeletonBlock(height: 22, width: 240)
+                SkeletonBlock(height: 14, width: 150)
+                HStack(spacing: 6) {
+                    ForEach(0..<3, id: \.self) { _ in SkeletonBlock(height: 34) }
+                }
+                .frame(maxWidth: 480)
+                .padding(.top, 8)
+            }
+            .frame(maxWidth: .infinity)
+            HStack(spacing: 8) {
+                ForEach(0..<3, id: \.self) { _ in SkeletonBlock(height: 46, radius: 9) }
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                SkeletonBlock(height: 16, width: 120)
+                ForEach(0..<3, id: \.self) { _ in SkeletonBlock(height: 12) }
+                SkeletonBlock(height: 12, width: 220)
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                SkeletonBlock(height: 16, width: 90)
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(0..<4, id: \.self) { _ in SkeletonBlock(height: 150, radius: 8) }
+                }
+            }
+        }
+        .padding(LedgerLayout.inset)
+        .frame(maxWidth: 800)
+        .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Loading \(kind.rawValue) details")
+    }
+}
+
+private struct StackCard: View {
+    let stack: InterestStack
+    var showsDescription = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(stack.name)
+                .font(.subheadline.weight(.semibold))
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+            if showsDescription, let summary = stack.summary {
+                Text(summary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            StackBadges(stack: stack).font(.caption2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .ledgerPanel(radius: 12)
+        .contentShape(.rect(cornerRadius: 12))
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct StackBadges: View {
+    let stack: InterestStack
+
+    var body: some View {
+        FlowLayout {
+            Text("\(stack.entryCount) \(stack.entryCount == 1 ? "title" : "titles")")
+                .foregroundStyle(.secondary)
+            if stack.isOfficial { pill("Official") }
+            if stack.isChallenge { pill("Challenge") }
+            if stack.isSpoiler { pill("Spoilers") }
+            if stack.restacks > 0 {
+                Label("\(stack.restacks)", systemImage: "arrow.2.squarepath")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel("\(stack.restacks) restacks")
+            }
+        }
+    }
+
+    private func pill(_ text: String) -> some View {
+        Text(text)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(.white.opacity(0.10), in: .capsule)
+    }
+}
+
+/// A full screen of posters for a media rail's "View all" link.
+struct TitleCollectionScreen: View {
+    let route: TitleCollectionRoute
+
+    var body: some View {
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 12)], spacing: 18) {
+                ForEach(route.titles) { title in
+                    VStack(alignment: .leading, spacing: 3) {
+                        CoverTile(
+                            title: title, showsScore: route.showsScore,
+                            loadMissingImage: route.notes[title.id] != nil,
+                            reservesCaptionSpace: false, posterWidth: LedgerLayout.detailPosterWidth)
+                        if let note = route.notes[title.id] {
+                            Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
+                }
+            }
+            .padding(LedgerLayout.inset)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle(route.label)
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One stack with its full description, author, badges and every entry it lists.
+struct StackScreen: View {
     @EnvironmentObject private var store: Store
+    let stack: InterestStack
+    @State private var detail: StackDetail?
+    @State private var failure: String?
+    @State private var loading = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                if let detail {
+                    if detail.entries.isEmpty {
+                        Text("No entries were returned for this stack.").foregroundStyle(.secondary)
+                    } else {
+                        let count = detail.entries.count
+                        if count < stack.entryCount {
+                            Text("Showing \(count) of \(stack.entryCount) titles")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        LazyVStack(alignment: .leading, spacing: 20) {
+                            ForEach(detail.entries) { entry in
+                                StackEntryRow(entry: entry, kind: stack.kind, hidesNote: stack.isSpoiler)
+                            }
+                        }
+                    }
+                } else if loading {
+                    ProgressView().frame(maxWidth: .infinity).padding(.top, 12)
+                } else if let failure {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(failure).foregroundStyle(.secondary)
+                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
+                    }
+                }
+            }
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: 800, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle(stack.name)
+        .navigationBarTitleDisplayMode(.inline)
+        .task { await load() }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(stack.name)
+                .font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 5) {
+                Text("by").foregroundStyle(.secondary)
+                if let authorURL = stack.authorURL {
+                    Link(stack.author, destination: authorURL)
+                } else {
+                    Text(stack.author)
+                }
+            }
+            .font(.subheadline)
+            StackBadges(stack: stack).font(.caption)
+            if let summary = stack.summary {
+                Text(summary)
+                    .lineSpacing(4)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let created = stack.created {
+                Text(created.formatted(.dateTime.month(.abbreviated).day().year()))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func load() async {
+        guard !loading else { return }
+        loading = true
+        failure = nil
+        defer { loading = false }
+        do {
+            detail = try await store.api.stackDetail(stack.id)
+        } catch {
+            if !Task.isCancelled { failure = error.localizedDescription }
+        }
+    }
+}
+
+/// One title in a stack: poster on the left, the title and its facts on the
+/// right, and the stack author's note underneath. A stack flagged as spoilers
+/// keeps that note behind a tap, the same way the review reader hides spoilers.
+private struct StackEntryRow: View {
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+    let entry: StackEntry
+    let kind: Kind
+    let hidesNote: Bool
+    @State private var revealed = false
+
+    private var note: String? {
+        guard let note = entry.note, !note.isEmpty else { return nil }
+        return note
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            NavigationLink(value: entry.title) { card }.buttonStyle(.plain)
+            if let note {
+                if hidesNote && !revealed {
+                    Button("Reveal note") { revealed = true }
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .buttonStyle(.borderless)
+                        .accessibilityHint("Shows the stack author's note for this title")
+                } else {
+                    Text(note)
+                        .font(.subheadline)
+                        .lineLimit(6)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private var card: some View {
+        HStack(alignment: .top, spacing: 14) {
+            PosterArt(url: entry.title.image, symbol: kind == .anime ? "film" : "book", width: posterWidth)
+                .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                .overlay(alignment: .topLeading) {
+                    if entry.position > 0 {
+                        Text(String(entry.position))
+                            .font(.caption2.monospacedDigit())
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.black.opacity(0.6), in: .rect(cornerRadius: 4))
+                            .padding(4)
+                    }
+                }
+            VStack(alignment: .leading, spacing: 8) {
+                Text(entry.title.displayName(for: titleLanguage))
+                    .font(.headline)
+                    .foregroundStyle(.tint)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(facts)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, minHeight: posterWidth / LedgerLayout.posterRatio, alignment: .topLeading)
+        }
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+    }
+
+    private var posterWidth: CGFloat { 96 }
+
+    private var facts: String {
+        var parts = [entry.title.kind.label]
+        if let total = entry.title.total {
+            parts.append("\(total) \(entry.title.kind == .anime ? "ep" : "ch")")
+        }
+        if let year = entry.title.releaseYear {
+            parts.append(String(year))
+        }
+        if let score = entry.score {
+            parts.append("\(score)/10")
+        }
+        return parts.joined(separator: ", ")
+    }
+}
+
+/// Every stack that lists this title, with the first page handed over from the
+/// title page so opening it does not repeat the request.
+struct TitleStacksScreen: View {
+    @EnvironmentObject private var store: Store
+    let title: Title
+    @State private var stacks: [InterestStack]
+    @State private var nextPage: Int?
+    @State private var loadingPage: Int?
+    @State private var failed = false
+
+    init(title: Title, firstPage: Page<InterestStack>? = nil) {
+        self.title = title
+        _stacks = State(initialValue: firstPage?.items ?? [])
+        let more = firstPage?.more ?? false
+        _nextPage = State(initialValue: firstPage == nil ? 1 : (more ? 2 : nil))
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 10) {
+                ForEach(stacks) { stack in
+                    NavigationLink(value: StackRoute(stack: stack)) {
+                        StackCard(stack: stack, showsDescription: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+                if let nextPage {
+                    if failed {
+                        VStack(spacing: 8) {
+                            Text("Could not load more stacks.").foregroundStyle(.secondary)
+                            Button("Retry") { Task { await load(nextPage) } }.ledgerGlassButton()
+                        }
+                        .frame(maxWidth: .infinity)
+                    } else {
+                        NextPageIndicator(label: "Loading more stacks", page: nextPage) {
+                            await load(nextPage)
+                        }
+                    }
+                }
+            }
+            .padding(LedgerLayout.inset)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Interest Stacks")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func load(_ page: Int) async {
+        guard loadingPage == nil else { return }
+        loadingPage = page
+        defer { loadingPage = nil }
+        do {
+            let result = try await store.api.interestStacks(for: title, page: page)
+            guard !Task.isCancelled else { return }
+            stacks = unique(stacks + result.items)
+            nextPage = result.more ? page + 1 : nil
+            failed = false
+        } catch {
+            // Keep the page indicator so the retry can ask for the same page again.
+            if !Task.isCancelled { failed = true }
+        }
+    }
+}
+
+struct TitleReviewsScreen: View {
+    @EnvironmentObject private var store: Store
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let title: Title
     @State private var reviews: [TitleReview]
     @State private var nextPage: Int?
@@ -735,13 +1272,11 @@ private struct TitleReviewsScreen: View {
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 0) {
-                Text(title.name).font(.title3.weight(.semibold))
+                Text(title.displayName(for: titleLanguage)).font(.title3.weight(.semibold))
                     .padding(.bottom, 8)
                     .accessibilityAddTraits(.isHeader)
                 ForEach(reviews) { review in
-                    NavigationLink {
-                        TitleReviewReader(title: title, review: review)
-                    } label: {
+                    NavigationLink(value: TitleReviewRoute(title: title, review: review)) {
                         HStack(spacing: 12) {
                             TitleReviewPreview(review: review)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -821,7 +1356,8 @@ private struct TitleReviewPreview: View {
     }
 }
 
-private struct TitleReviewReader: View {
+struct TitleReviewReader: View {
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let title: Title
     let review: TitleReview
     @State private var revealed = false
@@ -833,7 +1369,7 @@ private struct TitleReviewReader: View {
                     PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book", width: 74)
                         .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(title.name).font(.title3.weight(.semibold))
+                        Text(title.displayName(for: titleLanguage)).font(.title3.weight(.semibold))
                             .accessibilityAddTraits(.isHeader)
                         Text("Reviewed by \(Text(review.author).bold())")
                             .font(.subheadline).foregroundStyle(.secondary)
@@ -939,119 +1475,6 @@ private struct TitleFriendActivityRow: View {
     }
 }
 
-private struct TitleExternalLink: Identifiable {
-    enum Mark {
-        case asset(String)
-        case symbol(String)
-        case monogram(String)
-    }
-
-    struct Appearance {
-        let mark: Mark
-        var fill = Palette.surface
-        var priority = 3
-
-        @ViewBuilder
-        var icon: some View {
-            switch mark {
-            case .asset(let name):
-                Image("External-\(name)")
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 15, height: 15)
-            case .symbol(let symbol):
-                Image(systemName: symbol).font(.subheadline.weight(.semibold))
-            case .monogram(let text):
-                Text(text).font(.caption2.weight(.heavy))
-                    .padding(.horizontal, 3)
-                    .padding(.vertical, 1)
-                    .background(.white.opacity(0.17), in: .rect(cornerRadius: 3))
-            }
-        }
-    }
-
-    private struct Provider {
-        let appearance: Appearance
-        let domains: [String]
-        let names: [String]
-
-        init(_ mark: Mark, domains: [String] = [], names: [String] = [],
-             fill: Color = Palette.surface, priority: Int = 3) {
-            appearance = Appearance(mark: mark, fill: fill, priority: priority)
-            self.domains = domains
-            self.names = names
-        }
-
-        func matches(host: String) -> Bool {
-            domains.contains { host == $0 || host.hasSuffix("." + $0) }
-        }
-    }
-
-    private static let providers: [Provider] = [
-        Provider(.asset("x"), domains: ["x.com", "twitter.com"], names: ["X", "Twitter", "Twitter JP", "X JP"],
-                 fill: .clear, priority: 1),
-        Provider(.asset("crunchyroll"), domains: ["crunchyroll.com"], names: ["Crunchyroll"],
-                 fill: Color(red: 0.53, green: 0.27, blue: 0.07), priority: 2),
-        Provider(.asset("netflix"), domains: ["netflix.com"], names: ["Netflix"],
-                 fill: Color(red: 0.55, green: 0.04, blue: 0.07), priority: 2),
-        Provider(.monogram("HD"), domains: ["hidive.com"], names: ["HIDIVE"],
-                 fill: Color(red: 0.10, green: 0.32, blue: 0.43), priority: 2),
-        Provider(.symbol("play.rectangle.fill"), domains: ["primevideo.com"],
-                 names: ["Amazon Prime Video", "Prime Video", "Amazon Prime"],
-                 fill: Color(red: 0.10, green: 0.29, blue: 0.44), priority: 2),
-        Provider(.monogram("h"), domains: ["hulu.com", "hulu.jp"], names: ["Hulu"],
-                 fill: Color(red: 0.10, green: 0.33, blue: 0.24), priority: 2),
-        Provider(.asset("youtube"), domains: ["youtube.com", "youtu.be"], names: ["YouTube"],
-                 fill: Color(red: 0.46, green: 0.13, blue: 0.14)),
-        Provider(.asset("bilibili"), domains: ["bilibili.com", "bilibili.tv"], names: ["Bilibili", "Bilibili TV"]),
-        Provider(.asset("niconico"), domains: ["nicovideo.jp"], names: ["Niconico", "Nico Nico"]),
-        Provider(.monogram("FOD"), domains: ["fod.fujitv.co.jp"], names: ["FOD"]),
-        Provider(.monogram("W"), domains: ["watcha.com"], names: ["Watcha"]),
-        Provider(.monogram("C+"), domains: ["catchplay.com"], names: ["Catchplay", "Catchplay Plus"]),
-        Provider(.monogram("F"), domains: ["athome.fandango.com", "vudu.com"], names: ["Fandango At Home", "Vudu"]),
-        Provider(.monogram("B"), domains: ["gamer.com.tw"], names: ["Bahamut Anime Crazy", "Bahamut"]),
-        Provider(.monogram("L"), domains: ["laftel.net"], names: ["Laftel"]),
-        Provider(.monogram("A+"), domains: ["aniplus-asia.com"], names: ["Aniplus Asia", "Aniplus"]),
-        Provider(.monogram("AV"), domains: ["aniverse.com"], names: ["Aniverse"]),
-        Provider(.monogram("AG"), names: ["Anime Generation"]),
-        Provider(.asset("wikipedia"), domains: ["wikipedia.org"], names: ["Wikipedia", "Wikipedia JP"]),
-        Provider(.symbol("books.vertical.fill"), domains: ["anidb.net"], names: ["AniDB"]),
-        Provider(.symbol("newspaper.fill"), domains: ["animenewsnetwork.com"], names: ["ANN", "Anime News Network"]),
-        Provider(.symbol("calendar"), domains: ["cal.syoboi.jp"], names: ["Syoboi"]),
-        Provider(.asset("anilist"), domains: ["anilist.co"], names: ["AniList"]),
-        Provider(.asset("myanimelist"), domains: ["myanimelist.net"], names: ["MyAnimeList"]),
-        Provider(.asset("instagram"), domains: ["instagram.com"], names: ["Instagram"]),
-        Provider(.asset("facebook"), domains: ["facebook.com", "fb.com"], names: ["Facebook"]),
-        Provider(.asset("tiktok"), domains: ["tiktok.com"], names: ["TikTok"])
-    ]
-
-    let name: String
-    let url: URL
-    let appearance: Appearance
-    var id: URL { url }
-
-    var priority: Int {
-        name.lowercased().hasPrefix("official") ? 0 : appearance.priority
-    }
-
-    init?(_ fields: Fields, streaming: Bool) {
-        guard let name = fields.string("name"), let url = publicURL(fields.string("url")),
-              let host = url.host()?.lowercased() else { return nil }
-        self.name = name
-        self.url = url
-        let key = Self.nameKey(name)
-        let provider = Self.providers.first { $0.matches(host: host) }
-            ?? Self.providers.first { $0.names.contains { Self.nameKey($0) == key } }
-        appearance = provider?.appearance
-            ?? Appearance(mark: .symbol(streaming ? "play.rectangle" : "globe"))
-    }
-
-    private static func nameKey(_ name: String) -> String {
-        name.lowercased().filter { $0.isLetter || $0.isNumber }
-    }
-}
-
 struct FlowLayout: Layout {
     private let spacing: CGFloat = 7
 
@@ -1114,6 +1537,9 @@ struct ListEditor: View {
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var error: String?
+    @AppStorage(SettingKey.askForScore) private var asksForScore = true
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+    @State private var askingForScore = false
 
     init(title: Title, original: ListEntry?, mode: Mode = .full) {
         self.title = title
@@ -1163,10 +1589,11 @@ struct ListEditor: View {
         NavigationStack {
             Group {
                 if !ready { preparation }
+                else if askingForScore { scorePrompt }
                 else if mode == .full { fullEditor }
                 else { quickEditor }
             }
-            .navigationTitle(heading)
+            .navigationTitle(askingForScore ? "My score" : heading)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -1227,7 +1654,11 @@ struct ListEditor: View {
                 dateRow("Finish Date", value: $details.finishDate)
             }
             Section("Notes") {
-                TextField("Add notes for \(title.name)", text: $details.notes, axis: .vertical)
+                TextField(
+                    "Add notes for \(title.displayName(for: titleLanguage))",
+                    text: $details.notes,
+                    axis: .vertical
+                )
                     .lineLimit(4...10)
                 if details.notes.utf8.count > 4000 {
                     Text("Notes are too long.").foregroundStyle(.secondary)
@@ -1261,6 +1692,8 @@ struct ListEditor: View {
         }
         .scrollContentBackground(.hidden)
         .disabled(busy)
+        .sensoryFeedback(.selection, trigger: selectedLists)
+        .sensoryFeedback(.selection, trigger: hidden)
     }
 
     private func numberRow(_ label: String, value: Binding<Int>, range: ClosedRange<Int>) -> some View {
@@ -1273,6 +1706,7 @@ struct ListEditor: View {
                     .frame(minWidth: 50)
             }
         }
+        .sensoryFeedback(.selection, trigger: value.wrappedValue)
     }
 
     @ViewBuilder
@@ -1348,6 +1782,7 @@ struct ListEditor: View {
         Picker("Status", selection: $change.status) {
             ForEach(title.kind.statuses, id: \.self) { Text(statusLabel($0)).tag($0) }
         }
+        .sensoryFeedback(.selection, trigger: change.status)
     }
 
     private var quickEditor: some View {
@@ -1394,6 +1829,30 @@ struct ListEditor: View {
         }
     }
 
+    private var scorePrompt: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: "star.circle.fill")
+                    .font(.system(size: 46))
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+                Text("How was \(title.displayName(for: titleLanguage))?")
+                    .font(.headline).multilineTextAlignment(.center)
+                Text("Your entry is saved as completed. Add a score if you want.")
+                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                counter($change.rating, maximum: 10, label: "Score", zeroLabel: "—")
+                HStack(spacing: 12) {
+                    Button("Not now") { dismiss() }.ledgerGlassButton()
+                    Button("Save score") { submit(change) }.ledgerProminentButton()
+                        .disabled(busy || change.rating == 0)
+                }
+            }
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: 420)
+            .frame(maxWidth: .infinity)
+        }
+    }
+
     private func counter(_ value: Binding<Int>, maximum: Int, label: String, zeroLabel: String = "0") -> some View {
         HStack(spacing: 14) {
             Button { value.wrappedValue -= 1 } label: {
@@ -1417,6 +1876,7 @@ struct ListEditor: View {
             .accessibilityLabel("Increase \(label.lowercased())")
             .disabled(value.wrappedValue >= maximum || busy)
         }
+        .sensoryFeedback(.selection, trigger: value.wrappedValue)
     }
 
     private func submit(_ value: ListChange?) {
@@ -1426,6 +1886,9 @@ struct ListEditor: View {
         let shouldOrganize = value != nil && mode == .full && organizationChanged
         var update = value
         if mode == .full { update?.details = details.changes(from: original?.details ?? ListDetails()) }
+        let asksNow =
+            !askingForScore && asksForScore && mode != .score && title.kind == .anime
+            && original?.status != "completed" && update?.status == "completed" && update?.rating == 0
         busy = true
         Task {
             defer { busy = false }
@@ -1434,9 +1897,14 @@ struct ListEditor: View {
                 if shouldOrganize {
                     store.organize(title, lists: selectedLists, adding: newLists, hidden: hidden, accountID: accountID)
                 }
+                Haptics.success()
+                if asksNow {
+                    askingForScore = true
+                    return
+                }
                 dismiss()
             } catch {
-                if (error as? APIError)?.status == 401 { store.handle(error) }
+                if (error as? APIError)?.status == 401 { store.handle(error) } else { Haptics.error() }
                 self.error = error.localizedDescription
             }
         }

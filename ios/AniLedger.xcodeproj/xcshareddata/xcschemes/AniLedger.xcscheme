@@ -5,6 +5,9 @@
          <BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
             <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000007" BuildableName="AniLedger.app" BlueprintName="AniLedger" ReferencedContainer="container:AniLedger.xcodeproj"/>
          </BuildActionEntry>
+         <BuildActionEntry buildForTesting="YES" buildForRunning="NO" buildForProfiling="NO" buildForArchiving="NO" buildForAnalyzing="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000058" BuildableName="AniLedgerTests.xctest" BlueprintName="AniLedgerTests" ReferencedContainer="container:AniLedger.xcodeproj"/>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <LaunchAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" launchStyle="0" useCustomWorkingDirectory="NO" ignoresPersistentStateOnLaunch="NO" debugDocumentVersioning="YES" allowLocationSimulation="YES">
@@ -12,5 +15,12 @@
          <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000007" BuildableName="AniLedger.app" BlueprintName="AniLedger" ReferencedContainer="container:AniLedger.xcodeproj"/>
       </BuildableProductRunnable>
    </LaunchAction>
+   <TestAction buildConfiguration="Debug" selectedDebuggerIdentifier="Xcode.DebuggerFoundation.Debugger.LLDB" selectedLauncherIdentifier="Xcode.DebuggerFoundation.Launcher.LLDB" shouldUseLaunchSchemeArgsEnv="YES">
+      <Testables>
+         <TestableReference skipped="NO">
+            <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="A00000000000000000000058" BuildableName="AniLedgerTests.xctest" BlueprintName="AniLedgerTests" ReferencedContainer="container:AniLedger.xcodeproj"/>
+         </TestableReference>
+      </Testables>
+   </TestAction>
    <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="YES"/>
 </Scheme>

@@ -1,49 +1,112 @@
 import AuthenticationServices
 import Kingfisher
 import SwiftUI
+import UIKit
 
 @main
 @MainActor
 struct AniLedgerApp: App {
     @StateObject private var store = Store()
+    @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
+    @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
+    @AppStorage(SettingKey.lastTab) private var lastTab = "anime"
+    @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
+    @State private var tab: String
+
+    /// The tabs this build has, and the only values a stored preference may
+    /// select. An identifier written by an older build would otherwise restore a
+    /// tab that no longer exists and leave the tab view with nothing selected.
+    private static let tabIdentifiers: Set<String> = ["anime", "manga", "discover", "feed", "profile"]
+
+    init() {
+        let defaults = UserDefaults.standard
+        let startsOnPreferred = defaults.object(forKey: SettingKey.preferredLaunch) as? Bool ?? false
+        let stored =
+            startsOnPreferred
+            ? defaults.string(forKey: SettingKey.launchTab) ?? "anime"
+            : defaults.string(forKey: SettingKey.lastTab) ?? "anime"
+        _tab = State(initialValue: Self.tabIdentifiers.contains(stored) ? stored : "anime")
+        // Posters and avatars are reused across scrolling and back navigation, so
+        // keep them longer than Kingfisher's one-week disk default.
+        let images = ImageCache.default
+        images.memoryStorage.config.expiration = .seconds(3600)
+        images.diskStorage.config.expiration = .days(30)
+        images.diskStorage.config.sizeLimit = 500 * 1024 * 1024
+    }
+
+    private var accentColor: Color {
+        (AccentChoice(rawValue: accent) ?? .white).color
+    }
 
     var body: some Scene {
         WindowGroup {
             rootTabs
-            .tint(Palette.accent)
-            .preferredColorScheme(.dark)
-            .environmentObject(store)
-            .task { await store.restore() }
-            .alert("AniLedger", isPresented: Binding(
-                get: { store.message != nil }, set: { if !$0 { store.message = nil } }
-            )) { Button("OK", role: .cancel) {} }
-            message: { Text(store.message ?? "") }
+                .onChange(of: tab) { _, value in lastTab = value }
+                .sensoryFeedback(.selection, trigger: tab)
+                .tint(accentColor)
+                .preferredColorScheme(.dark)
+                .environment(
+                    \.openURL,
+                    OpenURLAction { url in
+                        guard openLinksInApp, let scheme = url.scheme,
+                            ["http", "https"].contains(scheme)
+                        else { return .systemAction }
+                        return InAppBrowser.present(url) ? .handled : .systemAction
+                    }
+                )
+                .environmentObject(store)
+                .task { await store.restore() }
+                .alert(
+                    "AniLedger",
+                    isPresented: Binding(
+                        get: { store.message != nil }, set: { if !$0 { store.message = nil } }
+                    )
+                ) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text(store.message ?? "")
+                }
         }
     }
 
     @ViewBuilder
     private var rootTabs: some View {
         if #available(iOS 26.0, *) {
-            TabView {
-                Tab("Anime", systemImage: "tv") { stack { ListsScreen(kind: .anime) } }
-                Tab("Manga", systemImage: "books.vertical") { stack { ListsScreen(kind: .manga) } }
-                Tab("Discover", systemImage: "safari") { stack { DiscoverScreen() } }
-                Tab("Feed", systemImage: "person.2") { stack { FriendsScreen() } }
-                Tab("Profile", systemImage: "person.crop.circle") { stack { AccountScreen() } }
+            TabView(selection: $tab) {
+                Tab("Anime", systemImage: "tv", value: "anime") {
+                    stack { ListsScreen(kind: .anime) }
+                }
+                Tab("Manga", systemImage: "books.vertical", value: "manga") {
+                    stack { ListsScreen(kind: .manga) }
+                }
+                Tab("Discover", systemImage: "safari", value: "discover") {
+                    stack { DiscoverScreen() }
+                }
+                Tab("Feed", systemImage: "person.2", value: "feed") {
+                    stack { FriendsScreen() }
+                }
+                Tab("Profile", systemImage: "person.crop.circle", value: "profile") {
+                    stack { AccountScreen() }
+                }
             }
-            .tabBarMinimizeBehavior(.never)
+            .tabBarMinimizeBehavior(tabBarBehavior == "onScrollDown" ? .onScrollDown : .never)
         } else {
-            TabView {
+            TabView(selection: $tab) {
                 stack { ListsScreen(kind: .anime) }
                     .tabItem { Label("Anime", systemImage: "tv") }
+                    .tag("anime")
                 stack { ListsScreen(kind: .manga) }
                     .tabItem { Label("Manga", systemImage: "books.vertical") }
+                    .tag("manga")
                 stack { DiscoverScreen() }
                     .tabItem { Label("Discover", systemImage: "safari") }
+                    .tag("discover")
                 stack { FriendsScreen() }
                     .tabItem { Label("Feed", systemImage: "person.2") }
+                    .tag("feed")
                 stack { AccountScreen() }
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
+                    .tag("profile")
             }
         }
     }
@@ -54,8 +117,90 @@ struct AniLedgerApp: App {
                 .navigationDestination(for: Title.self) { TitleScreen(title: $0) }
                 .navigationDestination(for: Friend.self) { FriendProfileScreen(friend: $0) }
                 .navigationDestination(for: CharacterReference.self) { CharacterScreen(character: $0) }
+                .navigationDestination(for: PersonReference.self) { PersonScreen(person: $0) }
                 .navigationDestination(for: CatalogFacet.self) { CatalogFacetScreen(facet: $0) }
+                .navigationDestination(for: StackRoute.self) { StackScreen(stack: $0.stack) }
+                .navigationDestination(for: TitleStacksRoute.self) { route in
+                    TitleStacksScreen(
+                        title: route.title, firstPage: Page(items: route.stacks, more: route.more))
+                }
+                .navigationDestination(for: TitleCollectionRoute.self) { TitleCollectionScreen(route: $0) }
+                .navigationDestination(for: CharactersRoute.self) { CharactersScreen(members: $0.members) }
+                .navigationDestination(for: TitleReviewsRoute.self) { route in
+                    TitleReviewsScreen(
+                        title: route.title,
+                        firstPage: route.reviews.map { Page(items: $0, more: route.more) })
+                }
+                .navigationDestination(for: TitleReviewRoute.self) {
+                    TitleReviewReader(title: $0.title, review: $0.review)
+                }
+                .navigationDestination(for: FriendMediaRoute.self) {
+                    FriendMediaListScreen(friend: $0.friend, kind: $0.kind)
+                }
+                .navigationDestination(for: CatalogBrowserRoute.self) { _ in CatalogBrowser() }
+                .navigationDestination(for: CatalogResultsRoute.self) { route in
+                    PosterResults(name: route.name, shelf: route.shelf, query: route.query, kind: route.kind)
+                        .navigationTitle(route.name)
+                }
+                .navigationDestination(for: CustomListsRoute.self) { _ in
+                    List(store.organization.lists) { collection in
+                        NavigationLink(value: CustomListRoute(list: collection)) {
+                            LabeledContent(collection.name, value: collection.titles.count.formatted())
+                        }
+                        .listRowBackground(Color.clear)
+                    }
+                    .scrollContentBackground(.hidden)
+                    .background(Palette.background)
+                    .navigationTitle("Custom Lists")
+                }
+                .navigationDestination(for: CustomListRoute.self) { route in
+                    List(route.list.titles) { title in
+                        NavigationLink(value: title) { TitleRow(title: title, note: title.kind.label) }
+                            .listRowBackground(Color.clear)
+                    }
+                    .overlay {
+                        if route.list.titles.isEmpty {
+                            ContentUnavailableView("No titles in this list", systemImage: "list.bullet")
+                        }
+                    }
+                    .scrollContentBackground(.hidden)
+                    .background(Palette.background)
+                    .navigationTitle(route.list.name)
+                }
         }
+    }
+}
+
+/// Tactile feedback for the moments a screen finishes something: a save that
+/// reached MyAnimeList, a request that failed. State-driven feedback (pickers,
+/// toggles, steppers) uses `.sensoryFeedback` at the control instead.
+@MainActor
+enum Haptics {
+    static func success() {
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+
+    static func error() {
+        UINotificationFeedbackGenerator().notificationOccurred(.error)
+    }
+}
+
+/// A quiet placeholder block for content that has not arrived yet, so a screen
+/// can be drawn once instead of assembling itself in front of the reader.
+struct SkeletonBlock: View {
+    var height: CGFloat = 14
+    var width: CGFloat?
+    var radius: CGFloat = 6
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pulse = false
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: radius, style: .continuous)
+            .fill(Color.white.opacity(pulse ? 0.13 : 0.06))
+            .frame(width: width, height: height)
+            .animation(reduceMotion ? nil : .easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
+            .accessibilityHidden(true)
     }
 }
 
@@ -63,14 +208,14 @@ enum Palette {
     static let background: Color = .black
     static let surface = Color(white: 0.12)
     static let sheet = Color(white: 0.08)
-    static let accent: Color = .white
     static let glow = Color(white: 0.16)
 
     static var canvas: some View {
         ZStack {
             background
-            RadialGradient(colors: [glow.opacity(0.8), background], center: .topTrailing,
-                           startRadius: 0, endRadius: 570)
+            RadialGradient(
+                colors: [glow.opacity(0.8), background], center: .topTrailing,
+                startRadius: 0, endRadius: 570)
         }
         .ignoresSafeArea()
     }
@@ -115,6 +260,55 @@ struct LedgerSectionTitle: View {
         Text(title)
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Shown while a screen keeps a saved snapshot on screen because the public
+/// data provider failed or served a stale copy.
+struct SavedDataNote: View {
+    let savedAt: Date?
+    var message: String? = nil
+    var isBusy = false
+    var retry: (() async -> Void)? = nil
+
+    private var text: String {
+        var parts = ["Showing saved data"]
+        if let message, !message.isEmpty { parts.append(message) }
+        if let savedAt {
+            let formatter = RelativeDateTimeFormatter()
+            formatter.unitsStyle = .full
+            parts.append("Updated \(formatter.localizedString(for: savedAt, relativeTo: Date()))")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "clock.arrow.circlepath")
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.secondary)
+            Spacer(minLength: 8)
+            if let retry {
+                Button("Retry") { Task { await retry() } }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .disabled(isBusy)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 10))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(0.08))
+                .allowsHitTesting(false)
+        }
     }
 }
 
@@ -171,6 +365,7 @@ private struct LedgerPrimaryButtonStyle: ButtonStyle {
 
 struct Art: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.displayScale) private var displayScale
     let url: URL?
     var symbol = "film"
 
@@ -180,13 +375,26 @@ struct Art: View {
                 .placeholder { placeholder }
                 .onFailureView { placeholder }
                 .cancelOnDisappear(true)
+                .setProcessor(processor(proxy.size))
                 .fade(duration: reduceMotion ? 0 : 0.18)
                 .resizable()
                 .scaledToFill()
-            .frame(width: proxy.size.width, height: proxy.size.height)
-            .clipped()
+                .frame(width: proxy.size.width, height: proxy.size.height)
+                .clipped()
         }
         .accessibilityHidden(true)
+    }
+
+    /// Decode to the size the image is drawn at: a full poster is several times
+    /// larger than a tile and costs memory on every row. Before the first layout
+    /// pass reports a real size, fall back to the unprocessed image.
+    private func processor(_ size: CGSize) -> ImageProcessor {
+        let scale = max(displayScale, 1)
+        let pixels = CGSize(
+            width: (size.width * scale).rounded(.up),
+            height: (size.height * scale).rounded(.up))
+        guard pixels.width >= 16, pixels.height >= 16 else { return DefaultImageProcessor.default }
+        return DownsamplingImageProcessor(size: pixels)
     }
 
     private var placeholder: some View {
@@ -197,10 +405,32 @@ struct Art: View {
     }
 }
 
+extension View {
+    /// Warms the posters a scrolling list is about to show. Keyed on the ids of the
+    /// first rows, so a refresh that swaps rows without changing the count still
+    /// prefetches the new art.
+    func prefetchingPosters<T: Identifiable>(
+        _ items: [T], limit: Int = 30,
+        url: (T) -> URL?
+    ) -> some View {
+        let upcoming = Array(items.prefix(limit))
+        let ids = upcoming.map { "\($0.id)" }
+        let urls = upcoming.compactMap(url)
+        return task(id: ids) {
+            guard !urls.isEmpty else { return }
+            ImagePrefetcher(urls: urls).start()
+        }
+    }
+}
+
 struct PreferredTitle<Content: View>: View {
     @EnvironmentObject private var store: Store
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let title: Title
     var loadMissingImage = false
+    /// Read titles always render a real name. A view that has nothing to show
+    /// until the lookup resolves (a poster tile) can keep the placeholder.
+    var showsLoadingTitle = true
     var onEnglishName: ((Title, String) -> Void)? = nil
     @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
@@ -215,13 +445,17 @@ struct PreferredTitle<Content: View>: View {
     var body: some View {
         let item = current
         let waiting = item.needsTitleLookup && attemptedID != title.id && store.api.cachedTitle(title) == nil
-        content(item, waiting ? "Loading title…" : item.name)
-            .onChange(of: item.englishName, initial: true) { _, name in
-                if let name { onEnglishName?(item, name) }
+        // A sparse row still carries its original title, so a reader that opts out
+        // of the placeholder always has something real to show. Romaji reads the
+        // original title instead of the English name.
+        content(item, waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
+            .onChange(of: item.englishName, initial: true) { _, english in
+                if let english { onEnglishName?(item, english) }
             }
             .task(id: title) {
                 guard attemptedID != title.id,
-                      item.needsTitleLookup || (loadMissingImage && item.image == nil) else { return }
+                    item.needsTitleLookup || (loadMissingImage && item.image == nil)
+                else { return }
                 let result = await store.api.resolveTitle(title)
                 if !Task.isCancelled {
                     resolved = result
@@ -334,8 +568,7 @@ struct SignInButton: View {
 
     var body: some View {
         Button {
-            if let saved = store.api.configuredClientID { signIn(saved) }
-            else { configure() }
+            if let saved = store.api.configuredClientID { signIn(saved) } else { configure() }
         } label: {
             if working { ProgressView() } else { Label("Sign in with MyAnimeList", systemImage: "person.crop.circle") }
         }
@@ -351,7 +584,9 @@ struct SignInButton: View {
             Button("Continue") { signIn(clientID) }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI). Enter its Client ID here.")
+            Text(
+                "Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI). Enter its Client ID here."
+            )
         }
     }
 
@@ -378,17 +613,24 @@ struct AccountScreen: View {
     @EnvironmentObject private var store: Store
     @State private var loadingProfile = false
     @State private var profileUnavailable = false
-    @State private var confirmSignOut = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 if let account = store.account {
                     let profile = store.profile(for: account.name)
-                    ProfileStatsHeader(image: account.image, stats: profile.stats?.value,
-                                       loadedAnime: store.lists[.anime, default: []].count,
-                                       loadedManga: store.lists[.manga, default: []].count)
-                    if loadingProfile && profile.stats == nil && profile.favorites == nil {
+                    let status = store.profileStatus(for: account.name)
+                    let hasSavedProfile = profile.stats != nil || profile.favorites != nil
+                    ProfileStatsHeader(
+                        image: account.image, stats: profile.stats?.value,
+                        loadedAnime: store.lists[.anime, default: []].count,
+                        loadedManga: store.lists[.manga, default: []].count)
+                    if let status, status.isShowingSavedData, hasSavedProfile {
+                        SavedDataNote(savedAt: status.savedAt, message: status.failure, isBusy: loadingProfile) {
+                            await loadProfile(refresh: true)
+                        }
+                        .padding(.horizontal, LedgerLayout.inset)
+                    } else if loadingProfile && !hasSavedProfile {
                         ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset)
                     } else if profileUnavailable && !loadingProfile {
                         Button("Retry loading profile") { Task { await loadProfile(refresh: true) } }
@@ -399,20 +641,13 @@ struct AccountScreen: View {
                     ForEach(Kind.allCases) { kind in favoriteShelf(kind) }
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
-                        if store.checking { ProgressView("Checking session") }
-                        else {
+                        if store.checking {
+                            ProgressView("Checking session")
+                        } else {
                             Text("Connect MyAnimeList to show your stats and favorites.").foregroundStyle(.secondary)
                             SignInButton()
                         }
                     }.padding(.horizontal, LedgerLayout.inset)
-                }
-                ForEach(Kind.allCases) { kind in
-                    let titles = store.previousLocalFavorites.filter { $0.kind == kind && !store.isMALFavorite($0) }
-                    if !titles.isEmpty {
-                        PosterShelf(heading: "Previously saved \(kind.rawValue)", titles: titles) {
-                            EmptyView()
-                        }
-                    }
                 }
             }.padding(.vertical, 18).frame(maxWidth: 800).frame(maxWidth: .infinity)
         }
@@ -420,23 +655,24 @@ struct AccountScreen: View {
         .navigationTitle(store.account?.name ?? "Profile")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    if let name = store.account?.name, let profile = publicURL("https://myanimelist.net/profile/\(name)") {
-                        Link("View MyAnimeList profile", destination: profile)
+            ToolbarItem(placement: .topBarLeading) {
+                if let name = store.account?.name,
+                    let profile = publicURL("https://myanimelist.net/profile/\(name)")
+                {
+                    ShareLink(item: profile) {
+                        Image(systemName: "square.and.arrow.up")
                     }
-                    NavigationLink { AboutScreen() } label: {
-                        Label("About AniLedger", systemImage: "info.circle")
-                    }
-                    if store.account != nil {
-                        Button("Sign out") { confirmSignOut = true }
-                    }
-                } label: { Label("Profile options", systemImage: "gearshape") }
+                    .accessibilityLabel("Share MyAnimeList profile")
+                }
             }
-        }
-        .confirmationDialog("Sign out of MyAnimeList?", isPresented: $confirmSignOut) {
-            Button("Sign out") { store.disconnect() }
-            Button("Cancel", role: .cancel) {}
+            ToolbarItem(placement: .topBarTrailing) {
+                NavigationLink {
+                    SettingsScreen()
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .accessibilityLabel("Settings")
+            }
         }
         .task(id: store.account?.id) {
             profileUnavailable = false
@@ -448,30 +684,9 @@ struct AccountScreen: View {
     @ViewBuilder
     private var customListsLink: some View {
         if !store.organization.lists.isEmpty {
-            NavigationLink {
-                List(store.organization.lists) { collection in
-                    NavigationLink {
-                        List(collection.titles) { title in
-                            NavigationLink(value: title) { TitleRow(title: title, note: title.kind.label) }
-                                .listRowBackground(Color.clear)
-                        }
-                        .overlay {
-                            if collection.titles.isEmpty {
-                                ContentUnavailableView("No titles in this list", systemImage: "list.bullet")
-                            }
-                        }
-                        .scrollContentBackground(.hidden)
-                        .background(Palette.background)
-                        .navigationTitle(collection.name)
-                    } label: {
-                        LabeledContent(collection.name, value: collection.titles.count.formatted())
-                    }
-                    .listRowBackground(Color.clear)
-                }
-                .scrollContentBackground(.hidden)
-                .background(Palette.background)
-                .navigationTitle("Custom Lists")
-            } label: { Label("Custom Lists", systemImage: "list.bullet.rectangle") }
+            NavigationLink(value: CustomListsRoute()) {
+                Label("Custom Lists", systemImage: "list.bullet.rectangle")
+            }
             .ledgerGlassButton()
             .padding(.horizontal, LedgerLayout.inset)
         }
@@ -481,21 +696,21 @@ struct AccountScreen: View {
     private func favoriteShelf(_ kind: Kind) -> some View {
         if let titles = store.malFavorites[kind], !titles.isEmpty {
             PosterShelf(heading: "Favorite \(kind.rawValue)", titles: titles) {
-                NavigationLink {
-                    ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 100), spacing: 12)], spacing: 16) {
-                            ForEach(unique(titles)) { CoverTile(title: $0) }
-                        }.padding(18)
-                    }
-                    .background(Palette.background)
-                    .navigationTitle("Favorite \(kind.rawValue)")
-                } label: { Text("View all").font(.caption.weight(.semibold)) }
+                NavigationLink(
+                    value: TitleCollectionRoute(
+                        label: "Favorite \(kind.rawValue)", titles: unique(titles), showsScore: true)
+                ) {
+                    Text("View all").font(.caption.weight(.semibold))
+                }
             }
         }
     }
 
     private func loadProfile(refresh: Bool = false) async {
-        guard let user = store.account else { loadingProfile = false; return }
+        guard let user = store.account else {
+            loadingProfile = false
+            return
+        }
         loadingProfile = true
         defer { if store.account?.id == user.id { loadingProfile = false } }
         let loaded = await store.loadProfile(user.name, refresh: refresh)
@@ -512,14 +727,22 @@ struct FriendProfileScreen: View {
     @State private var unavailable = false
     @State private var updates: [FriendUpdate]?
     @State private var updatesUnavailable = false
+    @State private var updatesAreSaved = false
     @State private var loadingUpdates = false
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
                 let profile = store.profile(for: friend.name)
+                let status = store.profileStatus(for: friend.name)
+                let hasSavedProfile = profile.stats != nil || profile.favorites != nil
                 ProfileStatsHeader(image: friend.avatar, stats: profile.stats?.value)
-                if loading && profile.stats == nil && profile.favorites == nil {
+                if let status, status.isShowingSavedData, hasSavedProfile {
+                    SavedDataNote(savedAt: status.savedAt, message: status.failure, isBusy: loading) {
+                        await load(refresh: true)
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
+                } else if loading && !hasSavedProfile {
                     ProgressView("Loading profile").padding(.horizontal, LedgerLayout.inset)
                 } else if unavailable && !loading {
                     VStack(alignment: .leading, spacing: 8) {
@@ -532,9 +755,7 @@ struct FriendProfileScreen: View {
                 if !listKinds.isEmpty {
                     HStack(spacing: 12) {
                         ForEach(listKinds) { kind in
-                            NavigationLink {
-                                FriendMediaListScreen(friend: friend, kind: kind)
-                            } label: {
+                            NavigationLink(value: FriendMediaRoute(friend: friend, kind: kind)) {
                                 Label("\(kind.label) List", systemImage: kind == .anime ? "film" : "books.vertical")
                                     .frame(maxWidth: .infinity)
                             }
@@ -571,6 +792,11 @@ struct FriendProfileScreen: View {
         VStack(alignment: .leading, spacing: 12) {
             LedgerSectionTitle("Recent list updates")
             if let updates, !updates.isEmpty {
+                if updatesAreSaved {
+                    SavedDataNote(savedAt: nil, isBusy: loadingUpdates) {
+                        await loadUpdates(refresh: true)
+                    }
+                }
                 LazyVStack(alignment: .leading, spacing: 10) {
                     ForEach(updates) { update in
                         PreferredTitle(title: update.title) { title, name in
@@ -597,8 +823,11 @@ struct FriendProfileScreen: View {
                     }
                 }
             } else if !updatesUnavailable {
-                if updates == nil { ProgressView("Loading recent updates") }
-                else { Text("No public list updates.").foregroundStyle(.secondary) }
+                if updates == nil {
+                    ProgressView("Loading recent updates")
+                } else {
+                    Text("No public list updates.").foregroundStyle(.secondary)
+                }
             }
 
             if updatesUnavailable {
@@ -621,9 +850,16 @@ struct FriendProfileScreen: View {
             let sorted = items.map { (item: $0, date: activityDate($0.date)) }
                 .sorted { $0.date > $1.date }
             updates = unique(sorted.map(\.item))
+            updatesAreSaved = false
             updatesUnavailable = false
         } catch {
-            if !Task.isCancelled { updatesUnavailable = true }
+            guard !Task.isCancelled else { return }
+            if updates == nil {
+                let saved = store.savedUpdates(for: friend)
+                updates = saved.isEmpty ? nil : saved
+            }
+            updatesAreSaved = updates != nil
+            updatesUnavailable = updates == nil
         }
     }
 
@@ -675,9 +911,11 @@ private struct FriendMediaListScreen: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else if entries.isEmpty {
-                ContentUnavailableView("No \(kind.rawValue) in this list",
-                                       systemImage: kind == .anime ? "film" : "books.vertical")
-                    .listRowBackground(Color.clear)
+                ContentUnavailableView(
+                    "No \(kind.rawValue) in this list",
+                    systemImage: kind == .anime ? "film" : "books.vertical"
+                )
+                .listRowBackground(Color.clear)
             }
         }
         .listStyle(.plain)
@@ -693,10 +931,11 @@ private struct FriendMediaListScreen: View {
         return ForEach(statuses, id: \.self) { status in
             let group = groups[status, default: []]
             let expanded = !collapsed.contains(status)
-            ListStatusHeader(title: statusLabel(status), count: group.count,
-                             expanded: expanded, partial: nextPage != nil) {
-                if expanded { collapsed.insert(status) }
-                else { collapsed.remove(status) }
+            ListStatusHeader(
+                title: statusLabel(status), count: group.count,
+                expanded: expanded, partial: nextPage != nil
+            ) {
+                if expanded { collapsed.insert(status) } else { collapsed.remove(status) }
             }
             .listRowInsets(EdgeInsets(top: 4, leading: 10, bottom: 4, trailing: 10))
             .listRowBackground(Color.clear)
@@ -787,10 +1026,12 @@ private struct ProfileStatsHeader: View {
     private func profileMetrics(_ anime: Int?, _ manga: Int?, _ days: Double?, _ chapters: Int?) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .top, spacing: 12) {
-                metric(anime == nil && loadedAnime != nil ? "Anime loaded" : "Total anime",
-                       (anime ?? loadedAnime)?.formatted() ?? "—")
-                metric(manga == nil && loadedManga != nil ? "Manga loaded" : "Total manga",
-                       (manga ?? loadedManga)?.formatted() ?? "—")
+                metric(
+                    anime == nil && loadedAnime != nil ? "Anime loaded" : "Total anime",
+                    (anime ?? loadedAnime)?.formatted() ?? "—")
+                metric(
+                    manga == nil && loadedManga != nil ? "Manga loaded" : "Total manga",
+                    (manga ?? loadedManga)?.formatted() ?? "—")
             }
             HStack(alignment: .top, spacing: 12) {
                 metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
@@ -829,13 +1070,16 @@ private struct ProfileStatisticsSection: View {
     @State private var expanded = true
 
     private var statuses: [Status] {
-        zip(kind.statuses, [
-            (kind == .anime ? "play.fill" : "book.fill", Color(uiColor: .systemBlue)),
-            ("checkmark", Color(uiColor: .systemGreen)),
-            ("pause.fill", Color(uiColor: .systemOrange)),
-            ("xmark", Color(uiColor: .systemRed)),
-            ("calendar", Color(uiColor: .systemGray))
-        ]).map { key, style in
+        zip(
+            kind.statuses,
+            [
+                (kind == .anime ? "play.fill" : "book.fill", Color(uiColor: .systemBlue)),
+                ("checkmark", Color(uiColor: .systemGreen)),
+                ("pause.fill", Color(uiColor: .systemOrange)),
+                ("xmark", Color(uiColor: .systemRed)),
+                ("calendar", Color(uiColor: .systemGray)),
+            ]
+        ).map { key, style in
             Status(key: key, icon: style.0, color: style.1, count: stats.statusCounts[key])
         }
     }
@@ -845,7 +1089,8 @@ private struct ProfileStatisticsSection: View {
     private var totalsLabel: String {
         var parts: [String] = []
         if let progress = stats.progress {
-            let unit = kind == .anime ? (progress == 1 ? "episode" : "episodes") : (progress == 1 ? "chapter" : "chapters")
+            let unit =
+                kind == .anime ? (progress == 1 ? "episode" : "episodes") : (progress == 1 ? "chapter" : "chapters")
             parts.append("\(kind == .anime ? "Watched" : "Read") \(progress.formatted()) \(unit)")
         }
         if kind == .manga, let volumes = stats.volumes {
@@ -930,8 +1175,9 @@ private struct ProfileStatisticsSection: View {
     @ViewBuilder
     private var days: some View {
         if let days = stats.days {
-            metric(kind == .anime ? "Days watched" : "Days read",
-                   days.formatted(.number.precision(.fractionLength(0...1))))
+            metric(
+                kind == .anime ? "Days watched" : "Days read",
+                days.formatted(.number.precision(.fractionLength(0...1))))
         }
     }
 
@@ -978,8 +1224,10 @@ private struct ProfileStatisticsSection: View {
                             .font(.subheadline.weight(.semibold))
                             .foregroundStyle(status.color)
                             .frame(width: 30, height: 30)
-                            .background(status.color.opacity(0.16),
-                                        in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                            .background(
+                                status.color.opacity(0.16),
+                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            )
                             .accessibilityHidden(true)
                         Text(status.label)
                     }
@@ -1006,11 +1254,11 @@ private struct ProfileStatisticsSection: View {
     }
 }
 
-private struct AboutScreen: View {
+struct AboutScreen: View {
     private let credits = [
         Credit("MyAnimeList", "Account sign-in, lists, and personal anime suggestions", "https://myanimelist.net"),
         Credit("Tenrai", "Anime and manga catalog", "https://tenrai.org"),
-        Credit("Jikan Edge", "Catalog fallback and public friend activity", "https://jikan.lucashdo.com")
+        Credit("Jikan Edge", "Catalog fallback and public friend activity", "https://jikan.lucashdo.com"),
     ]
 
     private var version: String {

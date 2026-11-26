@@ -83,6 +83,30 @@ struct Fields: Decodable {
     }
 }
 
+/// Freshness reported by Jikan Edge for public user data. The proxy answers
+/// with `meta = {cached, stale, refreshFailed, fetchedAt}`.
+struct CatalogFreshness: Equatable {
+    var isStale = false
+    var fetchedAt: Date?
+
+    init(_ meta: Fields? = nil) {
+        let stale: Bool? = meta?.read("stale")
+        let refreshFailed: Bool? = meta?.read("refreshFailed")
+        isStale = (stale ?? false) || (refreshFailed ?? false)
+        if let raw = meta?.string("fetchedAt") {
+            let date = activityDate(raw)
+            fetchedAt = date == .distantPast ? nil : date
+        }
+    }
+}
+
+enum TitleLanguage: String, CaseIterable, Identifiable {
+    case english = "English"
+    case romaji = "Romaji"
+
+    var id: String { rawValue }
+}
+
 func publicURL(_ raw: String?) -> URL? {
     guard let raw, let url = URL(string: raw), url.scheme == "https", url.host != nil else { return nil }
     return url
@@ -97,6 +121,14 @@ struct Title: Identifiable, Hashable, Codable {
     private var english: String?
     private var sparseTitle: Bool?
     var englishName: String? { english ?? (name == original ? nil : name) }
+
+    /// The name a reader should see for the stored preferred-language setting.
+    func displayName(for language: String) -> String {
+        if language == TitleLanguage.romaji.rawValue {
+            return original.isEmpty ? name : original
+        }
+        return name.isEmpty ? original : name
+    }
     var needsTitleLookup: Bool { sparseTitle == true && englishName == nil }
     let score: Double?
     let format: String?
@@ -218,7 +250,7 @@ struct ListChange: Encodable {
     var details: ListDetailPatch? = nil
 }
 
-struct CustomTitleList: Identifiable, Codable {
+struct CustomTitleList: Identifiable, Codable, Hashable {
     var id = UUID()
     let name: String
     var titles: [Title] = []
@@ -301,7 +333,7 @@ struct FriendUpdate: Identifiable, Codable {
     }
 }
 
-struct TitleReview: Identifiable {
+struct TitleReview: Identifiable, Hashable {
     let id: String
     let url: URL?
     let author: String
@@ -336,4 +368,123 @@ struct TitleReview: Identifiable {
         rating = fields.read("score")
         spoiler = (fields.read("is_spoiler", "isSpoiler") ?? false) || tags.contains { $0.localizedCaseInsensitiveContains("spoiler") }
     }
+}
+
+/// A MyAnimeList interest stack: a curated group of titles. Tenrai serves the
+/// stacks that contain a title at `/anime/{id}/stacks` and `/manga/{id}/stacks`,
+/// and one stack with all of its entries at `/stacks/{id}`.
+struct InterestStack: Identifiable, Hashable {
+    let id: Int
+    let kind: Kind
+    let name: String
+    let summary: String?
+    let author: String
+    let authorURL: URL?
+    let url: URL?
+    let restacks: Int
+    let entryCount: Int
+    let isOfficial: Bool
+    let isChallenge: Bool
+    let isSpoiler: Bool
+    let created: Date?
+
+    init?(_ fields: Fields) {
+        guard let id: Int = fields.read("mal_id", "malId", "id"), id > 0,
+              let name = fields.string("title", "name")
+        else { return nil }
+        self.id = id
+        self.name = name
+        kind = fields.string("stack_type", "stackType")?.lowercased() == "manga" ? .manga : .anime
+        summary = fields.string("description", "synopsis")
+        author = fields.string("author_username", "authorUsername", "username") ?? "MyAnimeList member"
+        authorURL = publicURL(fields.string("author_url", "authorUrl"))
+        url = publicURL(fields.string("url"))
+        restacks = fields.read("restack_count", "restackCount") ?? 0
+        entryCount = fields.read("entry_count", "entryCount") ?? 0
+        isOfficial = fields.read("is_official", "isOfficial") ?? false
+        isChallenge = fields.read("is_challenge", "isChallenge") ?? false
+        isSpoiler = fields.read("is_spoiler", "isSpoiler") ?? false
+        let rawCreated = fields.string("created_at", "createdAt")
+        let parsed = activityDate(rawCreated)
+        created = parsed == .distantPast ? nil : parsed
+    }
+}
+
+/// One title inside a stack, with the stack author's score and note for it.
+struct StackEntry: Identifiable {
+    let title: Title
+    let position: Int
+    let note: String?
+    let score: Int?
+    /// A stack can list the same title more than once, so the position is part
+    /// of the row identity rather than the title alone.
+    var id: String { "\(position)-\(title.id)" }
+
+    init?(_ fields: Fields, kind: Kind) {
+        guard let title = Title(fields, kind: kind) else { return nil }
+        self.title = title
+        position = fields.read("position") ?? 0
+        note = fields.string("note")
+        let rating: Double? = fields.read("author_score", "authorScore")
+        score = rating.flatMap { (1...10).contains(Int($0)) ? Int($0) : nil }
+    }
+}
+
+/// The entries a stack page returns. The stack header is parsed too, because
+/// its `stack_type` is what tells the entries how to decode.
+struct StackDetail {
+    let entries: [StackEntry]
+
+    init?(_ response: Fields) {
+        let row: Fields = response.read("data") ?? response
+        guard let stack = InterestStack(row) else { return nil }
+        let rows: [Fields] = row.read("entries") ?? row.read("items") ?? []
+        entries = rows.compactMap { StackEntry($0, kind: stack.kind) }
+    }
+}
+
+// Screens that used to be pushed with a destination closure get a value route
+// instead: mixing the two navigation styles makes the next value-based push
+// appear beneath the destination-pushed screen.
+struct StackRoute: Hashable {
+    let stack: InterestStack
+}
+
+struct TitleStacksRoute: Hashable {
+    let title: Title
+    let stacks: [InterestStack]
+    let more: Bool
+}
+
+struct TitleCollectionRoute: Hashable {
+    let label: String
+    let titles: [Title]
+    var notes: [String: String] = [:]
+    var showsScore = false
+}
+
+struct CharactersRoute: Hashable {
+    let members: [CastMember]
+}
+
+struct TitleReviewsRoute: Hashable {
+    let title: Title
+    let reviews: [TitleReview]?
+    let more: Bool
+}
+
+struct TitleReviewRoute: Hashable {
+    let title: Title
+    let review: TitleReview
+}
+
+struct FriendMediaRoute: Hashable {
+    let friend: Friend
+    let kind: Kind
+}
+
+struct CustomListsRoute: Hashable {}
+
+struct CustomListRoute: Hashable {
+    let list: CustomTitleList
 }
