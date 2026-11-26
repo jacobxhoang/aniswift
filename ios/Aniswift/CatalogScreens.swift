@@ -94,7 +94,7 @@ struct ListsScreen: View {
 
     var body: some View {
         if store.account != nil {
-            list.ledgerSearch(text: $query, prompt: "Search")
+            list.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         } else {
             list
         }
@@ -444,18 +444,22 @@ struct DiscoverScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
-        .ledgerSearch(text: $search, prompt: "Search") {
-            // The field is the app's own, so there is no system scope bar to
-            // carry the media type: it sits under the field, reachable while
-            // the bar is open.
-            Picker("Search category", selection: $searchKind) {
-                ForEach(Kind.allCases) { kind in
-                    Text(kind.label).tag(kind)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if !searchTerm.isEmpty {
+                Picker("Search category", selection: $searchKind) {
+                    ForEach(Kind.allCases) { kind in
+                        Text(kind.label).tag(kind)
+                    }
                 }
+                .pickerStyle(.segmented)
+                .sensoryFeedback(.selection, trigger: searchKind)
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.vertical, 6)
+                .background(Palette.background)
             }
-            .pickerStyle(.segmented)
-            .sensoryFeedback(.selection, trigger: searchKind)
         }
+        .scrollDismissesKeyboard(.interactively)
+        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: CatalogBrowserRoute()) {
@@ -629,8 +633,17 @@ struct CatalogFacetScreen: View {
         Group {
             if facet.category.usesGenreIndex {
                 results
+            } else if #available(iOS 26.0, *) {
+                results
+                    .searchable(text: $search, placement: .toolbar, prompt: "Search titles")
+                    .toolbar { DefaultToolbarItem(kind: .search, placement: .topBarTrailing) }
+                    .scrollDismissesKeyboard(.interactively)
             } else {
-                results.ledgerSearch(text: $search, prompt: "Search titles")
+                results
+                    .searchable(
+                        text: $search, placement: .navigationBarDrawer(displayMode: .automatic),
+                        prompt: "Search titles")
+                    .scrollDismissesKeyboard(.interactively)
             }
         }
         .navigationTitle(facet.category.usesGenreIndex ? facet.name : "More from \(facet.name)")
@@ -1026,7 +1039,7 @@ struct CatalogBrowser: View {
             }.padding()
         }
         .navigationTitle("Browse catalog")
-        .ledgerSearch(text: $search, prompt: "Search anime or manga")
+        .searchable(text: $search, prompt: "Search anime or manga")
         // Mode, season and year live in one toolbar menu: three rows of pickers
         // above the grid used a third of the first screen for controls.
         .toolbar {

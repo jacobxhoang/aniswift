@@ -362,8 +362,10 @@ final class API: APIClient {
         return (updates, CatalogFreshness(response.read("meta")))
     }
 
-    /// One page of a friend's list, built off the main actor. A row with no date
-    /// cannot be placed in the feed, so it is left out here.
+    /// One page of a friend's list, built off the main actor. Every row is kept:
+    /// Jikan Edge's list rows carry no `date` — only `updatedAt`, which is often
+    /// null — and a friend's list screen draws them without one. The feed, which
+    /// sorts and dates its rows, filters them where it reads them.
     nonisolated static func decodeListPage(
         _ data: Data, friend: Friend, kind: Kind, page: Int, limit: Int
     ) async throws -> Page<FriendUpdate> {
@@ -379,8 +381,7 @@ final class API: APIClient {
         let more = hasNext ?? (total.map { $0 > page * limit } ?? (rows.count == limit))
         let entries = rows.compactMap { row -> FriendUpdate? in
             guard let title = Title(row, kind: kind) else { return nil }
-            let update = FriendUpdate(friend: friend, title: title, fields: row)
-            return update.date == nil ? nil : update
+            return FriendUpdate(friend: friend, title: title, fields: row)
         }
         return Page(items: entries, more: more)
     }

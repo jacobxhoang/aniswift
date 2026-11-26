@@ -26,7 +26,7 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 | Tab | What you can do |
 | --- | --- |
 | Anime and Manga | Expand status groups, sort and search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
-| Discover | Open the search button in the toolbar to search anime and manga, and switch media with the picker under the field; browse releases and rankings, and open title details. |
+| Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | View account statistics and public favorites, open custom lists, share your MyAnimeList profile, and open **Settings** from the toolbar gear. |
 
@@ -242,7 +242,7 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   ```
 ## Verification checklist
 
-- Build in Xcode and exercise search in Anime, Manga and Discover, including Discover's anime/manga picker under the field.
+- Build in Xcode and exercise search in Anime, Manga and Discover, and switch Discover's anime/manga picker.
 - Open a title with several genres or producers. Check wrapping at standard and large text sizes.
 - Swipe the Relations, Characters and Recommended shelves. Open **View All** and select an item.
 - Open **Settings** from the Profile gear. Change the accent and confirm controls, links and the Safari sheet

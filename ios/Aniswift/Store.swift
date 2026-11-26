@@ -811,8 +811,13 @@ final class Store: ObservableObject {
         saveFriendFeed()
     }
 
+    /// The feed places every row by its date, and a Jikan Edge list row often
+    /// has none, so the feed's older pages keep only the rows it can place. A
+    /// friend's list screen reads the pages without this filter.
     private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
-        try await api.friendListPage(cursor.friend, kind: cursor.kind, page: cursor.page, limit: 50)
+        let page = try await api.friendListPage(
+            cursor.friend, kind: cursor.kind, page: cursor.page, limit: 50)
+        return Page(items: page.items.filter { $0.date != nil }, more: page.more)
     }
 
     func publicListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int = 50) async throws -> Page<FriendUpdate> {
