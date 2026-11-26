@@ -374,28 +374,43 @@ private struct LedgerSearch: ViewModifier {
     @ViewBuilder
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            // The system's own search button: tapping it expands the field into
-            // the navigation bar, and its Close button collapses it again.
+            // A round button of our own opens the system's field in the toolbar,
+            // and the field's Close button puts the button back.
             content
-                .searchable(text: $text, placement: .toolbar, prompt: prompt)
-                .toolbar { DefaultToolbarItem(kind: .search, placement: .topBarTrailing) }
+                .searchable(text: $text, isPresented: $isSearching, placement: .toolbar, prompt: Text(prompt))
+                .toolbar { searchButton }
                 .scrollDismissesKeyboard(.interactively)
         } else {
-            // Before iOS 26 there is no search button, so the same expand-on-tap
-            // behaviour is a magnifying glass that presents the drawer's field.
+            // Before iOS 26 the field has no toolbar presentation, so the same
+            // button reveals the navigation bar's drawer instead.
             content
                 .searchable(
                     text: $text, isPresented: $isSearching,
                     placement: .navigationBarDrawer(displayMode: .automatic), prompt: Text(prompt)
                 )
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { isSearching = true } label: {
-                            Label("Search", systemImage: "magnifyingglass")
-                        }
-                    }
-                }
+                .toolbar { searchButton }
                 .scrollDismissesKeyboard(.interactively)
+        }
+    }
+
+    /// The app's round glass search button, drawn by the app rather than the
+    /// system so it matches the badges on the rest of the screen. It steps aside
+    /// while the field is open, where the field's own Close button takes over.
+    @ToolbarContentBuilder
+    private var searchButton: some ToolbarContent {
+        if !isSearching {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    isSearching = true
+                } label: {
+                    Image(systemName: "magnifyingglass")
+                        .font(.body.weight(.semibold))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .ledgerGlassBadge()
+                .accessibilityLabel("Search")
+            }
         }
     }
 }

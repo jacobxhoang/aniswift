@@ -24,9 +24,11 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Advisory: reported on every change but not a dependency of the IPA job.
-  # Run `xcrun swift-format format --in-place` over the files it lists, then add
-  # `format` to the `ipa` job's needs to make it blocking.
+  # Advisory, and never red: a style finding is reported as a warning with the
+  # formatted copy of each file attached as an artifact, so a formatting rule
+  # cannot hold up a change it never blocks. Run `xcrun swift-format format
+  # --in-place` over the files it names, take them off `UNFORMATTED`, and make
+  # the last line of the lint step `exit 1` to turn this back into a gate.
   format:
     runs-on: macos-15
     steps:
@@ -48,6 +50,7 @@ jobs:
           echo "::error::Xcode 26 is required for swift-format."
           exit 1
       - name: Lint changed Swift files
+        id: lint
         shell: bash
         env:
           BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
@@ -80,7 +83,38 @@ jobs:
             exit 0
           fi
           printf '%s\n' "${files[@]}"
-          xcrun swift-format lint --strict --configuration .swift-format "${files[@]}"
+          log="$RUNNER_TEMP/swift-format.log"
+          status=0
+          xcrun swift-format lint --strict --configuration .swift-format "${files[@]}" > "$log" 2>&1 || status=$?
+          if [[ "$status" -eq 0 ]]; then
+            echo "The changed Swift files are formatted."
+            exit 0
+          fi
+          # Report each finding rather than failing the run: the tree is only part
+          # formatted, so a red job says less than a warning that names the file
+          # and the rule.
+          while IFS= read -r line; do
+            if [[ -n "$line" ]]; then
+              echo "::warning title=swift-format::${line}"
+            fi
+          done < "$log"
+          # The formatted copy of every file it named, to apply by hand.
+          formatted="$RUNNER_TEMP/formatted"
+          mkdir -p "$formatted"
+          for file in "${files[@]}"; do
+            target="$formatted/$(basename "$file")"
+            xcrun swift-format format --configuration .swift-format "$file" > "$target" 2>/dev/null \
+              || rm -f "$target"
+          done
+          echo "found=1" >> "$GITHUB_OUTPUT"
+          exit 0
+      - name: Upload the formatted copies
+        if: steps.lint.outputs.found == '1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-format
+          path: ${{ runner.temp }}/formatted
+          if-no-files-found: ignore
 
   test:
     runs-on: macos-15

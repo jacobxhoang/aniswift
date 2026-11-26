@@ -227,7 +227,8 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   xcrun swift-format lint --strict --configuration .swift-format $(git diff --name-only origin/main -- 'ios/*.swift')
   ```
   The workflow's `format` job lints only the Swift files a change touches, so existing files are not
-  reformatted in bulk.
+  reformatted in bulk, and reports a finding as a warning with the formatted copy attached rather than
+  failing the run.
 - **Tests** use Swift Testing in the `AniswiftTests` target and cover the shared decoder, title parsing, the
   activity-date heuristics, the store's list sync and failure reporting, the friend-feed cursor bookkeeping and
   the OAuth callback validation. The `test` job runs them on the newest available iPhone simulator. The IPA build

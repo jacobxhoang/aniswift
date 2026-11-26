@@ -45,12 +45,12 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | --- | ---: | --- |
 | `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
 | `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 448 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ARCHITECTURE.md` | 450 | This analysis: structure, APIs, state, caching, settings, CI and risks |
 | `ios/Aniswift/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
 | `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
 | `ios/Aniswift/Store.swift` | 884 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching (twelve friends per group until the page holds 30 rows) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
 | `ios/Aniswift/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/Aniswift/AniswiftApp.swift` | 1410 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch` (a toolbar search button that expands), `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
+| `ios/Aniswift/AniswiftApp.swift` | 1425 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch` (a round glass search button that expands the field), `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
 | `ios/Aniswift/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
 | `ios/Aniswift/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
 | `ios/Aniswift/TitleScreen.swift` | 2029 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
@@ -64,7 +64,7 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | `ios/Aniswift/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
 | `ios/Aniswift/PrivacyInfo.xcprivacy` | 31 | Privacy manifest: no tracking, no collected data types, UserDefaults and file-timestamp reasons |
 | `ios/build-signed.sh` | 83 | Ad Hoc IPA export: temporary keychain, profile validation, manual signing, `release-testing` export |
-| `.github/workflows/ios.yml` | 342 | Format check (skipping the unformatted files), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release, rolling nightly prerelease |
+| `.github/workflows/ios.yml` | 375 | Format check (skipping the unformatted files, reported as warnings), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release, rolling nightly prerelease |
 | `.gitignore` | 3 | `.env`, `.env.*`, `artifacts/` |
 
 ## 4. Architecture
@@ -326,8 +326,10 @@ pull requests never publish.
 1. `format` (macos-15) selects Xcode 26 and runs `swift-format lint --strict` on the Swift files changed against
    the pull-request base (or the push `before` SHA). It skips when there is no usable base, and it skips the files
    listed in `UNFORMATTED` (`TitleScreen`, `CatalogScreens`, `SettingsScreen`, `Store` and `API`), which predate the
-   formatter and have never been formatted in bulk. The job is advisory: it is not in the `ipa` job's `needs`, so a
-   lint failure is reported without stopping a build.
+   formatter and have never been formatted in bulk. It is advisory twice over: it is not in the `ipa` job's `needs`,
+   and a finding is reported as a warning with the formatted copy of each file attached as the `swift-format`
+   artifact, so the run itself stays green. Once the tree is formatted, `exit 1` at the end of the lint step and one
+   entry in `needs` turn it into a gate.
 2. `test` (macos-15) selects Xcode 26 and the newest available iPhone simulator, runs `xcodebuild test` for the
    `Aniswift` scheme (arm64, signing disabled) against the six suites in `AniswiftTests`, and uploads the
    `.xcresult` when the run fails. The Swift package cache is restored between runs.
@@ -413,10 +415,10 @@ its `commits` job are gone: one push is one build, and a release is a tag.
 20. **The nightly asset is overwritten in place.** `Aniswift-Nightly-Unsigned.ipa` keeps its name so the download
     link is stable, which means a rebuild replaces it under the same URL: a cached or CDN copy can still hand out
     the previous nightly, and the build number in About is how two of them are told apart.
-21. **Search lives behind a toolbar button, and Discover's media switch rides with it.** `ledgerSearch` puts the
-    field behind the iOS 26 search button (behind a magnifier on the drawer before that), so a scope bar exists
-    only while the field is open. If an iOS release declines to draw scopes for the toolbar field, Discover's
-    anime/manga switch has no visible control while searching.
+21. **Search lives behind a button the app draws, and Discover's media switch rides with it.** `ledgerSearch` puts
+    the field behind a round glass search button of its own — the toolbar's field on iOS 26, the drawer's field
+    before that — so a scope bar exists only while the field is open. If an iOS release declines to draw scopes for
+    that presentation, Discover's anime/manga switch has no visible control while searching.
 
 ## 13. How this analysis was produced
 
