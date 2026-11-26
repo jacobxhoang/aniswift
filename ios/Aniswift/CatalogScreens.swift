@@ -57,13 +57,113 @@ struct ListStatusHeader: View {
     }
 }
 
+/// The orders a list can be read in. Every order is written ascending here and
+/// read the other way when the sheet asks for it, so one comparator serves both
+/// directions.
+enum ListSort: String, CaseIterable, Identifiable, Codable {
+    case title = "Title"
+    case recent = "Recently updated"
+    case rating = "My rating"
+    case progress = "My progress"
+    case score = "Average score"
+
+    var id: Self { self }
+
+    /// The direction a reader wants first: names read A to Z, everything else
+    /// reads newest or highest first.
+    var readsDescending: Bool { self != .title }
+}
+
+/// What a list asks of an entry. Every chip that is on has to hold, so Has
+/// Score with Has Notes keeps only the entries that have both.
+enum ListDetailFilter: String, CaseIterable, Identifiable, Codable {
+    case score = "Has Score"
+    case progress = "Has Progress"
+    case notes = "Has Notes"
+    case rewatched = "Rewatched / Reread"
+    case customLists = "Custom Lists"
+
+    var id: Self { self }
+}
+
+/// How a list is ordered and narrowed. It is remembered per kind, so a reader
+/// who sorts by score and hides finished titles finds the same list next time.
+struct ListFilter: Codable, Equatable {
+    var sort = ListSort.title
+    var descending = false
+    var statuses: Set<String>
+    var formats: Set<String>
+    var details: Set<ListDetailFilter> = []
+    var year = ""
+
+    /// The formats a list offers, as MyAnimeList names them.
+    static let allFormats = ["TV", "Movie", "OVA", "ONA", "Special", "Music", "TV Special"]
+
+    /// Everything kept: every status, every format, no requirement and no year.
+    /// This is what Reset returns to and what a first visit starts on.
+    static func defaults(for kind: Kind) -> ListFilter {
+        ListFilter(statuses: Set(kind.statuses), formats: Set(allFormats))
+    }
+
+    /// Whether anything narrows the list, so the screen can say so and offer to
+    /// clear it. The order the list is read in is not a filter.
+    func isFiltering(for kind: Kind) -> Bool {
+        statuses != Set(kind.statuses) || formats != Set(Self.allFormats) || !details.isEmpty
+            || !year.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Everything a tap in the sheet can change, without the year a reader
+    /// types, so the sheet's haptic fires on a chip and not on every digit.
+    var selectionKey: String {
+        let statuses = statuses.sorted().joined(separator: ",")
+        let formats = formats.sorted().joined(separator: ",")
+        let details = details.map(\.rawValue).sorted().joined(separator: ",")
+        return "\(sort.rawValue)-\(descending)-\(statuses)-\(formats)-\(details)"
+    }
+
+    /// The year a reader typed, as a number, when it is one.
+    var yearNumber: Int? {
+        let digits = year.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard digits.count == 4 else { return nil }
+        return Int(digits)
+    }
+
+    /// MyAnimeList names a format its own way ("tv", "tv_special"), so the
+    /// chips compare the names with the punctuation taken out.
+    static func formatName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "_", with: " ").lowercased()
+    }
+
+    // MARK: Remembering
+
+    /// The filter a list opens with: the one it was last left on, or everything
+    /// kept. A saved set naming a status this build no longer has is dropped
+    /// rather than leaving the list empty with no chip to blame.
+    static func remembered(_ kind: Kind) -> ListFilter {
+        guard let data = UserDefaults.standard.data(forKey: key(kind)),
+            let saved = try? JSONDecoder().decode(ListFilter.self, from: data),
+            saved.statuses.isSubset(of: Set(kind.statuses)),
+            saved.formats.isSubset(of: Set(allFormats))
+        else { return .defaults(for: kind) }
+        return saved
+    }
+
+    static func remember(_ filter: ListFilter, kind: Kind) {
+        guard let data = try? JSONEncoder().encode(filter) else { return }
+        UserDefaults.standard.set(data, forKey: key(kind))
+    }
+
+    private static func key(_ kind: Kind) -> String { "aniswift.list.filter.\(kind.rawValue)" }
+}
+
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
-    @State private var sort = ListSort.title
+    @State private var filter: ListFilter
+    @State private var showingFilter = false
     @State private var paging = false
     @State private var listPageError: String?
     @State private var removed: (entry: ListEntry, change: ListChange)?
@@ -71,22 +171,53 @@ struct ListsScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let rowInset: CGFloat = 10
 
-    private enum ListSort: String, CaseIterable {
-        case title = "Title"
-        case recent = "Recently updated"
-        case rating = "My rating"
-    }
-
     init(kind: Kind) {
         self.kind = kind
         _collapsed = State(initialValue: Set(kind.statuses.dropFirst().dropLast()))
+        _filter = State(initialValue: ListFilter.remembered(kind))
     }
 
     private var entries: [ListEntry] {
         let entries = store.lists[kind, default: []]
-        return searchTerm.isEmpty ? entries.filter { !store.organization.hidden.contains($0.id) } : entries
+        let visible = searchTerm.isEmpty ? entries.filter { !store.organization.hidden.contains($0.id) } : entries
+        return visible.filter(matchesFilters)
     }
     private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var isFiltering: Bool { filter.isFiltering(for: kind) }
+    /// Whether the list is narrowed at all, by a filter or by a search, so a
+    /// group with no match is not drawn and a collapsed one opens itself.
+    private var isNarrowed: Bool { isFiltering || !searchTerm.isEmpty }
+
+    /// Whether an entry survives the sheet's chips. A status chip reads the
+    /// entry's own status; the rest read what its title or its row carries.
+    private func matchesFilters(_ entry: ListEntry) -> Bool {
+        guard filter.statuses.contains(entry.status) else { return false }
+        if filter.formats != Set(ListFilter.allFormats) {
+            let format = ListFilter.formatName(entry.title.format ?? "")
+            guard filter.formats.contains(where: { ListFilter.formatName($0) == format }) else { return false }
+        }
+        if let year = filter.yearNumber, entry.title.releaseYear != year { return false }
+        for detail in filter.details {
+            switch detail {
+            case .score:
+                if entry.rating <= 0 { return false }
+            case .progress:
+                if entry.progress <= 0 { return false }
+            case .notes:
+                if (entry.details?.notes ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return false
+                }
+            case .rewatched:
+                if (entry.details?.repeatCount ?? 0) <= 0 { return false }
+            case .customLists:
+                let listed = store.organization.lists.contains { list in
+                    list.titles.contains { $0.id == entry.id }
+                }
+                if !listed { return false }
+            }
+        }
+        return true
+    }
 
     private func displayName(_ title: Title) -> String { title.displayName(for: titleLanguage) }
 
@@ -142,19 +273,18 @@ struct ListsScreen: View {
                 ForEach(kind.statuses, id: \.self) { status in
                     let group = entries.filter { $0.status == status }
                     let matches = visibleEntries(group)
-                    if searchTerm.isEmpty || !matches.isEmpty {
-                        groupHeader(status, count: searchTerm.isEmpty ? group.count : matches.count)
+                    if !isNarrowed || !matches.isEmpty {
+                        groupHeader(status, count: isNarrowed ? matches.count : group.count)
                             .listRowInsets(EdgeInsets(top: 4, leading: rowInset, bottom: 4, trailing: rowInset))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
-                        if !collapsed.contains(status) || !searchTerm.isEmpty {
+                        if !collapsed.contains(status) || isNarrowed {
                             ForEach(matches) { item in entryRow(item) }
                         }
                     }
                 }
-                if !searchTerm.isEmpty && visibleEntries(entries).isEmpty && store.nextList[kind] == nil {
-                    Text("No matches in your list.").foregroundStyle(.secondary)
-                        .listRowBackground(Color.clear)
+                if isNarrowed && !hasSearchMatch(entries) && store.nextList[kind] == nil {
+                    noMatches
                 }
                 if let page = store.nextList[kind] {
                     if let listPageError {
@@ -177,15 +307,26 @@ struct ListsScreen: View {
         .toolbar {
             if store.account != nil {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Picker("Sort by", selection: $sort) {
-                            ForEach(ListSort.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                        }
-                        .sensoryFeedback(.selection, trigger: sort)
-                    } label: { Label("Sort list", systemImage: "line.3.horizontal.decrease") }
+                    Button { showingFilter = true } label: {
+                        // A dot on the icon says a filter is hiding something,
+                        // so the sheet is not the only way to find out.
+                        Label("Sort and filter", systemImage: "line.3.horizontal.decrease")
+                            .overlay(alignment: .topTrailing) {
+                                if isFiltering {
+                                    Circle().fill(.tint)
+                                        .frame(width: 6, height: 6)
+                                        .offset(x: 3, y: -2)
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                    }
                 }
             }
         }
+        .sheet(isPresented: $showingFilter) {
+            ListFilterSheet(kind: kind, filter: $filter)
+        }
+        .onChange(of: filter) { _, value in ListFilter.remember(value, kind: kind) }
         .scrollDismissesKeyboard(.interactively)
         .prefetchingPosters(entries) { $0.title.image }
         .onChange(of: store.account?.id) { _, _ in
@@ -223,12 +364,46 @@ struct ListsScreen: View {
     }
 
     private func groupHeader(_ status: String, count: Int) -> some View {
-        let expanded = !collapsed.contains(status) || !searchTerm.isEmpty
-        let partial = store.nextList[kind] != nil && searchTerm.isEmpty
+        let expanded = !collapsed.contains(status) || isNarrowed
+        let partial = store.nextList[kind] != nil && !isNarrowed
         return ListStatusHeader(title: statusLabel(status), count: count, expanded: expanded,
-                                partial: partial, isInteractive: searchTerm.isEmpty) {
+                                partial: partial, isInteractive: !isNarrowed) {
             if expanded { collapsed.insert(status) }
             else { collapsed.remove(status) }
+        }
+    }
+
+    /// A list a filter or a search has emptied: it says which one emptied it
+    /// and offers the way back out of the filter.
+    private var noMatches: some View {
+        VStack(spacing: 10) {
+            Label("No matches in your list", systemImage: "line.3.horizontal.decrease.circle")
+                .font(.headline)
+            Text(searchTerm.isEmpty
+                ? "These filters hide every title in it."
+                : "Nothing here matches the search.")
+                .foregroundStyle(.secondary)
+            if isFiltering {
+                Button("Clear Filters") { filter = .defaults(for: kind) }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
+                    .accessibilityHint("Shows every title in your list again")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .multilineTextAlignment(.center)
+        .padding(.vertical, 28)
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+    }
+
+    /// Whether a narrowed list has anything to show by its search, without
+    /// sorting every entry just to ask whether one is left.
+    private func hasSearchMatch(_ group: [ListEntry]) -> Bool {
+        group.contains { entry in
+            searchTerm.isEmpty || entry.title.name.localizedCaseInsensitiveContains(searchTerm)
+                || entry.title.original.localizedCaseInsensitiveContains(searchTerm)
         }
     }
 
@@ -237,14 +412,29 @@ struct ListsScreen: View {
             searchTerm.isEmpty || entry.title.name.localizedCaseInsensitiveContains(searchTerm)
                 || entry.title.original.localizedCaseInsensitiveContains(searchTerm)
         }
-        switch sort {
-        case .recent: return matches.sorted { $0.updated > $1.updated }
+        // Each order is written ascending, and the sheet's direction reads it
+        // the other way, so one comparator serves both.
+        let sorted: [ListEntry]
+        switch filter.sort {
         case .title:
-            return matches.sorted {
+            sorted = matches.sorted {
                 displayName($0.title).localizedStandardCompare(displayName($1.title)) == .orderedAscending
             }
-        case .rating: return matches.sorted { $0.rating == $1.rating ? $0.updated > $1.updated : $0.rating > $1.rating }
+        case .recent:
+            sorted = matches.sorted { $0.updated < $1.updated }
+        case .rating:
+            sorted = matches.sorted { $0.rating == $1.rating ? $0.updated < $1.updated : $0.rating < $1.rating }
+        case .progress:
+            sorted = matches.sorted { $0.progress == $1.progress ? $0.updated < $1.updated : $0.progress < $1.progress }
+        case .score:
+            sorted = matches.sorted { left, right in
+                let one = left.title.score ?? 0
+                let other = right.title.score ?? 0
+                guard one == other else { return one < other }
+                return displayName(left.title).localizedStandardCompare(displayName(right.title)) == .orderedAscending
+            }
         }
+        return filter.descending ? Array(sorted.reversed()) : sorted
     }
 
     private func entryRow(_ item: ListEntry) -> some View {
@@ -351,6 +541,236 @@ struct ListsScreen: View {
         self.removed = nil
         Haptics.success()
         update(removed.entry, change: removed.change)
+    }
+}
+
+/// A filter chip: one tap toggles it, and a chip that is on says so with a
+/// checkmark as well as a fill, so the sheet reads in whatever accent the app is
+/// set to instead of only in a shade of grey.
+private struct FilterChip: View {
+    let title: String
+    let isOn: Bool
+    let toggle: () -> Void
+
+    var body: some View {
+        Button(action: toggle) {
+            HStack(spacing: 5) {
+                Text(title)
+                if isOn {
+                    Image(systemName: "checkmark")
+                        .font(.caption2.weight(.bold))
+                        .accessibilityHidden(true)
+                }
+            }
+            .font(.subheadline)
+            .foregroundStyle(isOn ? .primary : .secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .frame(minHeight: 44)
+            .background(isOn ? Palette.fill : Color.clear, in: .capsule)
+            .overlay {
+                Capsule()
+                    .strokeBorder(isOn ? Palette.border : Palette.hairline)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(.capsule)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isOn ? [.isSelected] : [])
+    }
+}
+
+/// The lists screen's order and filters in one sheet: the sort a list is read
+/// in and which direction, then the status, format, entry and year chips that
+/// narrow it. Every choice is written back to the list as it is made, so the
+/// sheet needs no Done, and Reset returns to everything kept.
+struct ListFilterSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let kind: Kind
+    @Binding var filter: ListFilter
+
+    private var isReset: Bool { filter == ListFilter.defaults(for: kind) }
+    private var directionLabel: String { filter.descending ? "Descending order" : "Ascending order" }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 26) {
+                    sortPanel
+                    group("Status") {
+                        ForEach(kind.statuses, id: \.self) { status in
+                            FilterChip(title: statusLabel(status), isOn: filter.statuses.contains(status)) {
+                                toggleStatus(status)
+                            }
+                        }
+                    }
+                    group("Format") {
+                        ForEach(ListFilter.allFormats, id: \.self) { format in
+                            FilterChip(title: format, isOn: filter.formats.contains(format)) {
+                                toggleFormat(format)
+                            }
+                        }
+                    }
+                    group("Entry Details") {
+                        ForEach(ListDetailFilter.allCases) { detail in
+                            FilterChip(title: detail.rawValue, isOn: filter.details.contains(detail)) {
+                                toggleDetail(detail)
+                            }
+                        }
+                    }
+                    yearField
+                }
+                .padding(LedgerLayout.inset)
+                .frame(maxWidth: 640)
+                .frame(maxWidth: .infinity)
+            }
+            .scrollDismissesKeyboard(.interactively)
+            .background(Palette.background.ignoresSafeArea())
+            .navigationTitle("Sort and Filter")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { dismiss() } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel("Close")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Reset") { filter = .defaults(for: kind) }
+                        .disabled(isReset)
+                }
+            }
+            .sensoryFeedback(.selection, trigger: filter.selectionKey)
+        }
+        .presentationDetents([.large])
+        .presentationDragIndicator(.visible)
+        // The sheet's cards are the app's own surface on its own canvas, so the
+        // sheet sits on the black the lists are drawn on rather than on the
+        // lighter sheet colour the editor uses for a system Form.
+        .presentationBackground(Palette.background)
+    }
+
+    /// The order a list reads in: its sort in a menu, a round control that
+    /// turns it around, and the direction spelled out under it.
+    private var sortPanel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 10) {
+                Text("Sort").font(.body)
+                Spacer(minLength: 8)
+                Button { filter.descending.toggle() } label: {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(width: 38, height: 38)
+                        .ledgerGlassCircle()
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(directionLabel)
+                .accessibilityHint("Turns the order around")
+                Menu {
+                    Picker("Sort", selection: $filter.sort) {
+                        ForEach(ListSort.allCases) { Text($0.rawValue).tag($0) }
+                    }
+                    .pickerStyle(.inline)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(filter.sort.rawValue).font(.body)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
+                    }
+                    .frame(minHeight: 44)
+                }
+                .accessibilityLabel("Sort by \(filter.sort.rawValue)")
+            }
+            HStack {
+                Spacer(minLength: 8)
+                Text(directionLabel).font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Palette.surface, in: .rect(cornerRadius: LedgerLayout.panelRadius))
+        .overlay {
+            RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
+                .strokeBorder(Palette.hairline)
+                .allowsHitTesting(false)
+        }
+        // A sort that reads newest or highest first starts the other way, so
+        // choosing it does not land the reader on the quietest rows.
+        .onChange(of: filter.sort) { _, sort in filter.descending = sort.readsDescending }
+    }
+
+    private func group<Content: View>(
+        _ title: String, @ViewBuilder content: () -> Content
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(title.uppercased())
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            FlowLayout { content() }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Palette.surface, in: .rect(cornerRadius: LedgerLayout.panelRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
+                        .strokeBorder(Palette.hairline)
+                        .allowsHitTesting(false)
+                }
+        }
+    }
+
+    private var yearField: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Year".uppercased())
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityAddTraits(.isHeader)
+            HStack(spacing: 8) {
+                Text("Released in").font(.body)
+                Spacer(minLength: 12)
+                TextField("Any year", text: $filter.year)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospacedDigit())
+                    .frame(maxWidth: 110)
+                    .accessibilityLabel("Released in")
+                if !filter.year.isEmpty {
+                    Button { filter.year = "" } label: { Image(systemName: "xmark.circle") }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel("Clear the year")
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .frame(minHeight: 48)
+            .background(Palette.surface, in: .rect(cornerRadius: LedgerLayout.panelRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
+                    .strokeBorder(Palette.hairline)
+                    .allowsHitTesting(false)
+            }
+        }
+        .onChange(of: filter.year) { _, value in
+            let digits = String(value.filter(\.isNumber).prefix(4))
+            if digits != value { filter.year = digits }
+        }
+    }
+
+    private func toggleStatus(_ status: String) {
+        if filter.statuses.contains(status) { filter.statuses.remove(status) }
+        else { filter.statuses.insert(status) }
+    }
+
+    private func toggleFormat(_ format: String) {
+        if filter.formats.contains(format) { filter.formats.remove(format) }
+        else { filter.formats.insert(format) }
+    }
+
+    private func toggleDetail(_ detail: ListDetailFilter) {
+        if filter.details.contains(detail) { filter.details.remove(detail) }
+        else { filter.details.insert(detail) }
     }
 }
 

@@ -7,7 +7,8 @@ its own.
 
 ## Features
 
-- **Anime and Manga lists** — status groups, search, sorting, pagination, swipe-to-update progress, swipe to
+- **Anime and Manga lists** — status groups, a Sort and Filter sheet for the order, direction, status, format
+  and entry filters, search, pagination, swipe-to-update progress, swipe to
   remove, and a full editor for scores, repeat counts, dates, notes and custom lists.
 - **Discover** — seasonal and ranked shelves, per-kind search, and genre, theme, studio and producer facets.
 - **Title pages** — summary, metadata, relations, characters, recommendations, trailer, theme songs, reviews,
