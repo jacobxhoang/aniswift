@@ -1182,7 +1182,7 @@ private struct StackSummary: View {
                                 .underline()
                         }
                         .buttonStyle(.plain)
-                        .accessibilityHint("Opens this stack in AniLedger")
+                        .accessibilityHint("Opens this stack in Aniswift")
                         .padding(.vertical, 2)
                         .contentShape(Rectangle())
                     }

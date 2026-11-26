@@ -1,4 +1,4 @@
-# AniLedger — Project and API Analysis
+# Aniswift — Project and API Analysis
 
 Static analysis of the repository at commit `45c6128` (2026-11-25), plus read-only probes of the three live
 APIs. Documentation was revised on 2026-11-25 for the settings layer, the preferred-title-language behaviour and
@@ -8,12 +8,12 @@ build behaviour is unverified.
 
 ## 1. At a glance
 
-AniLedger is a native SwiftUI anime and manga tracker for iPhone and iPad (iOS 17+ deployment target, built with
+Aniswift is a native SwiftUI anime and manga tracker for iPhone and iPad (iOS 17+ deployment target, built with
 Xcode 26). It signs in to MyAnimeList with OAuth, keeps the user's anime/manga lists in sync, browses a catalog,
 and follows friends' public activity. A settings layer controls the accent color, display language, link
 handling, launch tab, tab-bar behavior, cache clearing and which groups appear on a title page. There is no
 backend and no database: the app talks directly to three third-party HTTP APIs and keeps state on the device.
-`AniLedgerTests` holds Swift Testing suites for the shared decoder, title parsing, the activity-date heuristics,
+`AniswiftTests` holds Swift Testing suites for the shared decoder, title parsing, the activity-date heuristics,
 stack-link parsing, the store's list sync and the OAuth callback; there are no UI or network tests.
 
 The repository used to contain a web app and a Cloudflare Worker (`web/*`, `worker.js`, `package.json`, Render
@@ -24,53 +24,53 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 
 | Item | Value |
 | --- | --- |
-| Xcode project | `ios/AniLedger.xcodeproj` (`objectVersion = 56`), shared scheme **AniLedger** |
-| Bundle identifier | `org.aniledger.ios` |
+| Xcode project | `ios/Aniswift.xcodeproj` (`objectVersion = 56`), shared scheme **Aniswift** |
+| Bundle identifier | `org.aniswift.ios` |
 | Deployment target | iOS 17.0 (device family 1,2: iPhone and iPad) |
 | Swift | 5.0; Liquid Glass and tab-bar-minimize paths guarded by `#available(iOS 26.0, *)` |
 | Version | `MARKETING_VERSION = 1.0`, `CURRENT_PROJECT_VERSION = 1` |
 | Dependencies | **Kingfisher 8.12.0** (images), pinned `exactVersion`, via Swift Package Manager |
-| Tests | `AniLedgerTests` unit-test bundle, Swift Testing, hosted by the app target; six suites, no UI tests |
-| Privacy | `ios/AniLedger/PrivacyInfo.xcprivacy`: no tracking, no developer-collected data, UserDefaults and file timestamps |
+| Tests | `AniswiftTests` unit-test bundle, Swift Testing, hosted by the app target; six suites, no UI tests |
+| Privacy | `ios/Aniswift/PrivacyInfo.xcprivacy`: no tracking, no developer-collected data, UserDefaults and file timestamps |
 | Formatting | `swift-format` from the Xcode 26 toolchain against the repository's `.swift-format` (120 columns, 4 spaces, existing line breaks respected); CI lints only files a change touches |
-| URL scheme | `org.aniledger.ios` (OAuth callback `org.aniledger.ios://oauth`) |
-| Info.plist | placeholder key `AniLedgerMALClientID` (empty in the repo), portrait + landscape orientations |
+| URL scheme | `org.aniswift.ios` (OAuth callback `org.aniswift.ios://oauth`) |
+| Info.plist | placeholder key `AniswiftMALClientID` (empty in the repo), portrait + landscape orientations |
 | Assets | App icon |
-| Preferences | `UserDefaults.standard`, all keys prefixed `aniledger.settings.`; app-wide, not per account |
+| Preferences | `UserDefaults.standard`, all keys prefixed `aniswift.settings.`; app-wide, not per account |
 | CI jobs | `format`, `test`, `ipa`, `release` in `.github/workflows/ios.yml`; one build per push, releases on `ios-v*` tags |
 
 ## 3. File map
 
 | Path | Lines | Contents |
 | --- | ---: | --- |
-| `README.md` | 55 | Product overview, requirements, data sources, documentation links, repository layout |
-| `ios/README.md` | 261 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 430 | This analysis: structure, APIs, state, caching, settings, CI and risks |
-| `ios/AniLedger/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
-| `ios/AniLedger/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/AniLedger/Store.swift` | 855 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
-| `ios/AniLedger/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/AniLedger/AniLedgerApp.swift` | 1376 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
-| `ios/AniLedger/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
-| `ios/AniLedger/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/AniLedger/TitleScreen.swift` | 2019 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
-| `ios/AniLedger/CharacterScreen.swift` | 710 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
-| `ios/AniLedgerTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
-| `ios/AniLedgerTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
-| `ios/AniLedgerTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
-| `ios/AniLedgerTests/StoreTests.swift` | 175 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting and feed-cursor tests |
-| `ios/AniLedgerTests/CallbackTests.swift` | 52 | `MALCallback` redirect validation: scheme, host, path, fragment, state and code |
-| `ios/AniLedgerTests/StackLinkTests.swift` | 59 | `StackLink` stack-URL parsing and description segmentation |
-| `ios/AniLedger/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
-| `ios/AniLedger/PrivacyInfo.xcprivacy` | 31 | Privacy manifest: no tracking, no collected data types, UserDefaults and file-timestamp reasons |
+| `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
+| `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
+| `ARCHITECTURE.md` | 439 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/Aniswift/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
+| `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
+| `ios/Aniswift/Store.swift` | 855 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
+| `ios/Aniswift/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
+| `ios/Aniswift/AniswiftApp.swift` | 1376 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
+| `ios/Aniswift/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
+| `ios/Aniswift/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
+| `ios/Aniswift/TitleScreen.swift` | 2019 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/Aniswift/CharacterScreen.swift` | 710 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
+| `ios/AniswiftTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
+| `ios/AniswiftTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
+| `ios/AniswiftTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
+| `ios/AniswiftTests/StoreTests.swift` | 175 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting and feed-cursor tests |
+| `ios/AniswiftTests/CallbackTests.swift` | 52 | `MALCallback` redirect validation: scheme, host, path, fragment, state and code |
+| `ios/AniswiftTests/StackLinkTests.swift` | 59 | `StackLink` stack-URL parsing and description segmentation |
+| `ios/Aniswift/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
+| `ios/Aniswift/PrivacyInfo.xcprivacy` | 31 | Privacy manifest: no tracking, no collected data types, UserDefaults and file-timestamp reasons |
 | `ios/build-signed.sh` | 83 | Ad Hoc IPA export: temporary keychain, profile validation, manual signing, `release-testing` export |
-| `.github/workflows/ios.yml` | 271 | Format check (skipping the unformatted files), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release |
+| `.github/workflows/ios.yml` | 342 | Format check (skipping the unformatted files), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release, rolling nightly prerelease |
 | `.gitignore` | 3 | `.env`, `.env.*`, `artifacts/` |
 
 ## 4. Architecture
 
 ```
-AniLedgerApp (@main)
+AniswiftApp (@main)
  └ TabView: Anime | Manga | Discover | Feed | Profile
     each tab = NavigationStack + navigationDestination for
     Title, Friend, CharacterReference, PersonReference, CatalogFacet and
@@ -101,7 +101,7 @@ State ownership:
 - **Keychain** — the MyAnimeList session (client ID, access token, refresh token, expiry).
 - **Caches directory** — list snapshot, friends-feed snapshot, public profile cache and saved title pages. All
   written with `.completeFileProtectionUntilFirstUserAuthentication`, off the main actor through `SnapshotWriter`.
-- **UserDefaults** — settings (`aniledger.settings.*`), per-account custom lists and hidden titles, the MAL
+- **UserDefaults** — settings (`aniswift.settings.*`), per-account custom lists and hidden titles, the MAL
   client ID, legacy saved favorites.
 - **Kingfisher** — poster/avatar memory (1 hour) and disk (30 days, 500 MB) caches; images are downsampled to the
   size they are drawn at.
@@ -203,18 +203,18 @@ On top of that:
 
 ## 7. Authentication and session flow
 
-1. **Client ID**: UserDefaults `aniledger.mal.nativeClientID` → Info.plist `AniLedgerMALClientID` (CI can inject it)
+1. **Client ID**: UserDefaults `aniswift.mal.nativeClientID` → Info.plist `AniswiftMALClientID` (CI can inject it)
    → prompt in `SignInButton` on a first sign-in. Settings → Behavior also sets or clears it, validating the same
    `^[A-Za-z0-9]{32}$` shape and showing only the last four characters.
 2. **PKCE**: 32 bytes from `SecRandomCopyBytes`, base64url-unpadded, used as `code_verifier` **and** `code_challenge`
    with `code_challenge_method=plain`; a second random value is the OAuth `state`.
 3. **Authorize**: `ASWebAuthenticationSession` on the key window. Session, `code`, and redirect are validated
-   strictly: scheme `org.aniledger.ios`, host `oauth`, empty path, no user/password/port/fragment, exactly one
+   strictly: scheme `org.aniswift.ios`, host `oauth`, empty path, no user/password/port/fragment, exactly one
    `state` equal to the generated value, exactly one non-empty `code`.
 4. **Exchange**: `POST /oauth2/token` with `grant_type=authorization_code`, `code`, `redirect_uri`,
    `code_verifier`, `client_id`. Then `GET /users/@me` with the new access token to read the account.
 5. **Persist**: session JSON (client ID, access/refresh token, expiry) in the Keychain
-   (`kSecClassGenericPassword`, service `org.aniledger.ios`, account `mal-native-session`,
+   (`kSecClassGenericPassword`, service `org.aniswift.ios`, account `mal-native-session`,
    `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`). `sessionGeneration` rotates so stale work is dropped.
 6. **Refresh**: before a private request when expiry is under 60 seconds, or after a 401 (then the request is retried
    once). A 400/401 from the refresh endpoint signs the user out with “Your MyAnimeList session expired.”
@@ -229,15 +229,15 @@ On top of that:
 | Layer | Behaviour |
 | --- | --- |
 | Catalog memory cache | 5-minute TTL keyed by resolved URL, 1 minute for `users/*` lists, friends and activity so user data refreshes on open; capped at 160 entries with oldest-first eviction; `refresh: true` bypasses reads but still writes. A title page also seeds `record` from `cachedDetail` so a revisit paints its summary and sections before the network answers. `hasCachedCatalog` lets Settings report catalog-only caches; `clearCatalogCache()` drops the dictionary and the saved detail files. |
-| Saved title pages | `Caches/AniLedgerDetailCache/<kind>-<id>-full.json`: the raw `anime|manga/{id}/full` body written after a successful catalog read (< 2 MB). Used only when the live request fails and nothing is in memory: the page paints the saved payload under a “Showing saved data” note with Retry, instead of an error or an empty screen. |
+| Saved title pages | `Caches/AniswiftDetailCache/<kind>-<id>-full.json`: the raw `anime|manga/{id}/full` body written after a successful catalog read (< 2 MB). Used only when the live request fails and nothing is in memory: the page paints the saved payload under a “Showing saved data” note with Retry, instead of an error or an empty screen. |
 | In-flight de-duplication | one shared `Task` per catalog URL |
 | Title lookups | one `Task` per `Title.id`; a 6-slot `CheckedContinuation` gate limits concurrent Tenrai detail fetches |
-| List snapshot | `AniLedger-lists-v1.json`: account + `[Kind: SavedList(items, page, more, needsReconciliation)]` |
-| Friends feed | `AniLedger-friends-feed-v1.json`: account ID, friends, activity, checked count, history cursors, page, English names |
-| Public profiles | `AniLedger-profiles-v1.json`: stats/favorites per user with **15-minute** freshness |
+| List snapshot | `Aniswift-lists-v1.json`: account + `[Kind: SavedList(items, page, more, needsReconciliation)]` |
+| Friends feed | `Aniswift-friends-feed-v1.json`: account ID, friends, activity, checked count, history cursors, page, English names |
+| Public profiles | `Aniswift-profiles-v1.json`: stats/favorites per user with **15-minute** freshness |
 | Saved-data state | Per-profile and feed `PublicDataStatus` (stale flag, last failure, snapshot time). Public refreshes honour Jikan Edge `meta.stale`/`refreshFailed`, keep the previous snapshot on screen, and back off 15/30/60 s (three automatic attempts, reset by pull-to-refresh or Retry). |
-| Custom lists | UserDefaults `aniledger.organization.v1.<accountID>` |
-| Settings | UserDefaults `aniledger.settings.*`; Clear Cache does not touch them |
+| Custom lists | UserDefaults `aniswift.organization.v1.<accountID>` |
+| Settings | UserDefaults `aniswift.settings.*`; Clear Cache does not touch them |
 | Images | Kingfisher memory + disk, with `DownsamplingImageProcessor` sized from `GeometryReader` and `displayScale`; fades disabled under Reduce Motion; the friends feed and both list screens prefetch their first 30 posters through `View.prefetchingPosters(_:limit:url:)`, keyed on the row ids |
 
 Concurrency patterns:
@@ -277,7 +277,7 @@ and an in-app `SFSafariViewController` whose controls use the selected accent.
 
 ## 10. Settings and personalization
 
-All preferences are stored in `UserDefaults.standard` under `aniledger.settings.*` and read with `@AppStorage`,
+All preferences are stored in `UserDefaults.standard` under `aniswift.settings.*` and read with `@AppStorage`,
 so a change updates open screens without a restart. They are **device-wide**: switching MyAnimeList accounts or
 signing out does not reset them, and they never sync.
 
@@ -287,12 +287,12 @@ signing out does not reset them, and they never sync.
 | Preferred Title Language | `titleLanguage` | `English` | Display-only name choice through `Title.displayName(for:)`; English falls back to Romaji and vice versa. Used by title pages, `PreferredTitle` tiles/rows, list sorting, stack entries, review headers/reader and editor prompts. List search matches either name. |
 | Open Links In-App | `openLinksInApp` | `true` | `OpenURLAction` presents http(s) links in `SFSafariViewController`; if no foreground scene can present it, the action returns `.systemAction` so the link still opens. |
 | Ask for Score After Watching an Anime | `askForScore` | `true` | In `ListEditor`, a transition to `completed` with rating 0 opens the score prompt; the editor skips entries already completed, and the prompt never opens from the score sheet itself. The title's Mark completed action asks whenever the update is completed and the entry still has no score. Anime only. |
-| Enable Preferred Launch Screen | `preferredLaunch` | `false` | `AniLedgerApp.init()` chooses `launchTab` instead of `lastTab` for the initial tab. |
+| Enable Preferred Launch Screen | `preferredLaunch` | `false` | `AniswiftApp.init()` chooses `launchTab` instead of `lastTab` for the initial tab. |
 | Preferred Screen | `launchTab` | `anime` | Anime, Manga, Discover, Feed or Profile. |
 | Last Used Tab | `lastTab` | `anime` | Written whenever the selected tab changes; used when preferred launch is off. |
 | Tab Bar Behavior | `tabBarBehavior` | `never` | iOS 26 only: `never` (always visible) or `onScrollDown` (`.tabBarMinimizeBehavior`). |
 
-Details Page toggles use `aniledger.settings.details.<anime|manga>.<section>` and all default to `true`. There
+Details Page toggles use `aniswift.settings.details.<anime|manga>.<section>` and all default to `true`. There
 are 17 anime keys and 14 manga keys (31 total):
 
 | Group | Section keys | UI |
@@ -314,7 +314,7 @@ repopulate an entry.
 
 ## 11. CI and release
 
-`Build AniLedger IPA` runs on pushes to `main`, on tags matching `ios-v*`, on pull requests touching `ios/**` or
+`Build Aniswift IPA` runs on pushes to `main`, on tags matching `ios-v*`, on pull requests touching `ios/**` or
 the workflow, and manually with a `signed` flag. A newer push of the same branch cancels the run it supersedes;
 pull requests never publish.
 
@@ -324,18 +324,24 @@ pull requests never publish.
    formatter and have never been formatted in bulk. The job is advisory: it is not in the `ipa` job's `needs`, so a
    lint failure is reported without stopping a build.
 2. `test` (macos-15) selects Xcode 26 and the newest available iPhone simulator, runs `xcodebuild test` for the
-   `AniLedger` scheme (arm64, signing disabled) against the six suites in `AniLedgerTests`, and uploads the
+   `Aniswift` scheme (arm64, signing disabled) against the six suites in `AniswiftTests`, and uploads the
    `.xcresult` when the run fails. The Swift package cache is restored between runs.
 3. `ipa` (macos-15) needs `test`. The test result is advisory until the repository variable `TESTS_GATE` is `on`;
    after that a failing suite blocks the IPA. The job builds **one** tree — the tip of the push, the tagged
    commit or the pull request — selects Xcode 26, injects `MAL_IOS_CLIENT_ID` into Info.plist for every build
    that is not a pull request after validating 32 alphanumerics, then archives unsigned
-   (`CODE_SIGNING_ALLOWED=NO`) and zips `Payload/` into `AniLedger-Unsigned.ipa`. The `signed` path runs
+   (`CODE_SIGNING_ALLOWED=NO`) and zips `Payload/` into `Aniswift-Unsigned.ipa`. The `signed` path runs
    `ios/build-signed.sh`: temporary keychain, Ad Hoc profile validation (registered devices, no
    `get-task-allow`, explicit App ID), team/bundle derived from the profile, manual `Apple Distribution` signing,
    `release-testing` export.
 4. `release` publishes the IPA on the `ios-v*` tag that triggered the run, idempotently uploading the asset if it
    is missing. A branch push publishes nothing.
+5. `nightly` needs `ipa` and runs only for a push to `main`: it downloads `Aniswift-Unsigned.ipa`, renames it to
+   `Aniswift-Nightly-Unsigned.ipa` and publishes it to one rolling prerelease tagged `nightly`, whose tag moves to
+   the built commit on every run. The asset name never changes, so the download link is stable; the release notes
+   list the commits since the previous nightly, read from the tag before it moves. Because `releases/latest` skips
+   prereleases, the stable download stays the newest `ios-v*` tag. While `TESTS_GATE` is off a red suite still
+   publishes a nightly — that is what the channel is for — and setting the gate stops it.
 
 A build used to be produced for every first-parent commit in a push and published as a prerelease per commit.
 That multiplied macOS runner minutes by the commit count and made the release list unreadable, so the matrix and
@@ -399,12 +405,15 @@ its `commits` job are gone: one push is one build, and a release is a tag.
     page counter, so pagination continues instead of stopping silently.
 19. **A title page scans a bounded set of friends.** Friends' list activity checks at most 18 friends per title
     page (`TitleScreen.friendScanLimit`); every other friend is still reachable from the feed and their profile.
+20. **The nightly asset is overwritten in place.** `Aniswift-Nightly-Unsigned.ipa` keeps its name so the download
+    link is stable, which means a rebuild replaces it under the same URL: a cached or CDN copy can still hand out
+    the previous nightly, and the build number in About is how two of them are told apart.
 
 ## 13. How this analysis was produced
 
 - Every Swift file, `Info.plist`, the Xcode project and scheme, both READMEs, `ios/build-signed.sh`, the workflow,
   `.swift-format` and `.gitignore` were read in full; the file map line counts come from `wc -l`.
-- Settings were checked against their actual read sites: `@AppStorage` keys in `TitleScreen`, `AniLedgerApp` and
+- Settings were checked against their actual read sites: `@AppStorage` keys in `TitleScreen`, `AniswiftApp` and
   `SettingsScreen`, the title-language helper in `Models`, and the cache/`InAppBrowser` paths.
 - Live APIs were called read-only (no authentication, no writes) to confirm provider split, response envelopes,
   JSON key casing and pagination fields:

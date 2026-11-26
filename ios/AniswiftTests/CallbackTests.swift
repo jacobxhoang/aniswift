@@ -1,14 +1,14 @@
 import Foundation
 import Testing
 
-@testable import AniLedger
+@testable import Aniswift
 
 @Suite("MyAnimeList callback")
 struct CallbackTests {
     private let state = "state-value"
 
     private func callback(_ query: String) -> URL? {
-        URL(string: "org.aniledger.ios://oauth?\(query)")
+        URL(string: "org.aniswift.ios://oauth?\(query)")
     }
 
     @Test("A matching state and code are accepted")
@@ -37,16 +37,16 @@ struct CallbackTests {
 
     @Test("A foreign host, scheme, path or fragment is rejected")
     func rejectsForeignCallback() throws {
-        let wrongHost = try #require(URL(string: "org.aniledger.ios://elsewhere?state=\(state)&code=abc"))
+        let wrongHost = try #require(URL(string: "org.aniswift.ios://elsewhere?state=\(state)&code=abc"))
         #expect(MALCallback.code(from: wrongHost, state: state) == nil)
 
         let wrongScheme = try #require(URL(string: "https://oauth?state=\(state)&code=abc"))
         #expect(MALCallback.code(from: wrongScheme, state: state) == nil)
 
-        let withPath = try #require(URL(string: "org.aniledger.ios://oauth/extra?state=\(state)&code=abc"))
+        let withPath = try #require(URL(string: "org.aniswift.ios://oauth/extra?state=\(state)&code=abc"))
         #expect(MALCallback.code(from: withPath, state: state) == nil)
 
-        let withFragment = try #require(URL(string: "org.aniledger.ios://oauth?state=\(state)&code=abc#next"))
+        let withFragment = try #require(URL(string: "org.aniswift.ios://oauth?state=\(state)&code=abc#next"))
         #expect(MALCallback.code(from: withFragment, state: state) == nil)
     }
 }

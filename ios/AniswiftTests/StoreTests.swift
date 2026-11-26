@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import AniLedger
+@testable import Aniswift
 
 /// A stand-in for the catalog and MyAnimeList client, so the store's sync,
 /// paging and failure paths run without a network or a signed-in session.

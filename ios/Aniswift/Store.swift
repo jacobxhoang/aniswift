@@ -512,7 +512,7 @@ final class Store: ObservableObject {
         organization = updated
     }
 
-    private func organizationKey(_ accountID: Int) -> String { "aniledger.organization.v1.\(accountID)" }
+    private func organizationKey(_ accountID: Int) -> String { "aniswift.organization.v1.\(accountID)" }
 
     private func readOrganization(for user: Account) -> ListOrganization {
         guard let data = UserDefaults.standard.data(forKey: organizationKey(user.id)) else { return ListOrganization() }
@@ -815,7 +815,7 @@ func plainMessage(_ error: Error, fallback: String) -> String {
     guard let failure = error as? URLError else { return fallback }
     switch failure.code {
     case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
-        return "AniLedger could not reach the internet."
+        return "Aniswift could not reach the internet."
     case .timedOut:
         return "The request took too long. Try again."
     default:

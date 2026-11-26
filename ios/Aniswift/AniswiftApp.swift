@@ -5,7 +5,7 @@ import UIKit
 
 @main
 @MainActor
-struct AniLedgerApp: App {
+struct AniswiftApp: App {
     @StateObject private var store = Store()
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
@@ -1318,7 +1318,7 @@ struct AboutScreen: View {
             Section("App") {
                 LabeledContent("Version", value: version).listRowBackground(Color.clear)
                 Link(destination: URL(string: "https://github.com/jacobxhoang/aniledger")!) {
-                    row("AniLedger on GitHub", detail: "Source code and iOS releases", symbol: "arrow.up.right")
+                    row("Aniswift on GitHub", detail: "Source code and iOS releases", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)
             }
@@ -1340,7 +1340,7 @@ struct AboutScreen: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
-        .navigationTitle("About AniLedger")
+        .navigationTitle("About Aniswift")
         .navigationBarTitleDisplayMode(.inline)
     }
 

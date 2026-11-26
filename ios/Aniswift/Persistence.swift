@@ -13,7 +13,7 @@ struct PublicDataStatus: Equatable {
 /// write itself moves to one serial queue, so the main actor never waits on the
 /// disk and two writes to the same file cannot land out of order.
 enum SnapshotWriter {
-    private static let queue = DispatchQueue(label: "org.aniledger.snapshot-writes", qos: .utility)
+    private static let queue = DispatchQueue(label: "org.aniswift.snapshot-writes", qos: .utility)
 
     static func write(_ data: Data, to file: URL) {
         queue.async {
@@ -76,7 +76,7 @@ struct FriendFeedCache: Codable {
     let englishNames: [String: String]?
     let savedAt: Date?
 
-    private static let file = URL.cachesDirectory.appending(path: "AniLedger-friends-feed-v1.json")
+    private static let file = URL.cachesDirectory.appending(path: "Aniswift-friends-feed-v1.json")
 
     static func read() -> Self? {
         guard let data = try? Data(contentsOf: file) else { return nil }
@@ -98,7 +98,7 @@ struct ListCache: Codable {
     let lists: [Kind: SavedList]
 
     private static var file: URL {
-        URL.cachesDirectory.appending(path: "AniLedger-lists-v1.json")
+        URL.cachesDirectory.appending(path: "Aniswift-lists-v1.json")
     }
 
     static func read() -> Self? {
@@ -190,7 +190,7 @@ struct ProfileSnapshot: Codable {
 }
 
 enum ProfileCache {
-    private static let file = URL.cachesDirectory.appending(path: "AniLedger-profiles-v1.json")
+    private static let file = URL.cachesDirectory.appending(path: "Aniswift-profiles-v1.json")
 
     static func read() -> [String: ProfileSnapshot] {
         guard let data = try? Data(contentsOf: file) else { return [:] }

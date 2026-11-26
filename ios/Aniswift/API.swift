@@ -19,7 +19,7 @@ struct Page<Value> {
 /// or a state that does not match the one this attempt generated must never be
 /// treated as a completed sign-in.
 enum MALCallback {
-    static let scheme = "org.aniledger.ios"
+    static let scheme = "org.aniswift.ios"
     static let url = "\(scheme)://oauth"
 
     static func code(from url: URL, state: String) -> String? {
@@ -53,7 +53,7 @@ private final class MALTransport: NSObject, URLSessionTaskDelegate {
 private enum SessionKeychain {
     static let key: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: "org.aniledger.ios",
+        kSecAttrService as String: "org.aniswift.ios",
         kSecAttrAccount as String: "mal-native-session"
     ]
 
@@ -122,7 +122,7 @@ final class API: APIClient {
     static let redirectURI = MALCallback.url
     private static let mal = URL(string: "https://api.myanimelist.net/v2")!
     private static let oauth = URL(string: "https://myanimelist.net/v1/oauth2")!
-    private static let clientIDKey = "aniledger.mal.nativeClientID"
+    private static let clientIDKey = "aniswift.mal.nativeClientID"
     private let tenrai = URL(string: "https://api.tenrai.org/v1")!
     private let jikan = URL(string: "https://jikan.lucashdo.com/v1")!
     private var malSession = SessionKeychain.read()
@@ -215,7 +215,7 @@ final class API: APIClient {
         guard let base = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
             return nil
         }
-        let directory = base.appending(path: "AniLedgerDetailCache", directoryHint: .isDirectory)
+        let directory = base.appending(path: "AniswiftDetailCache", directoryHint: .isDirectory)
         if !FileManager.default.fileExists(atPath: directory.path) {
             try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
@@ -429,7 +429,7 @@ final class API: APIClient {
     var configuredClientID: String? {
         get {
             if let saved = UserDefaults.standard.string(forKey: Self.clientIDKey), !saved.isEmpty { return saved }
-            guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniLedgerMALClientID") as? String,
+            guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniswiftMALClientID") as? String,
                 !bundled.isEmpty
             else { return nil }
             return bundled
@@ -650,7 +650,7 @@ private final class LoginBrowser: NSObject, ASWebAuthenticationPresentationConte
     }
 
     func authenticate(_ start: URL, scheme: String) async throws -> URL {
-        guard window != nil else { throw APIError(status: 0, message: "Bring AniLedger to the foreground and try again.") }
+        guard window != nil else { throw APIError(status: 0, message: "Bring Aniswift to the foreground and try again.") }
         defer { session = nil }
         return try await withCheckedThrowingContinuation { continuation in
             let browser = ASWebAuthenticationSession(url: start, callbackURLScheme: scheme) { url, error in

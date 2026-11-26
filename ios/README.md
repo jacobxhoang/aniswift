@@ -1,6 +1,6 @@
-# AniLedger for iOS
+# Aniswift for iOS
 
-AniLedger is a native SwiftUI anime and manga tracker for iPhone and iPad running iOS 17 or newer. It uses
+Aniswift is a native SwiftUI anime and manga tracker for iPhone and iPad running iOS 17 or newer. It uses
 MyAnimeList for accounts and personal lists, Tenrai for catalog data, and Jikan Edge for catalog fallback and
 public friend activity.
 
@@ -9,19 +9,19 @@ disk caching, decoded at the size they are drawn. Xcode resolves the package on 
 
 ## Run on a Mac
 
-1. Open `AniLedger.xcodeproj` in Xcode 26 with the iOS 26 SDK installed.
-2. Select the **AniLedger** scheme and an iPhone or iPad simulator. Press Run.
+1. Open `Aniswift.xcodeproj` in Xcode 26 with the iOS 26 SDK installed.
+2. Select the **Aniswift** scheme and an iPhone or iPad simulator. Press Run.
 3. For a physical device, select your team under **Signing & Capabilities**, choose a bundle ID available to
    that team if needed, and run on the device.
 
 Command line simulator build:
 
 ```sh
-xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
+xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
   -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build
 ```
 
-## Using AniLedger
+## Using Aniswift
 
 | Tab | What you can do |
 | --- | --- |
@@ -63,7 +63,7 @@ controls use interactive Liquid Glass on iOS 26 and translucent material on earl
 
 ## Settings
 
-Open **Profile → gear → Settings**. Settings also holds About AniLedger and Sign Out; the share button at the top
+Open **Profile → gear → Settings**. Settings also holds About Aniswift and Sign Out; the share button at the top
 left of Profile shares your MyAnimeList profile. Settings apply to the whole app and are stored on this device;
 they are not per account and are never synced to MyAnimeList.
 
@@ -78,7 +78,7 @@ checkmark, or updates without animation when Reduce Motion is on.
 | Setting | Default | Effect |
 | --- | --- | --- |
 | Preferred Title Language | English | Shows English titles when a translation exists, otherwise the original; Romaji shows the original title with the English name as fallback. Applies to title pages, lists, shelves, sorting, stacks, reviews and editor prompts. |
-| Open Links In-App | On | Opens http(s) links from titles, profiles, stacks and About in a Safari sheet inside AniLedger. When off, links open in the default browser. If no foreground window can present the sheet, the link opens outside the app instead of being dropped. |
+| Open Links In-App | On | Opens http(s) links from titles, profiles, stacks and About in a Safari sheet inside Aniswift. When off, links open in the default browser. If no foreground window can present the sheet, the link opens outside the app instead of being dropped. |
 | Ask for Score After Watching an Anime | On | After an anime is marked completed with no score — from the title's completion action, the quick status editor or the full editor — presents a score sheet. It never appears for manga or from the score editor itself; the editor path also skips an entry that was already completed. |
 | Enable Preferred Launch Screen | Off | When on, the app opens the selected screen (Anime, Manga, Discover, Feed or Profile) on every cold launch. When off, it restores the last tab you used. |
 | Preferred Screen | Anime | The tab used when preferred launch is enabled. |
@@ -132,7 +132,7 @@ so the title page asks for less. The remaining groups only change what is drawn.
 
 ### About
 
-Settings also links to **About AniLedger**: version and build, the three data providers, open-source library
+Settings also links to **About Aniswift**: version and build, the three data providers, open-source library
 credits, and source and support links. When signed in,
 **Sign Out** ends this device's MyAnimeList session and returns to the signed-out profile.
 
@@ -145,14 +145,14 @@ credits, and source and support links. When signed in,
 | Jikan Edge | Catalog fallback and public friends, favorites, statistics and activity |
 | Device storage | Keychain tokens, list/feed/profile snapshots, cached artwork and responses, preferences and custom lists |
 
-AniLedger can restore already downloaded list pages while it syncs with MyAnimeList. Kingfisher caches posters
+Aniswift can restore already downloaded list pages while it syncs with MyAnimeList. Kingfisher caches posters
 and avatars. Signing out clears the active session and its downloaded list snapshot; it does not reset settings,
 which stay on the device. Clearing the cache from Settings removes images, URL responses and in-memory catalog
 data without touching sign-in, lists, saved feed/profile snapshots or custom lists. Public profile sections
 depend on what the provider can retrieve.
 
 Snapshots are encoded on the screen's actor and written through one serial background queue, so a list edit or a
-feed page never waits on the disk. `AniLedger/PrivacyInfo.xcprivacy` carries the app's privacy manifest: no
+feed page never waits on the disk. `Aniswift/PrivacyInfo.xcprivacy` carries the app's privacy manifest: no
 tracking, no data collected by the developer, and required-reason access for `UserDefaults` and file timestamps.
 
 ## Direct MyAnimeList connection
@@ -162,8 +162,8 @@ provide catalog data and public activity. List snapshots, artwork caches, saved 
 stored on the device.
 
 1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create an application with App Type `iOS`.
-2. Register the exact redirect URL `org.aniledger.ios://oauth`.
-3. In AniLedger, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser
+2. Register the exact redirect URL `org.aniswift.ios://oauth`.
+3. In Aniswift, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser
    sign-in. To change it later, open **Settings → Behavior → MyAnimeList Client ID**.
 
 The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in
@@ -182,14 +182,29 @@ GitHub keeps the secret out of the repository and build logs. The Client ID is r
 If your registration requires the Client ID to remain undisclosed, leave the secret unset for public releases
 and enter it on the device. Use the iOS Client ID only.
 
-The **Build AniLedger IPA** workflow runs on pushes to `main`, on tags matching `ios-v*`, on pull requests
+The **Build Aniswift IPA** workflow runs on pushes to `main`, on tags matching `ios-v*`, on pull requests
 touching `ios/**` or the workflow, and manually. Each run builds one tree — the tip of the push, the tagged
-commit or the pull request — and uploads `AniLedger-Unsigned.ipa` as a workflow artifact. The unsigned file is a
+commit or the pull request — and uploads `Aniswift-Unsigned.ipa` as a workflow artifact. The unsigned file is a
 device build and requires signing before iOS can install it.
 
 A release is a tag. Push one (`git tag ios-v1.0.0 && git push origin ios-v1.0.0`) and the run publishes a
 [GitHub release](https://github.com/jacobxhoang/aniledger/releases) of that name with the IPA attached; a branch
 push publishes nothing. A newer push of the same branch cancels the run it supersedes.
+
+### Nightly builds
+
+Every push to `main` also republishes one rolling prerelease, the way SideStore runs its nightly channel. The
+`nightly` tag moves to the pushed commit and the asset keeps its name, so this link never changes:
+
+```text
+https://github.com/jacobxhoang/aniledger/releases/download/nightly/Aniswift-Nightly-Unsigned.ipa
+```
+
+That file is the tip of `main`, rebuilt on every push with the commit count as its build number — About
+Aniswift shows it, so two nightlies can be told apart — and its release notes list the commits since the previous
+one. It is unsigned like every artifact: sign it with your own profile, or import it into a sideloading tool, before
+installing it on a device. `releases/latest` skips prereleases, so the stable download stays the newest `ios-v*`
+tag. While `TESTS_GATE` is off a red suite still publishes a nightly; setting the gate stops that.
 
 For an installable Ad Hoc IPA, use an Apple Distribution certificate with its private key in a password-protected
 `.p12`, and an Ad Hoc provisioning profile for an explicit App ID that includes the devices you want to install
@@ -201,7 +216,7 @@ on. Add these repository Actions secrets:
 | `IOS_CERTIFICATE_PASSWORD` | Password used to export the `.p12` |
 | `IOS_PROFILE_BASE64` | Base64-encoded Ad Hoc `.mobileprovision` |
 
-In **Actions → Build AniLedger IPA → Run workflow**, enable **signed**. Download the `AniLedger-Signed` artifact.
+In **Actions → Build Aniswift IPA → Run workflow**, enable **signed**. Download the `Aniswift-Signed` artifact.
 The workflow uses the App ID and team from the provisioning profile and exports for its registered devices.
 
 ## Development tools
@@ -213,7 +228,7 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   ```
   The workflow's `format` job lints only the Swift files a change touches, so existing files are not
   reformatted in bulk.
-- **Tests** use Swift Testing in the `AniLedgerTests` target and cover the shared decoder, title parsing, the
+- **Tests** use Swift Testing in the `AniswiftTests` target and cover the shared decoder, title parsing, the
   activity-date heuristics, the store's list sync and failure reporting, the friend-feed cursor bookkeeping and
   the OAuth callback validation. The `test` job runs them on the newest available iPhone simulator. The IPA build
   depends on that job, but while the suite is still unproven the dependency is advisory: a red run is visible in
@@ -221,7 +236,7 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   (Settings → Secrets and variables → Actions → Variables) once the suite is green, and a failing run will then
   block the IPA and the release. Run them locally with:
   ```sh
-  xcodebuild test -project ios/AniLedger.xcodeproj -scheme AniLedger \
+  xcodebuild test -project ios/Aniswift.xcodeproj -scheme Aniswift \
     -destination 'platform=iOS Simulator,name=iPhone 16'
   ```
 ## Verification checklist

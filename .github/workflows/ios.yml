@@ -1,4 +1,4 @@
-name: Build AniLedger IPA
+name: Build Aniswift IPA
 on:
   push:
     branches: [main]
@@ -56,11 +56,11 @@ jobs:
           # Format one with `xcrun swift-format format --in-place <file>` and take
           # it off this list in the same change.
           UNFORMATTED: >-
-            ios/AniLedger/TitleScreen.swift
-            ios/AniLedger/CatalogScreens.swift
-            ios/AniLedger/SettingsScreen.swift
-            ios/AniLedger/Store.swift
-            ios/AniLedger/API.swift
+            ios/Aniswift/TitleScreen.swift
+            ios/Aniswift/CatalogScreens.swift
+            ios/Aniswift/SettingsScreen.swift
+            ios/Aniswift/Store.swift
+            ios/Aniswift/API.swift
         run: |
           set -euo pipefail
           if [[ -z "${BASE:-}" ]] || [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
@@ -93,7 +93,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('ios/AniLedger.xcodeproj/project.pbxproj') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/Aniswift.xcodeproj/project.pbxproj') }}
           restore-keys: spm-${{ runner.os }}-
       - name: Select Xcode 26
         shell: bash
@@ -129,11 +129,11 @@ jobs:
         run: |
           set -euo pipefail
           xcodebuild test \
-            -project ios/AniLedger.xcodeproj \
-            -scheme AniLedger \
+            -project ios/Aniswift.xcodeproj \
+            -scheme Aniswift \
             -destination "platform=iOS Simulator,id=${{ steps.simulator.outputs.udid }},arch=arm64" \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
-            -resultBundlePath "$RUNNER_TEMP/AniLedgerTests.xcresult" \
+            -resultBundlePath "$RUNNER_TEMP/AniswiftTests.xcresult" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             SWIFT_ENABLE_EXPLICIT_MODULES=NO \
             ARCHS=arm64 ONLY_ACTIVE_ARCH=YES
@@ -141,8 +141,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: AniLedgerTests-xcresult
-          path: ${{ runner.temp }}/AniLedgerTests.xcresult
+          name: AniswiftTests-xcresult
+          path: ${{ runner.temp }}/AniswiftTests.xcresult
           if-no-files-found: ignore
 
   ipa:
@@ -163,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/Library/Caches/org.swift.swiftpm
-          key: spm-${{ runner.os }}-${{ hashFiles('ios/AniLedger.xcodeproj/project.pbxproj') }}
+          key: spm-${{ runner.os }}-${{ hashFiles('ios/Aniswift.xcodeproj/project.pbxproj') }}
           restore-keys: spm-${{ runner.os }}-
       - name: Select Xcode 26
         shell: bash
@@ -194,14 +194,14 @@ jobs:
           import re
           from pathlib import Path
 
-          path = Path("ios/AniLedger/Info.plist")
+          path = Path("ios/Aniswift/Info.plist")
           with path.open("rb") as source:
               config = plistlib.load(source)
           client_id = os.environ.get("MAL_IOS_CLIENT_ID", "").strip()
-          if "AniLedgerMALClientID" in config and client_id:
+          if "AniswiftMALClientID" in config and client_id:
               if not re.fullmatch(r"[A-Za-z0-9]{32}", client_id):
                   raise SystemExit("MAL_IOS_CLIENT_ID must be a 32-character iOS Client ID.")
-              config["AniLedgerMALClientID"] = client_id
+              config["AniswiftMALClientID"] = client_id
               with path.open("wb") as output:
                   plistlib.dump(config, output, sort_keys=False)
           PY
@@ -210,17 +210,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="$RUNNER_TEMP/AniLedger.xcarchive"
+          archive="$RUNNER_TEMP/Aniswift.xcarchive"
           # The commit count makes every build identifiable in Settings > About.
           build=$(git rev-list --count HEAD)
-          xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
+          xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
             -configuration Release -destination 'generic/platform=iOS' \
             -archivePath "$archive" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
             CURRENT_PROJECT_VERSION="$build" archive
-          test -f "$archive/Products/Applications/AniLedger.app/AniLedger"
+          test -f "$archive/Products/Applications/Aniswift.app/Aniswift"
           mkdir -p "$RUNNER_TEMP/ipa/Payload"
-          ditto "$archive/Products/Applications/AniLedger.app" "$RUNNER_TEMP/ipa/Payload/AniLedger.app"
-          (cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$RUNNER_TEMP/AniLedger-Unsigned.ipa" Payload)
+          ditto "$archive/Products/Applications/Aniswift.app" "$RUNNER_TEMP/ipa/Payload/Aniswift.app"
+          (cd "$RUNNER_TEMP/ipa" && /usr/bin/zip -qry "$RUNNER_TEMP/Aniswift-Unsigned.ipa" Payload)
       - name: Sign and export IPA
         if: ${{ inputs.signed }}
         shell: bash
@@ -231,8 +231,8 @@ jobs:
         run: bash ios/build-signed.sh
       - uses: actions/upload-artifact@v4
         with:
-          name: ${{ inputs.signed && 'AniLedger-Signed' || 'AniLedger-Unsigned' }}
-          path: ${{ runner.temp }}/AniLedger-*.ipa
+          name: ${{ inputs.signed && 'Aniswift-Signed' || 'Aniswift-Unsigned' }}
+          path: ${{ runner.temp }}/Aniswift-*.ipa
           if-no-files-found: error
           overwrite: true
 
@@ -247,7 +247,7 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: AniLedger-Unsigned
+          name: Aniswift-Unsigned
           path: ${{ runner.temp }}/release-ipa
       - name: Publish the tagged release
         env:
@@ -256,16 +256,86 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          ipa="$RUNNER_TEMP/release-ipa/AniLedger-Unsigned.ipa"
+          ipa="$RUNNER_TEMP/release-ipa/Aniswift-Unsigned.ipa"
           test -f "$ipa"
           if gh release view "$TAG" --json assets > "$RUNNER_TEMP/release.json" 2>/dev/null; then
-            if jq -e 'any(.assets[]; .name == "AniLedger-Unsigned.ipa")' "$RUNNER_TEMP/release.json" >/dev/null; then
+            if jq -e 'any(.assets[]; .name == "Aniswift-Unsigned.ipa")' "$RUNNER_TEMP/release.json" >/dev/null; then
               echo "The IPA for $TAG is already published."
             else
               gh release upload "$TAG" "$ipa"
             fi
           else
             gh release create "$TAG" "$ipa" \
-              --title "AniLedger iOS ${TAG#ios-v}" --verify-tag \
+              --title "Aniswift iOS ${TAG#ios-v}" --verify-tag \
               --notes "Unsigned iOS device build for ${TAG}. Sign the IPA before installing it on an iPhone or iPad."
           fi
+
+  # The tip of main as one rolling prerelease: the `nightly` tag moves to every
+  # new commit while the asset keeps its name, so a download link never changes.
+  # SideStore runs its nightly channel the same way. `releases/latest` ignores
+  # prereleases, so the stable download stays the newest `ios-v*` tag, and a red
+  # suite still publishes here while TESTS_GATE is off — that is the point of a
+  # nightly, and setting the gate stops it.
+  nightly:
+    needs: [ipa]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: Aniswift-Unsigned
+          path: ${{ runner.temp }}/nightly
+      - name: Publish the nightly build
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          BUILD: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          ipa="$RUNNER_TEMP/nightly/Aniswift-Unsigned.ipa"
+          test -f "$ipa"
+          # One asset name, so the download link survives every rebuild.
+          asset="$RUNNER_TEMP/Aniswift-Nightly-Unsigned.ipa"
+          cp "$ipa" "$asset"
+
+          # The tag moves with each build, so the commit it points at before this
+          # one is the last nightly that was published.
+          git fetch --tags --force --quiet || true
+          previous=$(git rev-parse -q --verify "nightly^{commit}" || true)
+          if [[ -n "$previous" && "$previous" != "$GITHUB_SHA" ]]; then
+            changes=$(git log --format='- %s' "$previous..$GITHUB_SHA" | head -n 40 || true)
+          else
+            changes=$(git log --format='- %s' -n 15 "$GITHUB_SHA" || true)
+          fi
+          if [[ -z "$changes" ]]; then changes="- No commits since the last nightly."; fi
+
+          notes=$(printf '%s\n' \
+            "The tip of main, rebuilt on every push. Build $BUILD, commit ${GITHUB_SHA:0:7}." \
+            "" \
+            "The IPA is unsigned: sign it with your own distribution profile, or import it into a" \
+            "sideloading tool, before installing it on an iPhone or iPad." \
+            "" \
+            "### Commits since the last nightly" \
+            "" \
+            "$changes")
+
+          if ! gh release view nightly >/dev/null 2>&1; then
+            gh release create nightly --prerelease --target "$GITHUB_SHA" \
+              --title "Nightly" --notes "$notes"
+          fi
+          gh release upload nightly "$asset" --clobber
+          # Editing the target moves the rolling tag onto this commit. A gh build
+          # that cannot move it recreates the release instead.
+          gh release edit nightly --prerelease --target "$GITHUB_SHA" \
+            --title "Nightly" --notes "$notes" \
+            || {
+              gh release delete nightly --yes --cleanup-tag
+              gh release create nightly "$asset" --prerelease --target "$GITHUB_SHA" \
+                --title "Nightly" --notes "$notes"
+            }

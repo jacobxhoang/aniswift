@@ -43,17 +43,17 @@ enum AccentChoice: String, CaseIterable, Identifiable {
 
 /// UserDefaults keys for every preference the settings screens write.
 enum SettingKey {
-    static let accent = "aniledger.settings.accent"
-    static let titleLanguage = "aniledger.settings.titleLanguage"
-    static let openLinksInApp = "aniledger.settings.openLinksInApp"
-    static let askForScore = "aniledger.settings.askForScore"
-    static let preferredLaunch = "aniledger.settings.preferredLaunch"
-    static let launchTab = "aniledger.settings.launchTab"
-    static let lastTab = "aniledger.settings.lastTab"
-    static let tabBarBehavior = "aniledger.settings.tabBarBehavior"
+    static let accent = "aniswift.settings.accent"
+    static let titleLanguage = "aniswift.settings.titleLanguage"
+    static let openLinksInApp = "aniswift.settings.openLinksInApp"
+    static let askForScore = "aniswift.settings.askForScore"
+    static let preferredLaunch = "aniswift.settings.preferredLaunch"
+    static let launchTab = "aniswift.settings.launchTab"
+    static let lastTab = "aniswift.settings.lastTab"
+    static let tabBarBehavior = "aniswift.settings.tabBarBehavior"
 
     static func detail(_ kind: Kind, _ section: String) -> String {
-        "aniledger.settings.details.\(kind.rawValue).\(section)"
+        "aniswift.settings.details.\(kind.rawValue).\(section)"
     }
 }
 
@@ -92,7 +92,7 @@ struct SettingsScreen: View {
             } header: {
                 Text("Accent Color")
             } footer: {
-                Text("Used for controls, links and highlights across AniLedger.")
+                Text("Used for controls, links and highlights across Aniswift.")
             }
             Section {
                 NavigationLink {
@@ -119,7 +119,7 @@ struct SettingsScreen: View {
                     AboutScreen()
                 } label: {
                     SettingsRow(
-                        icon: "info.circle", title: "About AniLedger",
+                        icon: "info.circle", title: "About Aniswift",
                         detail: "Version, services and open-source libraries")
                 }
                 .settingsRow()
@@ -225,7 +225,7 @@ struct BehaviorSettingsScreen: View {
             } footer: {
                 Text(
                     "Titles are shown in Romaji or in English when a translation exists. "
-                        + "Links open in a browser sheet inside AniLedger; turn this off to use your default browser."
+                        + "Links open in a browser sheet inside Aniswift; turn this off to use your default browser."
                 )
             }
             Section {
@@ -233,7 +233,7 @@ struct BehaviorSettingsScreen: View {
                     .sensoryFeedback(.selection, trigger: asksForScore)
                     .settingsRow()
             } footer: {
-                Text("When an anime is marked completed without a score, AniLedger asks for one.")
+                Text("When an anime is marked completed without a score, Aniswift asks for one.")
             }
             Section {
                 Toggle("Enable Preferred Launch Screen", isOn: $usesPreferredLaunch)
@@ -251,7 +251,7 @@ struct BehaviorSettingsScreen: View {
                 }
             } footer: {
                 Text(
-                    "When on, AniLedger always opens your preferred screen. "
+                    "When on, Aniswift always opens your preferred screen. "
                         + "When off, it opens the last tab you used."
                 )
             }

@@ -71,8 +71,8 @@ security import "$scratch/certificate.p12" -k "$keychain" -P "$IOS_CERTIFICATE_P
 security set-key-partition-list -S apple-tool:,apple: -k "$keychain_password" "$keychain"
 security list-keychains -d user -s "$keychain" "${original_keychains[@]}"
 
-archive="$RUNNER_TEMP/AniLedger.xcarchive"
-xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger -configuration Release \
+archive="$RUNNER_TEMP/Aniswift.xcarchive"
+xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift -configuration Release \
   -destination 'generic/platform=iOS' -archivePath "$archive" \
   "PRODUCT_BUNDLE_IDENTIFIER=$bundle_id" "DEVELOPMENT_TEAM=$team" \
   CODE_SIGN_STYLE=Manual 'CODE_SIGN_IDENTITY=Apple Distribution' "PROVISIONING_PROFILE_SPECIFIER=$uuid" archive
@@ -80,4 +80,4 @@ xcodebuild -exportArchive -archivePath "$archive" -exportPath "$scratch/export" 
   -exportOptionsPlist "$scratch/export.plist"
 ipa=("$scratch/export/"*.ipa)
 test -f "${ipa[0]}"
-cp "${ipa[0]}" "$RUNNER_TEMP/AniLedger-Signed.ipa"
+cp "${ipa[0]}" "$RUNNER_TEMP/Aniswift-Signed.ipa"

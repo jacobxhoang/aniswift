@@ -1,7 +1,7 @@
 import Foundation
 import Testing
 
-@testable import AniLedger
+@testable import Aniswift
 
 @Suite("Fields decoding")
 struct DecodingTests {
