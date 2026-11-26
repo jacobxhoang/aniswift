@@ -56,8 +56,14 @@ private final class StubAPI: APIClient {
         return ([], CatalogFreshness())
     }
 
-    func friendListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int) async throws -> Page<FriendUpdate> {
+    /// The pages a stub list request answers, by page, instead of an empty list.
+    var listPageAnswer: ((Int) throws -> Page<FriendUpdate>)?
+
+    func friendListPage(
+        _ friend: Friend, kind: Kind, page: Int, limit: Int, refresh: Bool
+    ) async throws -> Page<FriendUpdate> {
         if let failure { throw failure }
+        if let listPageAnswer { return try listPageAnswer(page) }
         return Page(items: [], more: false)
     }
 
@@ -183,5 +189,89 @@ struct FriendHistoryTests {
             [cursor], answered: [(cursor: cursor, page: Page<FriendUpdate>(items: [], more: false))])
 
         #expect(advanced.isEmpty)
+    }
+}
+
+@Suite("Friend list batches")
+@MainActor
+struct FriendListBatchTests {
+    private func friend() throws -> Friend {
+        let fields = try StubAPI.fields(#"{"username": "ana"}"#)
+        return try #require(Friend(fields))
+    }
+
+    private func row(_ id: Int, friend: Friend) throws -> FriendUpdate {
+        let fields = try StubAPI.fields("{\"mal_id\": \(id), \"title\": \"Show \(id)\"}")
+        let title = try #require(Title(fields, kind: .anime))
+        return FriendUpdate(friend: friend, title: title, fields: fields)
+    }
+
+    @Test("A batch reads every page up to the one that reports no more")
+    func batchReadsToTheEnd() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        let friend = try friend()
+        let rows = try (1...3).map { try row($0, friend: friend) }
+        api.listPageAnswer = { page in
+            switch page {
+            case 1: Page(items: [rows[0]], more: true, total: 3)
+            case 2: Page(items: [rows[1]], more: true, total: 3)
+            default: Page(items: [rows[2]], more: false, total: 3)
+            }
+        }
+
+        let batch = await store.publicListBatch(friend, kind: .anime, from: 1)
+
+        #expect(batch.items.map(\.title.malID) == [1, 2, 3])
+        #expect(batch.nextPage == nil)
+        #expect(batch.total == 3)
+        #expect(batch.failure == nil)
+    }
+
+    @Test("A batch stops at the number of pages it was given")
+    func batchStopsAtItsPageCount() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        let friend = try friend()
+        let rows = try (1...3).map { try row($0, friend: friend) }
+        api.listPageAnswer = { page in Page(items: [rows[page - 1]], more: true, total: 9) }
+
+        let batch = await store.publicListBatch(friend, kind: .anime, from: 1, pages: 2)
+
+        #expect(batch.items.count == 2)
+        #expect(batch.nextPage == 3)
+    }
+
+    @Test("A page that fails keeps the rows before it and the page to retry")
+    func failedPageKeepsEarlierRows() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        let friend = try friend()
+        let first = try row(1, friend: friend)
+        api.listPageAnswer = { page in
+            guard page == 1 else { throw APIError(status: 500, message: "Catalog unavailable.") }
+            return Page(items: [first], more: true, total: 3)
+        }
+
+        let batch = await store.publicListBatch(friend, kind: .anime, from: 1)
+
+        #expect(batch.items.count == 1)
+        #expect(batch.nextPage == 2)
+        #expect((batch.failure as? APIError)?.status == 500)
+    }
+
+    @Test("A page that repeats rows already read ends the batch")
+    func repeatingPageEndsBatch() async throws {
+        let api = StubAPI()
+        let store = Store(api: api)
+        let friend = try friend()
+        let first = try row(1, friend: friend)
+        api.listPageAnswer = { _ in Page(items: [first], more: true, total: 9) }
+
+        let batch = await store.publicListBatch(friend, kind: .anime, from: 1)
+
+        #expect(batch.items.count == 1)
+        #expect(batch.nextPage == nil)
+        #expect(batch.failure == nil)
     }
 }

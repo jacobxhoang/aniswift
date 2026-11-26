@@ -12,6 +12,9 @@ struct APIError: LocalizedError {
 struct Page<Value> {
     let items: [Value]
     let more: Bool
+    /// The provider's own count of every row behind a page, when it sent one:
+    /// a friend's list screen reads it to say how much of the list it has.
+    var total: Int? = nil
 }
 
 /// The redirect MyAnimeList sends back after sign-in. Every part is checked
@@ -109,7 +112,9 @@ protocol APIClient: AnyObject {
         _ friend: Friend, refresh: Bool
     ) async throws -> (updates: [FriendUpdate], freshness: CatalogFreshness)
     /// One page of a friend's public list, decoded on the thread that fetched it.
-    func friendListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int) async throws -> Page<FriendUpdate>
+    func friendListPage(
+        _ friend: Friend, kind: Kind, page: Int, limit: Int, refresh: Bool
+    ) async throws -> Page<FriendUpdate>
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String]
     func resolveTitle(_ title: Title) async -> Title?
     func cachedTitle(_ title: Title) -> Title?
@@ -305,15 +310,16 @@ final class API: APIClient {
         return decoded
     }
 
-    /// One page of a friend's public list, decoded the same way.
+    /// One page of a friend's public list, decoded the same way. A pull to
+    /// refresh passes `refresh` so the minute of cached pages is not handed back.
     func friendListPage(
-        _ friend: Friend, kind: Kind, page: Int, limit: Int
+        _ friend: Friend, kind: Kind, page: Int, limit: Int, refresh: Bool
     ) async throws -> Page<FriendUpdate> {
         let url = Self.url(jikan, "users/\(friend.name)/\(kind.rawValue)list", [
             URLQueryItem(name: "page", value: String(page)),
             URLQueryItem(name: "limit", value: String(limit)),
         ])
-        if let entry = cachedListPages[url], Date().timeIntervalSince(entry.date) < Self.userLifetime {
+        if !refresh, let entry = cachedListPages[url], Date().timeIntervalSince(entry.date) < Self.userLifetime {
             return entry.page
         }
         let data = try await Self.data(URLRequest(url: url, timeoutInterval: 10))
@@ -377,13 +383,13 @@ final class API: APIClient {
         let meta: Fields? = response.read("meta")
         let pagination: Fields? = meta?.read("pagination") ?? response.read("pagination")
         let hasNext: Bool? = pagination?.read("hasNextPage", "has_next_page")
-        let total: Int? = body?.read("total")
+        let total: Int? = pagination?.read("total") ?? body?.read("total")
         let more = hasNext ?? (total.map { $0 > page * limit } ?? (rows.count == limit))
         let entries = rows.compactMap { row -> FriendUpdate? in
             guard let title = Title(row, kind: kind) else { return nil }
             return FriendUpdate(friend: friend, title: title, fields: row)
         }
-        return Page(items: entries, more: more)
+        return Page(items: entries, more: more, total: total)
     }
 
     /// English titles for a batch of ids in as few requests as possible.

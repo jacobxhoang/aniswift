@@ -816,12 +816,46 @@ final class Store: ObservableObject {
     /// friend's list screen reads the pages without this filter.
     private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
         let page = try await api.friendListPage(
-            cursor.friend, kind: cursor.kind, page: cursor.page, limit: 50)
+            cursor.friend, kind: cursor.kind, page: cursor.page, limit: 50, refresh: false)
         return Page(items: page.items.filter { $0.date != nil }, more: page.more)
     }
 
-    func publicListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int = 50) async throws -> Page<FriendUpdate> {
-        try await api.friendListPage(friend, kind: kind, page: page, limit: limit)
+    /// A friend's list is read in batches of pages, and the whole list is read
+    /// rather than one page at a time: a page adds a hundred rows above the
+    /// screen's loading row, so a batch that asked for one page per scroll left
+    /// a long list at whatever page the reader had reached. A page that fails
+    /// keeps the pages read before it, with the page to retry, and a page that
+    /// repeats rows already read ends the batch instead of asking forever.
+    func publicListBatch(
+        _ friend: Friend, kind: Kind, from page: Int, pages: Int = 4, limit: Int = 100,
+        refresh: Bool = false
+    ) async -> FriendListBatch {
+        var items: [FriendUpdate] = []
+        var next = page
+        var total: Int? = nil
+        var asked = 0
+        while asked < pages {
+            if Task.isCancelled {
+                return FriendListBatch(items: items, nextPage: next, total: total, failure: nil)
+            }
+            do {
+                let result = try await api.friendListPage(
+                    friend, kind: kind, page: next, limit: limit, refresh: refresh)
+                total = result.total ?? total
+                let merged = unique(items + result.items)
+                let advanced = merged.count > items.count
+                items = merged
+                next += 1
+                asked += 1
+                guard result.more, advanced else {
+                    return FriendListBatch(items: items, nextPage: nil, total: total, failure: nil)
+                }
+            } catch {
+                return FriendListBatch(
+                    items: items, nextPage: next, total: total, failure: Task.isCancelled ? nil : error)
+            }
+        }
+        return FriendListBatch(items: items, nextPage: next, total: total, failure: nil)
     }
 
     private func sortedFriendActivity(_ items: [FriendUpdate]) -> [FriendUpdate] {
@@ -867,6 +901,16 @@ final class Store: ObservableObject {
     func friendEntry(_ friend: Friend, _ title: Title) async throws -> FriendUpdate? {
         try await publicUpdates(friend).first { $0.title.id == title.id }
     }
+}
+
+/// What a batch of a friend's list pages answered: the rows, the page to ask
+/// for next when there is one, the provider's total when it sent one, and the
+/// page that failed, if one did.
+struct FriendListBatch {
+    let items: [FriendUpdate]
+    let nextPage: Int?
+    let total: Int?
+    let failure: Error?
 }
 
 func unique<T: Identifiable>(_ values: [T]) -> [T] {

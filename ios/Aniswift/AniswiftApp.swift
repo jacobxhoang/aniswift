@@ -921,12 +921,16 @@ private struct FriendMediaListScreen: View {
 
     @State private var entries: [FriendUpdate] = []
     @State private var nextPage: Int? = 1
+    @State private var listTotal: Int?
     @State private var loading = false
     @State private var errorMessage: String?
     @State private var isPrivate = false
 
     @State private var collapsed: Set<String>
     private let unknownStatus = "other"
+    /// Pages asked for in one batch, so a long list arrives in a few requests
+    /// instead of one per scroll to its last row.
+    private static let pagesPerBatch = 4
 
     init(friend: Friend, kind: Kind) {
         self.friend = friend
@@ -949,10 +953,20 @@ private struct FriendMediaListScreen: View {
                 }
                 .padding(.vertical, 12)
                 .listRowBackground(Color.clear)
-            } else if let nextPage {
-                NextPageIndicator(label: "Loading \(kind.rawValue) list", page: nextPage) { await load() }
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+            } else if nextPage != nil {
+                VStack(spacing: 6) {
+                    ProgressView()
+                        .accessibilityLabel("Loading \(kind.rawValue) list")
+                    if let listTotal, entries.count < listTotal {
+                        Text("\(entries.count) of \(listTotal) titles")
+                            .font(.caption)
+                            .monospacedDigit()
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             } else if entries.isEmpty {
                 VStack(spacing: 6) {
                     Label("No \(kind.rawValue) in this list", systemImage: kind == .anime ? "film" : "books.vertical")
@@ -972,13 +986,8 @@ private struct FriendMediaListScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("\(friend.name)’s \(kind.label) List")
         .navigationBarTitleDisplayMode(.inline)
-        .refreshable {
-            entries = []
-            nextPage = 1
-            errorMessage = nil
-            isPrivate = false
-            await load()
-        }
+        .task { await load() }
+        .refreshable { await load(refresh: true) }
     }
 
     private var statusGroups: some View {
@@ -1032,21 +1041,50 @@ private struct FriendMediaListScreen: View {
         return details.joined(separator: " · ")
     }
 
-    private func load() async {
-        guard let page = nextPage, !loading else { return }
+    /// A friend's list is read to its end here rather than one page per scroll:
+    /// the rows a page adds push the screen's loading row out of view, so a load
+    /// driven by that row appearing left a long list half read, and a list that
+    /// never finishes reading never says so.
+    private func load(refresh: Bool = false) async {
+        // A refresh that lands while a batch is still being read would clear the
+        // rows the running batch is about to merge into, so it waits its turn.
+        guard !loading else { return }
+        if refresh {
+            entries = []
+            nextPage = 1
+            listTotal = nil
+            errorMessage = nil
+            isPrivate = false
+        }
+        guard let start = nextPage else { return }
         loading = true
         errorMessage = nil
         defer { loading = false }
-        do {
-            let result = try await store.publicListPage(friend, kind: kind, page: page)
+        var page = start
+        while true {
+            let batch = await store.publicListBatch(
+                friend, kind: kind, from: page, pages: Self.pagesPerBatch, refresh: refresh)
+            // The pages a batch did read are kept even when it stopped short,
+            // so a failed page never throws away the rows before it.
+            entries = unique(entries + batch.items)
+            if let total = batch.total { listTotal = total }
+            if let failure = batch.failure {
+                nextPage = batch.nextPage
+                let status = (failure as? APIError)?.status
+                isPrivate = status == 401 || status == 403
+                errorMessage =
+                    isPrivate
+                    ? "This list is private."
+                    : entries.isEmpty ? "Could not load this list." : "Could not load the rest of this list."
+                return
+            }
+            guard let next = batch.nextPage else {
+                nextPage = nil
+                return
+            }
+            nextPage = next
+            page = next
             guard !Task.isCancelled else { return }
-            entries = unique(entries + result.items)
-            nextPage = result.more ? page + 1 : nil
-        } catch {
-            guard !Task.isCancelled else { return }
-            let status = (error as? APIError)?.status
-            isPrivate = status == 401 || status == 403
-            errorMessage = isPrivate ? "This list is private." : "Could not load this list."
         }
     }
 }
