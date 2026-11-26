@@ -1,3 +1,4 @@
+import Combine
 import Kingfisher
 import SwiftUI
 
@@ -7,6 +8,9 @@ struct TitleScreen: View {
     @ScaledMetric(relativeTo: .body) private var quickSheetExtra: CGFloat = 32
     let title: Title
     @State private var payload: Fields?
+    /// The shelves the header and information groups draw, decoded once when
+    /// the payload lands instead of on every body pass.
+    @State private var facts: TitleFacts?
     @State private var related: [Title] = []
     @State private var suggested: [Title] = []
     @State private var relationNames: [String: String] = [:]
@@ -34,39 +38,11 @@ struct TitleScreen: View {
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
 
-    @AppStorage(SettingKey.detail(.anime, DetailSection.characters)) private var animeCharacters = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.trailer)) private var animeTrailer = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.related)) private var animeRelated = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.source)) private var animeSource = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.openings)) private var animeOpenings = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.endings)) private var animeEndings = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.recommendations)) private var animeRecommendations = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.characters)) private var mangaCharacters = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.related)) private var mangaRelated = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.source)) private var mangaSource = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.recommendations)) private var mangaRecommendations = true
-
-    @AppStorage(SettingKey.detail(.anime, DetailSection.headerPoster)) private var animeHeaderPoster = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.headerScore)) private var animeHeaderScore = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.headerRank)) private var animeHeaderRank = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.headerPopularity)) private var animeHeaderPopularity = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.headerCreators)) private var animeHeaderCreators = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.headerPoster)) private var mangaHeaderPoster = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.headerScore)) private var mangaHeaderScore = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.headerRank)) private var mangaHeaderRank = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.headerPopularity)) private var mangaHeaderPopularity = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.headerCreators)) private var mangaHeaderCreators = true
-
-    @AppStorage(SettingKey.detail(.anime, DetailSection.infoSeries)) private var animeInfoSeries = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.infoAlternatives)) private var animeInfoAlternatives = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.infoGenres)) private var animeInfoGenres = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.infoThemes)) private var animeInfoThemes = true
-    @AppStorage(SettingKey.detail(.anime, DetailSection.infoCreators)) private var animeInfoCreators = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.infoSeries)) private var mangaInfoSeries = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.infoAlternatives)) private var mangaInfoAlternatives = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.infoGenres)) private var mangaInfoGenres = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.infoThemes)) private var mangaInfoThemes = true
-    @AppStorage(SettingKey.detail(.manga, DetailSection.infoCreators)) private var mangaInfoCreators = true
+    /// Every Details Page toggle, read once per kind: the thirty-one `@AppStorage`
+    /// wrappers this page used each read `UserDefaults` on access, on every pass
+    /// of the busiest screen.
+    @State private var animePreferences = DetailPreferences(.anime)
+    @State private var mangaPreferences = DetailPreferences(.manga)
 
     private var current: Title {
         let detail = record.flatMap { Title($0, kind: title.kind) } ?? store.api.cachedTitle(title) ?? title
@@ -75,25 +51,27 @@ struct TitleScreen: View {
 
     private var displayName: String { current.displayName(for: titleLanguage) }
 
-    private func chosen(_ anime: Bool, _ manga: Bool) -> Bool { title.kind == .anime ? anime : manga }
+    private func shows(_ section: String) -> Bool {
+        title.kind == .anime ? animePreferences.shows(section) : mangaPreferences.shows(section)
+    }
 
-    private var showsCharacters: Bool { chosen(animeCharacters, mangaCharacters) }
-    private var showsRelated: Bool { chosen(animeRelated, mangaRelated) }
-    private var showsSource: Bool { chosen(animeSource, mangaSource) }
-    private var showsRecommendations: Bool { chosen(animeRecommendations, mangaRecommendations) }
-    private var showsTrailer: Bool { title.kind == .anime && animeTrailer }
-    private var showsOpenings: Bool { title.kind == .anime && animeOpenings }
-    private var showsEndings: Bool { title.kind == .anime && animeEndings }
-    private var showsHeaderPoster: Bool { chosen(animeHeaderPoster, mangaHeaderPoster) }
-    private var showsHeaderScore: Bool { chosen(animeHeaderScore, mangaHeaderScore) }
-    private var showsHeaderRank: Bool { chosen(animeHeaderRank, mangaHeaderRank) }
-    private var showsHeaderPopularity: Bool { chosen(animeHeaderPopularity, mangaHeaderPopularity) }
-    private var showsHeaderCreators: Bool { chosen(animeHeaderCreators, mangaHeaderCreators) }
-    private var showsSeriesInfo: Bool { chosen(animeInfoSeries, mangaInfoSeries) }
-    private var showsAlternatives: Bool { chosen(animeInfoAlternatives, mangaInfoAlternatives) }
-    private var showsGenres: Bool { chosen(animeInfoGenres, mangaInfoGenres) }
-    private var showsThemes: Bool { chosen(animeInfoThemes, mangaInfoThemes) }
-    private var showsCreators: Bool { chosen(animeInfoCreators, mangaInfoCreators) }
+    private var showsCharacters: Bool { shows(DetailSection.characters) }
+    private var showsRelated: Bool { shows(DetailSection.related) }
+    private var showsSource: Bool { shows(DetailSection.source) }
+    private var showsRecommendations: Bool { shows(DetailSection.recommendations) }
+    private var showsTrailer: Bool { title.kind == .anime && shows(DetailSection.trailer) }
+    private var showsOpenings: Bool { title.kind == .anime && shows(DetailSection.openings) }
+    private var showsEndings: Bool { title.kind == .anime && shows(DetailSection.endings) }
+    private var showsHeaderPoster: Bool { shows(DetailSection.headerPoster) }
+    private var showsHeaderScore: Bool { shows(DetailSection.headerScore) }
+    private var showsHeaderRank: Bool { shows(DetailSection.headerRank) }
+    private var showsHeaderPopularity: Bool { shows(DetailSection.headerPopularity) }
+    private var showsHeaderCreators: Bool { shows(DetailSection.headerCreators) }
+    private var showsSeriesInfo: Bool { shows(DetailSection.infoSeries) }
+    private var showsAlternatives: Bool { shows(DetailSection.infoAlternatives) }
+    private var showsGenres: Bool { shows(DetailSection.infoGenres) }
+    private var showsThemes: Bool { shows(DetailSection.infoThemes) }
+    private var showsCreators: Bool { shows(DetailSection.infoCreators) }
     private var showsMetadata: Bool {
         showsSeriesInfo || showsAlternatives || showsGenres || showsThemes || showsCreators
     }
@@ -179,6 +157,13 @@ struct TitleScreen: View {
             }
         }
         .task { await load() }
+        // A Details Page toggle written in Settings reaches this page while it is
+        // open: the toggles are read into one value per kind, so they are read
+        // again when `UserDefaults` changes rather than per property wrapper.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            animePreferences = DetailPreferences(.anime)
+            mangaPreferences = DetailPreferences(.manga)
+        }
         .task(id: store.account?.id) {
             friendRows = []
             friendOffset = 0
@@ -266,7 +251,7 @@ struct TitleScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
             if showsHeaderCreators {
-                let studios = catalogFacets("studios", category: .studio)
+                let studios = shelves.studios
                 if title.kind == .anime, !studios.isEmpty {
                     FlowLayout {
                         ForEach(studios) { studio in
@@ -280,9 +265,9 @@ struct TitleScreen: View {
                             .accessibilityHint("Opens this studio's titles")
                         }
                     }
-                } else if title.kind == .manga, !authorPeople.isEmpty {
+                } else if title.kind == .manga, !shelves.authors.isEmpty {
                     FlowLayout {
-                        ForEach(authorPeople) { author in
+                        ForEach(shelves.authors) { author in
                             NavigationLink(value: author) {
                                 Text(author.rawName.uppercased()).font(.subheadline)
                             }
@@ -293,8 +278,8 @@ struct TitleScreen: View {
                             .accessibilityHint("Opens this mangaka's page")
                         }
                     }
-                } else if title.kind == .manga, !authorNames.isEmpty {
-                    Text(authorNames.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                } else if title.kind == .manga, !shelves.authorNames.isEmpty {
+                    Text(shelves.authorNames.uppercased()).font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else if current.original != current.name {
                     Text(current.original).font(.subheadline).foregroundStyle(.secondary)
@@ -382,21 +367,12 @@ struct TitleScreen: View {
         .disabled(changingList)
     }
 
-    private func fieldNames(_ key: String) -> [String] {
-        let rows: [Fields] = record?.read(key) ?? []
-        return (record?.read(key) as [String]?) ?? rows.compactMap { $0.string("name") }
-    }
-
-    /// The manga's authors, each carrying the person id that opens their page.
-    /// Tenrai nests a `mal_id` in every author row, so the header can open one;
-    /// a provider that flattens the list into names leaves them as plain text.
-    private var authorPeople: [PersonReference] {
-        let rows: [Fields] = record?.read("authors") ?? []
-        return unique(rows.compactMap { PersonReference($0) })
-    }
-
-    private var authorNames: String {
-        fieldNames("authors").joined(separator: " · ")
+    /// The studios, authors, genres and themes the header and the information
+    /// groups draw. They are decoded once when the payload lands, or from the
+    /// cache on the first paint, instead of once per section and body pass.
+    private var shelves: TitleFacts {
+        if let facts { return facts }
+        return record.map { TitleFacts($0, kind: title.kind) } ?? TitleFacts()
     }
 
     /// A synopsis longer than one paragraph starts collapsed. MAL puts its
@@ -472,15 +448,15 @@ struct TitleScreen: View {
                         if !aliases.isEmpty { infoCell("Also known as", aliases.joined(separator: "\n")) }
                     }
                 }
-                if showsThemes { facetChips("Themes", catalogFacets("themes", category: .theme)) }
-                if showsGenres { facetChips("Genres", catalogFacets("genres", category: .genre)) }
+                if showsThemes { facetChips("Themes", shelves.themes) }
+                if showsGenres { facetChips("Genres", shelves.genres) }
                 if title.kind == .anime {
                     if showsCreators {
-                        facetChips("Studios", catalogFacets("studios", category: .studio))
-                        facetChips("Producers", catalogFacets("producers", category: .producer))
+                        facetChips("Studios", shelves.studios)
+                        facetChips("Producers", shelves.producers)
                     }
                 } else if showsCreators {
-                    chips("Serialization", fieldNames("serializations"))
+                    chips("Serialization", shelves.serializations)
                 }
             }
         }
@@ -492,17 +468,6 @@ struct TitleScreen: View {
             Text(value).font(.subheadline).fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func catalogFacets(_ key: String, category: CatalogFacet.Category) -> [CatalogFacet] {
-        let rows: [Fields] = record?.read(key) ?? []
-        let names: [String] = record?.read(key) ?? []
-        let structured: [CatalogFacet] = rows.compactMap { row in
-            guard let name = row.string("name") else { return nil }
-            return CatalogFacet(name: name, malID: row.read("mal_id", "malId", "id"),
-                                category: category, kind: title.kind)
-        }
-        return unique(structured + names.map { CatalogFacet(name: $0, malID: nil, category: category, kind: title.kind) })
     }
 
     @ViewBuilder
@@ -564,19 +529,20 @@ struct TitleScreen: View {
         .overlay(alignment: .top) { Divider() }
     }
 
+    /// The shelves the page already holds a unique array of, so the rows are laid
+    /// out as they are rather than deduped again on every body pass.
     private func mediaRail(_ label: String, titles: [Title], notes: [String: String] = [:]) -> some View {
-        let items = unique(titles)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
                 shelfHeading(label)
                 Spacer(minLength: 8)
-                NavigationLink(value: TitleCollectionRoute(label: label, titles: items, notes: notes)) {
+                NavigationLink(value: TitleCollectionRoute(label: label, titles: titles, notes: notes)) {
                     viewAllLabel(label)
                 }
                 .buttonStyle(.plain)
             }
             LedgerShelf(spacing: 8, inset: LedgerLayout.inset) {
-                ForEach(items.prefix(12)) { item in
+                ForEach(titles.prefix(12)) { item in
                     shelfCover(item, note: notes[item.id]).frame(width: LedgerLayout.detailPosterWidth)
                 }
             }
@@ -752,6 +718,7 @@ struct TitleScreen: View {
             let result = try await detail
             if let full: Fields = result.read("data") {
                 payload = full
+                facts = TitleFacts(full, kind: title.kind)
                 savedAt = nil
                 loadBundledSections(full)
             } else if record == nil {
@@ -764,6 +731,7 @@ struct TitleScreen: View {
             if !Task.isCancelled, record == nil {
                 if let saved = store.api.savedDetail(title) {
                     payload = saved.fields
+                    facts = TitleFacts(saved.fields, kind: title.kind)
                     loadBundledSections(saved.fields)
                     savedAt = saved.savedAt
                 } else {
@@ -1830,15 +1798,15 @@ struct ListEditor: View {
     private func dateRow(_ label: String, value: Binding<String>) -> some View {
         if value.wrappedValue.isEmpty {
             LabeledContent(label) {
-                Button("Set") { value.wrappedValue = dayFormatter.string(from: Date()) }
+                Button("Set") { value.wrappedValue = Self.dayFormatter.string(from: Date()) }
                     .ledgerGlassButton()
                     .accessibilityLabel("Set \(label.lowercased())")
             }
         } else {
             HStack {
                 DatePicker(label, selection: Binding(
-                    get: { dayFormatter.date(from: value.wrappedValue) ?? Date() },
-                    set: { value.wrappedValue = dayFormatter.string(from: $0) }
+                    get: { Self.dayFormatter.date(from: value.wrappedValue) ?? Date() },
+                    set: { value.wrappedValue = Self.dayFormatter.string(from: $0) }
                 ), displayedComponents: .date)
                 Button {
                     value.wrappedValue = ""
@@ -1851,13 +1819,13 @@ struct ListEditor: View {
         }
     }
 
-    private var dayFormatter: DateFormatter {
+    private static let dayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.dateFormat = "yyyy-MM-dd"
         return formatter
-    }
+    }()
 
     private static func listChange(_ title: Title, _ entry: ListEntry?) -> ListChange {
         ListChange(status: entry?.status ?? title.kind.statuses.last!,
@@ -2025,5 +1993,55 @@ struct ListEditor: View {
                 self.error = plainMessage(error, fallback: "Could not save this entry.")
             }
         }
+    }
+}
+
+
+/// The shelves a title page draws from its payload. The header and the
+/// information groups used to decode the same studios, authors, genres and
+/// themes on every body pass, and the header's creators twice; a page now
+/// decodes them once, when the payload lands.
+private struct TitleFacts {
+    var studios: [CatalogFacet] = []
+    var producers: [CatalogFacet] = []
+    var genres: [CatalogFacet] = []
+    var themes: [CatalogFacet] = []
+    var authors: [PersonReference] = []
+    var authorNames: String = ""
+    var serializations: [String] = []
+
+    init() {}
+
+    init(_ fields: Fields, kind: Kind) {
+        studios = Self.facets(fields, "studios", .studio, kind)
+        producers = Self.facets(fields, "producers", .producer, kind)
+        genres = Self.facets(fields, "genres", .genre, kind)
+        themes = Self.facets(fields, "themes", .theme, kind)
+        let authorRows: [Fields] = fields.read("authors") ?? []
+        let names: [String] = fields.read("authors") ?? []
+        authors = unique(authorRows.compactMap { PersonReference($0) })
+        authorNames = (names.isEmpty ? authorRows.compactMap { $0.string("name") } : names)
+            .joined(separator: " · ")
+        let serializationRows: [Fields] = fields.read("serializations") ?? []
+        let serializationNames: [String] = fields.read("serializations") ?? []
+        serializations =
+            serializationNames.isEmpty
+            ? serializationRows.compactMap { $0.string("name") }
+            : serializationNames
+    }
+
+    /// A provider sends a facet as a name, a row with an id, or both, so every
+    /// shape is read into one list.
+    private static func facets(
+        _ fields: Fields, _ key: String, _ category: CatalogFacet.Category, _ kind: Kind
+    ) -> [CatalogFacet] {
+        let rows: [Fields] = fields.read(key) ?? []
+        let names: [String] = fields.read(key) ?? []
+        let structured: [CatalogFacet] = rows.compactMap { row in
+            guard let name = row.string("name") else { return nil }
+            return CatalogFacet(name: name, malID: row.read("mal_id", "malId", "id"),
+                                category: category, kind: kind)
+        }
+        return unique(structured + names.map { CatalogFacet(name: $0, malID: nil, category: category, kind: kind) })
     }
 }

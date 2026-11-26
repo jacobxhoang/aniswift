@@ -380,7 +380,18 @@ struct PosterShelf<Trailing: View>: View {
     let heading: String
     let titles: [Title]
     var isDiscoverShelf = false
-    @ViewBuilder var trailing: Trailing
+    let trailing: Trailing
+    /// The dupes are dropped once per page instead of on every body pass.
+    @State private var items: [Title]
+
+    init(heading: String, titles: [Title], isDiscoverShelf: Bool = false,
+         @ViewBuilder trailing: () -> Trailing) {
+        self.heading = heading
+        self.titles = titles
+        self.isDiscoverShelf = isDiscoverShelf
+        self.trailing = trailing()
+        _items = State(initialValue: unique(titles))
+    }
 
     private var posterWidth: CGFloat { isDiscoverShelf ? LedgerLayout.detailPosterWidth : LedgerLayout.posterWidth }
 
@@ -397,16 +408,17 @@ struct PosterShelf<Trailing: View>: View {
                 trailing
             }.padding(.horizontal, LedgerLayout.inset)
             LedgerShelf(spacing: isDiscoverShelf ? 8 : LedgerLayout.gap, inset: LedgerLayout.inset) {
-                ForEach(unique(titles)) { title in
+                ForEach(items) { title in
                     VStack(alignment: .leading, spacing: 3) {
                         CoverTile(title: title, showsScore: false, reservesCaptionSpace: false, posterWidth: posterWidth)
-                        if let entry = store.lists[title.kind]?.first(where: { $0.id == title.id }) {
+                        if let entry = store.entries[title.kind]?[title.id] {
                             Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }.frame(width: posterWidth)
                 }
             }
         }
+        .onChange(of: titles) { _, new in items = unique(new) }
     }
 }
 
@@ -432,14 +444,18 @@ struct DiscoverScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
-        .ledgerSearch(text: $search, prompt: "Search")
-        // The media type is a search scope, not a second bar above the results.
-        .searchScopes($searchKind) {
-            ForEach(Kind.allCases) { kind in
-                Text(kind.label).tag(kind)
+        .ledgerSearch(text: $search, prompt: "Search") {
+            // The field is the app's own, so there is no system scope bar to
+            // carry the media type: it sits under the field, reachable while
+            // the bar is open.
+            Picker("Search category", selection: $searchKind) {
+                ForEach(Kind.allCases) { kind in
+                    Text(kind.label).tag(kind)
+                }
             }
+            .pickerStyle(.segmented)
+            .sensoryFeedback(.selection, trigger: searchKind)
         }
-        .sensoryFeedback(.selection, trigger: searchKind)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: CatalogBrowserRoute()) {
@@ -1168,7 +1184,7 @@ struct FriendsScreen: View {
                 }
             }
         }
-        .task(id: store.account?.id) { if store.friendFeedPage == 0 { await store.loadFriends() } }
+        .task(id: store.account?.id) { await store.openFeed() }
         .prefetchingPosters(store.activity) { $0.title.image }
         .refreshable { await store.loadFriends(reset: true) }
     }

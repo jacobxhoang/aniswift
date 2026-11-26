@@ -78,6 +78,33 @@ enum DetailSection {
     static let infoCreators = "info.creators"
 }
 
+extension DetailSection {
+    /// Every section key, so a page reads them once instead of through
+    /// thirty-one separate property wrappers.
+    static let all = [
+        characters, trailer, related, source, openings, endings, recommendations,
+        headerPoster, headerScore, headerRank, headerPopularity, headerCreators,
+        infoSeries, infoAlternatives, infoGenres, infoThemes, infoCreators,
+    ]
+}
+
+/// Every Details Page toggle for one kind, read once: an `@AppStorage` wrapper
+/// reads `UserDefaults` on each access, and a title page asked for all thirty-one
+/// of them on every body pass. Defaults are on, as before.
+struct DetailPreferences: Equatable {
+    private var values: [String: Bool] = [:]
+
+    init(_ kind: Kind) {
+        var values: [String: Bool] = [:]
+        for section in DetailSection.all {
+            values[section] = UserDefaults.standard.object(forKey: SettingKey.detail(kind, section)) as? Bool ?? true
+        }
+        self.values = values
+    }
+
+    func shows(_ section: String) -> Bool { values[section] ?? true }
+}
+
 struct SettingsScreen: View {
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

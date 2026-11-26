@@ -104,6 +104,12 @@ protocol APIClient: AnyObject {
     func save(_ title: Title, change: ListChange?) async throws -> Fields?
 
     func catalog(_ path: String, _ query: [URLQueryItem], refresh: Bool) async throws -> Fields
+    /// A friend's public activity, decoded on the thread that fetched it.
+    func friendUpdates(
+        _ friend: Friend, refresh: Bool
+    ) async throws -> (updates: [FriendUpdate], freshness: CatalogFreshness)
+    /// One page of a friend's public list, decoded on the thread that fetched it.
+    func friendListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int) async throws -> Page<FriendUpdate>
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String]
     func resolveTitle(_ title: Title) async -> Title?
     func cachedTitle(_ title: Title) -> Title?
@@ -131,6 +137,8 @@ final class API: APIClient {
     private let transport = URLSession(configuration: .ephemeral, delegate: MALTransport(), delegateQueue: nil)
     private var privateQueue: Task<Void, Never>?
     private var cached: [URL: (Date, Fields)] = [:]
+    private var cachedUpdates: [URL: (date: Date, updates: [FriendUpdate], freshness: CatalogFreshness)] = [:]
+    private var cachedListPages: [URL: (date: Date, page: Page<FriendUpdate>)] = [:]
     private var catalogRequests: [URL: Task<(Fields, Data), Error>] = [:]
     private let catalogCacheLimit = 160
     private static let catalogLifetime: TimeInterval = 300
@@ -263,13 +271,119 @@ final class API: APIClient {
     /// Drops decoded catalog responses so Clear Cache also refreshes title pages.
     func clearCatalogCache() {
         cached.removeAll()
+        cachedUpdates.removeAll()
+        cachedListPages.removeAll()
         if let directory = Self.detailDirectory() {
             try? FileManager.default.removeItem(at: directory)
         }
     }
 
     /// Whether a decoded catalog response is still available to title pages.
-    var hasCachedCatalog: Bool { !cached.isEmpty }
+    var hasCachedCatalog: Bool { !cached.isEmpty || !cachedUpdates.isEmpty || !cachedListPages.isEmpty }
+
+    /// A friend's public activity, decoded off the main actor: `Fields` wraps a
+    /// decoder container and cannot leave the thread that decoded it, so the rows
+    /// are built where the bytes arrive and only values come back.
+    func friendUpdates(
+        _ friend: Friend, refresh: Bool
+    ) async throws -> (updates: [FriendUpdate], freshness: CatalogFreshness) {
+        let url = Self.url(jikan, "users/\(friend.name)/userupdates")
+        if !refresh, let entry = cachedUpdates[url],
+            Date().timeIntervalSince(entry.date) < Self.userLifetime
+        {
+            return (entry.updates, entry.freshness)
+        }
+        let data = try await Self.data(URLRequest(url: url, timeoutInterval: 10))
+        let decoded = try await Self.decodeUpdates(data, friend: friend)
+        cachedUpdates[url] = (.now, decoded.updates, decoded.freshness)
+        if cachedUpdates.count > catalogCacheLimit {
+            let oldest = cachedUpdates.sorted { $0.value.date < $1.value.date }
+            for entry in oldest.prefix(cachedUpdates.count - catalogCacheLimit) {
+                cachedUpdates.removeValue(forKey: entry.key)
+            }
+        }
+        return decoded
+    }
+
+    /// One page of a friend's public list, decoded the same way.
+    func friendListPage(
+        _ friend: Friend, kind: Kind, page: Int, limit: Int
+    ) async throws -> Page<FriendUpdate> {
+        let url = Self.url(jikan, "users/\(friend.name)/\(kind.rawValue)list", [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "limit", value: String(limit)),
+        ])
+        if let entry = cachedListPages[url], Date().timeIntervalSince(entry.date) < Self.userLifetime {
+            return entry.page
+        }
+        let data = try await Self.data(URLRequest(url: url, timeoutInterval: 10))
+        let result = try await Self.decodeListPage(data, friend: friend, kind: kind, page: page, limit: limit)
+        cachedListPages[url] = (.now, result)
+        if cachedListPages.count > catalogCacheLimit {
+            let oldest = cachedListPages.sorted { $0.value.date < $1.value.date }
+            for entry in oldest.prefix(cachedListPages.count - catalogCacheLimit) {
+                cachedListPages.removeValue(forKey: entry.key)
+            }
+        }
+        return result
+    }
+
+    /// The bytes of a request, fetched and checked off the main actor.
+    nonisolated static func data(_ request: URLRequest) async throws -> Data {
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: 0, message: "The server did not respond.")
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            let fields = try? JSONDecoder().decode(Fields.self, from: data)
+            throw APIError(status: http.statusCode,
+                           message: fields?.string("error") ?? "The request could not be completed.")
+        }
+        return data
+    }
+
+    /// The rows a friend's activity payload describes. `nonisolated async` runs it
+    /// on the cooperative pool rather than the caller's actor, so the parse never
+    /// lands on the main thread.
+    nonisolated static func decodeUpdates(
+        _ data: Data, friend: Friend
+    ) async throws -> (updates: [FriendUpdate], freshness: CatalogFreshness) {
+        let response = try JSONDecoder().decode(Fields.self, from: data)
+        let body: Fields? = response.read("data")
+        let updates = Kind.allCases.flatMap { kind -> [FriendUpdate] in
+            let entries: [Fields] = body?.read(kind.rawValue) ?? []
+            return entries.compactMap { entry -> FriendUpdate? in
+                guard let info: Fields = entry.read("entry"), let title = Title(info, kind: kind) else {
+                    return nil
+                }
+                return FriendUpdate(friend: friend, title: title, fields: entry)
+            }
+        }
+        return (updates, CatalogFreshness(response.read("meta")))
+    }
+
+    /// One page of a friend's list, built off the main actor. A row with no date
+    /// cannot be placed in the feed, so it is left out here.
+    nonisolated static func decodeListPage(
+        _ data: Data, friend: Friend, kind: Kind, page: Int, limit: Int
+    ) async throws -> Page<FriendUpdate> {
+        let response = try JSONDecoder().decode(Fields.self, from: data)
+        let body: Fields? = response.read("data")
+        guard let rows: [Fields] = response.read("data") ?? body?.read("entries") else {
+            throw APIError(status: 0, message: "Could not load this list.")
+        }
+        let meta: Fields? = response.read("meta")
+        let pagination: Fields? = meta?.read("pagination") ?? response.read("pagination")
+        let hasNext: Bool? = pagination?.read("hasNextPage", "has_next_page")
+        let total: Int? = body?.read("total")
+        let more = hasNext ?? (total.map { $0 > page * limit } ?? (rows.count == limit))
+        let entries = rows.compactMap { row -> FriendUpdate? in
+            guard let title = Title(row, kind: kind) else { return nil }
+            let update = FriendUpdate(friend: friend, title: title, fields: row)
+            return update.date == nil ? nil : update
+        }
+        return Page(items: entries, more: more)
+    }
 
     /// English titles for a batch of ids in as few requests as possible.
     /// Tenrai's `ids` filter answers 50 titles at a time, which replaces a

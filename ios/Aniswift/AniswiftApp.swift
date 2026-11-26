@@ -286,13 +286,19 @@ struct SavedDataNote: View {
     var isBusy = false
     var retry: (() async -> Void)? = nil
 
+    /// One formatter for every note: building one per body pass is the cost this
+    /// row pays for a relative date.
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        return formatter
+    }()
+
     private var text: String {
         var parts = ["Showing saved data"]
         if let message, !message.isEmpty { parts.append(message) }
         if let savedAt {
-            let formatter = RelativeDateTimeFormatter()
-            formatter.unitsStyle = .full
-            parts.append("Updated \(formatter.localizedString(for: savedAt, relativeTo: Date()))")
+            parts.append("Updated \(Self.relative.localizedString(for: savedAt, relativeTo: Date()))")
         }
         return parts.joined(separator: " · ")
     }
@@ -362,56 +368,136 @@ extension View {
     /// One search field for every searchable screen, so a search never opens
     /// differently just because it lives on another screen.
     func ledgerSearch(text: Binding<String>, prompt: String) -> some View {
-        modifier(LedgerSearch(text: text, prompt: prompt))
+        modifier(LedgerSearch(text: text, prompt: prompt) { EmptyView() })
     }
-}
 
-private struct LedgerSearch: ViewModifier {
-    @Binding var text: String
-    let prompt: String
-    @State private var isSearching = false
+    /// The same field with a control beneath it, for a screen whose search needs
+    /// a choice the field itself does not carry.
+    func ledgerSearch<Extra: View>(
+        text: Binding<String>, prompt: String, @ViewBuilder extra: () -> Extra
+    ) -> some View {
+        modifier(LedgerSearch(text: text, prompt: prompt, extra: extra))
+    }
 
+    /// The glass the search bar is made of: a capsule for the field and a circle
+    /// for its buttons, so the bar reads like the rest of the Liquid Glass
+    /// controls instead of a flat strip laid over the page.
     @ViewBuilder
-    func body(content: Content) -> some View {
+    func ledgerSearchField() -> some View {
         if #available(iOS 26.0, *) {
-            // A round button of our own opens the system's field in the toolbar,
-            // and the field's Close button puts the button back.
-            content
-                .searchable(text: $text, isPresented: $isSearching, placement: .toolbar, prompt: Text(prompt))
-                .toolbar { searchButton }
-                .scrollDismissesKeyboard(.interactively)
+            glassEffect(.regular, in: .capsule)
         } else {
-            // Before iOS 26 the field has no toolbar presentation, so the same
-            // button reveals the navigation bar's drawer instead.
-            content
-                .searchable(
-                    text: $text, isPresented: $isSearching,
-                    placement: .navigationBarDrawer(displayMode: .automatic), prompt: Text(prompt)
-                )
-                .toolbar { searchButton }
-                .scrollDismissesKeyboard(.interactively)
+            background(.ultraThinMaterial, in: .capsule)
+                .overlay {
+                    Capsule().strokeBorder(.white.opacity(0.14)).allowsHitTesting(false)
+                }
         }
     }
 
-    /// The app's round glass search button, drawn by the app rather than the
-    /// system so it matches the badges on the rest of the screen. It steps aside
-    /// while the field is open, where the field's own Close button takes over.
-    @ToolbarContentBuilder
-    private var searchButton: some ToolbarContent {
-        if !isSearching {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    isSearching = true
-                } label: {
+    @ViewBuilder
+    func ledgerSearchControl() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            background(.ultraThinMaterial, in: .circle)
+                .overlay {
+                    Circle().strokeBorder(.white.opacity(0.14)).allowsHitTesting(false)
+                }
+        }
+    }
+}
+
+/// The app's own search bar: nothing is on screen until the round button is
+/// tapped, and Cancel puts it away again. `.searchable` cannot promise that —
+/// its field lives in the navigation bar, where a placement decides whether it
+/// shows on its own.
+private struct LedgerSearch<Extra: View>: ViewModifier {
+    @Binding var text: String
+    let prompt: String
+    @ViewBuilder var extra: Extra
+    @State private var isSearching = false
+    @FocusState private var focused: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if isSearching { bar }
+            }
+            .scrollDismissesKeyboard(.interactively)
+            // The bar takes the very top while it is open, the way the GitHub
+            // app does: the navigation title and the back button step aside,
+            // and the bar's own round X closes the search instead.
+            .toolbar(isSearching ? .hidden : .visible, for: .navigationBar)
+            .toolbar {
+                if !isSearching {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            withAnimation(.snappy(duration: 0.2)) { isSearching = true }
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                                .font(.body.weight(.semibold))
+                                .frame(width: 44, height: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .ledgerSearchControl()
+                        .accessibilityLabel("Search")
+                    }
+                }
+            }
+    }
+
+    private var bar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                    TextField(prompt, text: $text)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                        .focused($focused)
+                    if !text.isEmpty {
+                        Button {
+                            text = ""
+                        } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Clear search")
+                    }
+                }
+                .padding(.horizontal, 14)
+                .frame(minHeight: 44)
+                .ledgerSearchField()
+                .contentShape(.capsule)
+                Button(action: close) {
+                    Image(systemName: "xmark")
                         .font(.body.weight(.semibold))
                         .frame(width: 44, height: 44)
                 }
                 .buttonStyle(.plain)
-                .ledgerGlassBadge()
-                .accessibilityLabel("Search")
+                .ledgerSearchControl()
+                .accessibilityLabel("Close search")
             }
+            extra
         }
+        .padding(.horizontal, LedgerLayout.inset)
+        .padding(.vertical, 8)
+        .task {
+            // Focus once the bar is on screen, or the keyboard never arrives.
+            focused = true
+        }
+        .transition(.move(edge: .top).combined(with: .opacity))
+    }
+
+    /// Empties the query, drops the keyboard and puts the round button back.
+    private func close() {
+        text = ""
+        focused = false
+        withAnimation(.snappy(duration: 0.2)) { isSearching = false }
     }
 }
 
@@ -513,7 +599,7 @@ struct PreferredTitle<Content: View>: View {
     @State private var attemptedID: String?
 
     private var current: Title {
-        let saved = store.lists[title.kind]?.first { $0.id == title.id }?.title
+        let saved = store.entries[title.kind]?[title.id]?.title
         return title.fillingTitleAndImage(from: saved)
             .fillingTitleAndImage(from: resolved ?? store.api.cachedTitle(title))
     }
@@ -607,21 +693,32 @@ struct Rail: View {
     let name: String
     let titles: [Title]
     var empty = "No titles available."
+    /// The dupes are dropped once per page instead of on every body pass, so a
+    /// scroll does not rebuild the set for each shelf it redraws.
+    @State private var items: [Title]
+
+    init(name: String, titles: [Title], empty: String = "No titles available.") {
+        self.name = name
+        self.titles = titles
+        self.empty = empty
+        _items = State(initialValue: unique(titles))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerSectionTitle(name).padding(.horizontal, LedgerLayout.inset)
-            if titles.isEmpty {
+            if items.isEmpty {
                 Text(empty).font(.subheadline).foregroundStyle(.secondary).padding(.horizontal, LedgerLayout.inset)
             } else {
                 LedgerShelf(inset: LedgerLayout.inset) {
-                    ForEach(unique(titles)) { title in
+                    ForEach(items) { title in
                         CoverTile(title: title, showsScore: false, posterWidth: LedgerLayout.posterWidth)
                             .frame(width: LedgerLayout.posterWidth)
                     }
                 }
             }
         }
+        .onChange(of: titles) { _, new in items = unique(new) }
     }
 }
 

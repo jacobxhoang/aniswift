@@ -10,6 +10,10 @@ final class Store: ObservableObject {
     @Published var message: String?
     @Published private(set) var organization = ListOrganization()
     @Published private var savedLists: [Kind: SavedList] = [:]
+    /// Every list row by title id, so a poster tile reads its saved row in one
+    /// step: Discover draws ten shelves of fourteen tiles, and each tile used to
+    /// walk up to a thousand rows on every pass.
+    private(set) var entries: [Kind: [String: ListEntry]] = [:]
     @Published private(set) var refreshingLists: Set<Kind> = []
     /// Why a kind's list could not be synced, so the list screen can offer a
     /// retry instead of drawing an empty list.
@@ -38,6 +42,7 @@ final class Store: ObservableObject {
     private var profileRequests: [String: Task<ProfileFetchOutcome, Never>] = [:]
     private var publicBackoff: [String: PublicBackoff] = [:]
     private var publicRetryTasks: [String: Task<Void, Never>] = [:]
+    private var pendingFeedSave: Task<Void, Never>?
     private static let feedBackoffKey = "feed"
     private static let publicRetryDelays: [TimeInterval] = [15, 30, 60]
     /// One friend answers with a handful of updates, so a page is built from
@@ -45,7 +50,11 @@ final class Store: ObservableObject {
     /// page holds enough rows to scroll instead of looking empty.
     private static let feedFriendBatch = 12
     private static let feedBatchLimit = 4
+    private static let feedOlderPageLimit = 2
     private static let feedPageTarget = 30
+    /// A saved feed older than this is refreshed when the tab is opened, so a
+    /// snapshot from an earlier run cannot keep the feed short for good.
+    private static let feedWindow: TimeInterval = 10 * 60
 
     init() {
         api = API()
@@ -295,6 +304,7 @@ final class Store: ObservableObject {
         setAccount(user)
         if let cache, cache.account.id == user.id, savedLists.isEmpty {
             savedLists = cache.lists
+            entries = cache.lists.mapValues { Self.index($0.items) }
             ListCache(account: user, lists: savedLists).write()
         }
         await loadLists(force: true)
@@ -317,6 +327,7 @@ final class Store: ObservableObject {
             listFailures = [:]
             pendingListLoads = []
             savedLists = [:]
+            entries = [:]
             activity = []
             friends = []
             checkedFriends = 0
@@ -369,7 +380,20 @@ final class Store: ObservableObject {
         let additions = names.filter { feedEnglishNames[$0.key] != $0.value }
         guard !additions.isEmpty else { return }
         feedEnglishNames.merge(additions) { _, new in new }
-        saveFriendFeed()
+        // A page that names a dozen titles used to encode and write the whole
+        // snapshot a dozen times, once per name; the write is coalesced instead.
+        saveFriendFeedSoon()
+    }
+
+    /// Writes the feed snapshot once after a burst of changes.
+    private func saveFriendFeedSoon() {
+        guard pendingFeedSave == nil else { return }
+        pendingFeedSave = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(400))
+            guard !Task.isCancelled, let self else { return }
+            self.pendingFeedSave = nil
+            self.saveFriendFeed()
+        }
     }
 
     /// Jikan Edge list rows carry only the original title, so the whole page is
@@ -531,11 +555,35 @@ final class Store: ObservableObject {
         listFailures[kind] = nil
         guard savedLists[kind] != snapshot else { return }
         savedLists[kind] = snapshot
+        entries[kind] = Self.index(snapshot.items)
         ListCache(account: account, lists: savedLists).write()
+    }
+
+    /// Every row of a list by title id, for a poster tile's lookup.
+    private static func index(_ items: [ListEntry]) -> [String: ListEntry] {
+        Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
     }
 
     func loadFriends(reset: Bool = false) async {
         await loadFriends(reset: reset, userInitiated: reset)
+    }
+
+    /// What the Feed tab does when it opens: a saved page is drawn at once, and
+    /// it is refreshed when it is older than the feed's window, or when the last
+    /// load left nothing to page from — so a thin snapshot from an earlier run
+    /// cannot keep the feed short for good.
+    func openFeed() async {
+        guard account != nil, !loadingFriends else { return }
+        if friendFeedPage == 0 {
+            await loadFriends()
+            return
+        }
+        if let savedAt = feedStatus.savedAt, Date().timeIntervalSince(savedAt) < Self.feedWindow,
+            hasMoreFriendActivity || !activity.isEmpty
+        {
+            return
+        }
+        await loadFriends(reset: true, userInitiated: false)
     }
 
     private func loadFriends(reset: Bool, userInitiated: Bool) async {
@@ -572,13 +620,20 @@ final class Store: ObservableObject {
             }
             guard !Task.isCancelled, accountGeneration == generation else { return }
 
+            // Every friend's lists are seeded at page one, so a page that recent
+            // activity cannot fill can be filled from them instead.
+            var cursors =
+                reset || friendFeedPage == 0
+                ? refreshedFriends.flatMap { friend in
+                    Kind.allCases.map { FriendHistoryCursor(friend: friend, kind: $0, page: 1) }
+                }
+                : historyCursors
             // One friend answers with a handful of updates, so a page built from
             // one group of friends reads as a feed with nothing in it. Keep asking
             // while the page is thin, up to four groups, and stop as soon as it
             // holds enough rows to scroll.
             var start = reset ? 0 : checkedFriends
             var updates: [FriendUpdate] = []
-            var asked = 0
             var failures = 0
             var batches = 0
             while batches < Self.feedBatchLimit, start < refreshedFriends.count {
@@ -587,7 +642,6 @@ final class Store: ObservableObject {
                 let result = await loadRecentFriendActivity(batch, refresh: reset)
                 guard !Task.isCancelled, accountGeneration == generation else { return }
                 start += batch.count
-                asked += batch.count
                 batches += 1
                 updates += result.updates
                 failures += result.failures
@@ -596,9 +650,23 @@ final class Store: ObservableObject {
                 if unique(updates).count >= Self.feedPageTarget { break }
             }
 
+            // Recent activity is only a friend's last few entries, so a page that
+            // is still thin fills from their list pages before it is drawn — the
+            // pages "Load older activity" walks — instead of showing a handful of
+            // rows and leaving the reader to tap for the rest.
+            var olderPages = 0
+            while unique(updates).count < Self.feedPageTarget, olderPages < Self.feedOlderPageLimit,
+                let older = await loadOlderActivity(cursors)
+            {
+                guard !Task.isCancelled, accountGeneration == generation else { return }
+                cursors = older.cursors
+                updates += older.updates
+                olderPages += 1
+            }
+
             // Keep the snapshot the user is already reading instead of replacing
-            // it with an empty page when no friend could be read at all.
-            if reset, updates.isEmpty, failures > 0, !activity.isEmpty {
+            // it with an empty page when nothing at all could be read.
+            if reset, unique(updates).isEmpty, failures > 0, !activity.isEmpty {
                 // The page did not land, so the feed must not keep asking for one.
                 feedPageStalled = true
                 markFeedSavedData(message: "Could not refresh the feed.",
@@ -607,11 +675,7 @@ final class Store: ObservableObject {
             }
 
             if reset { friendFeedPage = 0 }
-            if reset || friendFeedPage == 0 {
-                historyCursors = refreshedFriends.flatMap { friend in
-                    Kind.allCases.map { FriendHistoryCursor(friend: friend, kind: $0, page: 1) }
-                }
-            }
+            historyCursors = cursors
             friends = refreshedFriends
             checkedFriends = start
             let sorted = sortedFriendActivity(updates)
@@ -623,9 +687,8 @@ final class Store: ObservableObject {
             saveFriendFeed()
 
             // A stray friend whose list is private should not put the whole feed
-            // behind a note, so only an empty or mostly failed page says so.
-            let mostlyFailed = failures * 3 >= max(asked, 1)
-            if stale || (failures > 0 && unique(updates).isEmpty) || mostlyFailed {
+            // behind a note, so only an empty page says so.
+            if stale || (failures > 0 && unique(updates).isEmpty) {
                 markFeedSavedData(message: failures > 0 ? "Could not refresh the feed." : nil,
                                   savedAt: providerFetchedAt ?? feedStatus.savedAt)
             } else {
@@ -674,9 +737,16 @@ final class Store: ObservableObject {
             let friends = batch[start..<min(start + concurrency, batch.count)]
             await withTaskGroup(of: (updates: [FriendUpdate]?, freshness: CatalogFreshness).self) { group in
                 for friend in friends {
+                    // The fetch and its decode both leave the main actor, so six
+                    // friends are six requests in flight rather than six tasks
+                    // queueing up to parse their payloads on the main thread.
                     group.addTask {
-                        let response = try? await self.publicUpdatesResponse(friend, refresh: refresh)
-                        return (response?.items, response?.freshness ?? CatalogFreshness())
+                        do {
+                            let rows = try await self.api.friendUpdates(friend, refresh: refresh)
+                            return (rows.updates, rows.freshness)
+                        } catch {
+                            return (nil, CatalogFreshness())
+                        }
                     }
                 }
                 for await item in group {
@@ -689,37 +759,50 @@ final class Store: ObservableObject {
         return result
     }
 
-    private func loadOlderFriendActivity(generation: UUID) async {
-        let batch = Array(historyCursors.prefix(4))
-        guard !batch.isEmpty else { return }
+    private struct OlderActivityBatch {
+        var updates: [FriendUpdate] = []
+        var cursors: [FriendHistoryCursor] = []
+    }
+
+    /// The next four list pages, newest first across friends. A batch nothing
+    /// answered returns nil rather than consuming the cursors it did not fill, so
+    /// a failure never drops a friend's older pages.
+    private func loadOlderActivity(_ cursors: [FriendHistoryCursor]) async -> OlderActivityBatch? {
+        let batch = Array(cursors.prefix(4))
+        guard !batch.isEmpty else { return nil }
         let answered = await withTaskGroup(of: (FriendHistoryCursor, Page<FriendUpdate>?).self) { group in
             for cursor in batch {
                 group.addTask { (cursor, try? await self.historyPage(cursor)) }
             }
             // Every cursor answers, with nil for a page that could not be read, so
-            // the bookkeeping below can tell a finished list from a failed request.
+            // the bookkeeping can tell a finished list from a failed request.
             var pages: [(cursor: FriendHistoryCursor, page: Page<FriendUpdate>?)] = []
             for await answer in group {
                 pages.append((cursor: answer.0, page: answer.1))
             }
             return pages
         }
+        let updatedCursors = advancedHistoryCursors(cursors, answered: answered)
+        guard updatedCursors != cursors else { return nil }
+        return OlderActivityBatch(updates: answered.flatMap { $0.page?.items ?? [] }, cursors: updatedCursors)
+    }
 
-        guard !Task.isCancelled, accountGeneration == generation else { return }
-        let updatedCursors = advancedHistoryCursors(historyCursors, answered: answered)
-        guard updatedCursors != historyCursors else {
+    private func loadOlderFriendActivity(generation: UUID) async {
+        guard let batch = await loadOlderActivity(historyCursors) else {
+            guard !Task.isCancelled, accountGeneration == generation else { return }
             // Nothing answered. Keep the cursors queued for the next refresh and
             // stop the feed from asking for a page that is not coming.
             feedPageStalled = true
             friendMessage = "Could not load older activity."
             return
         }
+        guard !Task.isCancelled, accountGeneration == generation else { return }
         feedPageStalled = false
-        historyCursors = updatedCursors
+        historyCursors = batch.cursors
         // The batch was consumed even when it held nothing this feed can show, so
         // the page advances and the next batch is asked for.
         friendFeedPage += 1
-        let older = sortedFriendActivity(answered.flatMap { $0.page?.items ?? [] })
+        let older = sortedFriendActivity(batch.updates)
         if !older.isEmpty {
             await resolveEnglishNames(in: older)
             guard !Task.isCancelled, accountGeneration == generation else { return }
@@ -729,31 +812,11 @@ final class Store: ObservableObject {
     }
 
     private func historyPage(_ cursor: FriendHistoryCursor) async throws -> Page<FriendUpdate> {
-        let result = try await publicListPage(cursor.friend, kind: cursor.kind, page: cursor.page)
-        return Page(items: result.items.filter { $0.date != nil }, more: result.more)
+        try await api.friendListPage(cursor.friend, kind: cursor.kind, page: cursor.page, limit: 50)
     }
 
     func publicListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int = 50) async throws -> Page<FriendUpdate> {
-        let result = try await api.catalog(
-            "users/\(friend.name)/\(kind.rawValue)list",
-            [
-                URLQueryItem(name: "page", value: String(page)),
-                URLQueryItem(name: "limit", value: String(limit)),
-            ], refresh: false)
-        let data: Fields? = result.read("data")
-        guard let rows: [Fields] = result.read("data") ?? data?.read("entries") else {
-            throw APIError(status: 0, message: "Could not load this list.")
-        }
-        let meta: Fields? = result.read("meta")
-        let pagination: Fields? = meta?.read("pagination") ?? result.read("pagination")
-        let hasNext: Bool? = pagination?.read("hasNextPage", "has_next_page")
-        let total: Int? = data?.read("total")
-        let more = hasNext ?? (total.map { $0 > page * limit } ?? (rows.count == limit))
-        let entries = rows.compactMap { row -> FriendUpdate? in
-            guard let title = Title(row, kind: kind) else { return nil }
-            return FriendUpdate(friend: friend, title: title, fields: row)
-        }
-        return Page(items: entries, more: more)
+        try await api.friendListPage(friend, kind: kind, page: page, limit: limit)
     }
 
     private func sortedFriendActivity(_ items: [FriendUpdate]) -> [FriendUpdate] {
@@ -784,20 +847,7 @@ final class Store: ObservableObject {
     }
 
     func publicUpdates(_ friend: Friend, refresh: Bool = false) async throws -> [FriendUpdate] {
-        try await publicUpdatesResponse(friend, refresh: refresh).items
-    }
-
-    private func publicUpdatesResponse(_ friend: Friend, refresh: Bool) async throws -> (items: [FriendUpdate], freshness: CatalogFreshness) {
-        let result = try await api.catalog("users/\(friend.name)/userupdates", [], refresh: refresh)
-        let body: Fields? = result.read("data")
-        let items = Kind.allCases.flatMap { kind -> [FriendUpdate] in
-            let entries: [Fields] = body?.read(kind.rawValue) ?? []
-            return entries.compactMap { entry -> FriendUpdate? in
-                guard let info: Fields = entry.read("entry"), let title = Title(info, kind: kind) else { return nil }
-                return FriendUpdate(friend: friend, title: title, fields: entry)
-            }
-        }
-        return (items, CatalogFreshness(result.read("meta")))
+        try await api.friendUpdates(friend, refresh: refresh).updates
     }
 
     /// Activity already cached by the friends feed, used when a friend profile
@@ -806,28 +856,11 @@ final class Store: ObservableObject {
         activity.filter { $0.friend.id == friend.id }
     }
 
+    /// A title page's friend row shows a friend's recent public activity, so one
+    /// `userupdates` request answers it. Walking the friend's list pages used to
+    /// cost up to ten 300-row requests per friend, for rows the page never shows.
     func friendEntry(_ friend: Friend, _ title: Title) async throws -> FriendUpdate? {
-        if let updates = try? await publicUpdates(friend), let match = updates.first(where: { $0.title.id == title.id }) {
-            return match
-        }
-        for page in 1...10 {
-            try Task.checkCancellation()
-            let response = try await api.catalog(
-                "users/\(friend.name)/\(title.kind.rawValue)list",
-                [
-                    URLQueryItem(name: "limit", value: "300"),
-                    URLQueryItem(name: "page", value: String(page)),
-                ], refresh: false)
-            let body: Fields? = response.read("data")
-            let entries: [Fields] = response.read("data") ?? body?.read("entries") ?? []
-            if let match = entries.first(where: { ($0.read("malId", "mal_id", "mediaId", "id") as Int?) == title.malID }) {
-                return FriendUpdate(friend: friend, title: title, fields: match)
-            }
-            let meta: Fields? = response.read("meta")
-            let pagination: Fields? = meta?.read("pagination")
-            if !(pagination?.read("hasNextPage") ?? (entries.count == 300)) { break }
-        }
-        return nil
+        try await publicUpdates(friend).first { $0.title.id == title.id }
     }
 }
 
@@ -852,19 +885,33 @@ func plainMessage(_ error: Error, fallback: String) -> String {
     }
 }
 
+/// The formats a provider writes a date in, each with its own formatter: a
+/// formatter cannot be reformatted while another row is reading it, and a row
+/// used to allocate a pair of them on every call.
+private enum ActivityDates {
+    static let iso = ISO8601DateFormatter()
+    static let isoFractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions.insert(.withFractionalSeconds)
+        return formatter
+    }()
+    static let dates: [(format: String, formatter: DateFormatter)] =
+        ["yyyy-MM-dd", "MMM d, yyyy", "MMM d, h:mm a", "MMM d"].map { format in
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            formatter.defaultDate = Date()
+            formatter.dateFormat = format
+            return (format, formatter)
+        }
+}
+
 func activityDate(_ value: String?) -> Date {
     guard let value else { return .distantPast }
-    let iso = ISO8601DateFormatter()
-    if let date = iso.date(from: value) { return date }
-    iso.formatOptions.insert(.withFractionalSeconds)
-    if let date = iso.date(from: value) { return date }
-    let formatter = DateFormatter()
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.defaultDate = Date()
-    for format in ["yyyy-MM-dd", "MMM d, yyyy", "MMM d, h:mm a", "MMM d"] {
-        formatter.dateFormat = format
-        if let date = formatter.date(from: value) {
-            if !format.contains("y"), date > Date() {
+    if let date = ActivityDates.iso.date(from: value) { return date }
+    if let date = ActivityDates.isoFractional.date(from: value) { return date }
+    for entry in ActivityDates.dates {
+        if let date = entry.formatter.date(from: value) {
+            if !entry.format.contains("y"), date > Date() {
                 return Calendar.current.date(byAdding: .year, value: -1, to: date) ?? date
             }
             return date

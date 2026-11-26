@@ -45,20 +45,20 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | --- | ---: | --- |
 | `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
 | `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 450 | This analysis: structure, APIs, state, caching, settings, CI and risks |
-| `ios/Aniswift/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
+| `ARCHITECTURE.md` | 466 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/Aniswift/API.swift` | 781 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
 | `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/Aniswift/Store.swift` | 884 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching (twelve friends per group until the page holds 30 rows) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
+| `ios/Aniswift/Store.swift` | 931 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures (plus an `entries` index, so a poster tile reads its saved row in one step), custom-list organisation, friend feed batching (twelve friends per group, then list pages, until the page holds 30 rows), `openFeed()` (a saved page older than ten minutes is refreshed on open) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics (reusing one formatter per format), `plainMessage` (one plain sentence for every failure) |
 | `ios/Aniswift/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/Aniswift/AniswiftApp.swift` | 1425 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch` (a round glass search button that expands the field), `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
-| `ios/Aniswift/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
-| `ios/Aniswift/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/Aniswift/TitleScreen.swift` | 2029 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/Aniswift/AniswiftApp.swift` | 1522 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch` (a round glass search button that expands the field), `Art`, `PreferredTitle` (with a batch-resolved name), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
+| `ios/Aniswift/SettingsScreen.swift` | 605 | `AccentChoice`, `SettingKey`, `DetailSection` (and its `all` list), `DetailPreferences` (the Details Page toggles for one kind, read once), `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
+| `ios/Aniswift/CatalogScreens.swift` | 1335 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a media switch under the search bar + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
+| `ios/Aniswift/TitleScreen.swift` | 2047 | Title detail fan-out and layout, `DetailPreferences` (the Details Page toggles, read once per kind), `TitleFacts` (the payload's studios, authors, genres, themes and serializations, decoded once), collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
 | `ios/Aniswift/CharacterScreen.swift` | 759 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits named in one batched request per kind, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniswiftTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniswiftTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
 | `ios/AniswiftTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
-| `ios/AniswiftTests/StoreTests.swift` | 175 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting and feed-cursor tests |
+| `ios/AniswiftTests/StoreTests.swift` | 187 | A stub `APIClient` plus list-sync, optimistic-edit, failure-reporting and feed-cursor tests |
 | `ios/AniswiftTests/CallbackTests.swift` | 52 | `MALCallback` redirect validation: scheme, host, path, fragment, state and code |
 | `ios/AniswiftTests/StackLinkTests.swift` | 59 | `StackLink` stack-URL parsing and description segmentation |
 | `ios/Aniswift/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
@@ -200,6 +200,10 @@ On top of that:
   original (romaji) name for `Romaji`, the English name for `English`, and falls back to whichever exists.
   `PreferredTitle`, list rows and sorting, title headers, interest-stack entries, review headers and editor
   prompts all use it, so a language change does not need per-screen conditions.
+- A title page decodes its payload once into a `TitleFacts` value (`studios`, `producers`, `genres`, `themes`,
+  `authors`, `serializations`), so the header and the information groups do not decode the same fields again on
+  every body pass; the first paint from the cache decodes it there instead. `activityDate` reuses one formatter
+  per format rather than allocating an ISO 8601 and a date formatter for every row it parses.
 - The same multi-key pattern applies to `FriendUpdate` (`progress | episodesWatched | chaptersRead | …`),
   `ProfileStats`/`ProfileMediaStats` (`totalEntries | total_entries`, `onHold | on_hold`, …), `TitleReview`,
   `ListEntry`, `InterestStack` and `StackEntry`.
@@ -245,12 +249,16 @@ On top of that:
 
 Concurrency patterns:
 
+- The feed's activity and list pages are fetched and decoded off the main actor (`API.friendUpdates`,
+  `API.friendListPage`): `Fields` wraps a decoder container and cannot leave the thread that decoded it, so the
+  rows are built there and only values come back. Six friends are then six requests in flight instead of six
+  tasks waiting to parse on the main thread, and the decoded rows are cached for the same one-minute lifetime.
 - Discover loads 10 shelves in batches of 3 task groups; the friend feed walks twelve friends at a time with six
-  concurrent `publicUpdates` calls, in up to four groups per page, until the page holds 30 rows or it has walked
-  every friend it can reach — one friend answers with only a handful of updates, so a page built from one group
-  looked empty; the title screen fans out up to 5 requests concurrently (`/full`, reviews
-  and stacks always; characters and recommendations only when those sections are enabled);
-  friends'-activity scanning looks up 6 friends per batch concurrently.
+  concurrent `publicUpdates` calls, in up to four groups per page, and then fills from four list pages at a time
+  (twice) while the page is still thin, until it holds 30 rows or has walked every page it can reach — one
+  friend answers with only a handful of updates, so a page built from one group looked empty; the title screen fans
+  out up to 5 requests concurrently (`/full`, reviews and stacks always; characters and recommendations only when
+  those sections are enabled); friends'-activity scanning looks up 6 friends per batch concurrently.
 - List sync re-fetches the whole loaded page range as a unit. A `listRevisions[kind]` counter aborts a sync if an
   edit lands mid-flight and sets `needsReconciliation` so the next page load re-syncs. Edits are applied
   optimistically.
@@ -273,7 +281,8 @@ Concurrency patterns:
 | Settings | `@AppStorage` preferences, cache sizes, version and service credits | accent, language, link handling, score prompt, launch screen, tab bar, 31 detail toggles, cache clearing |
 
 Design system: black canvas, forced dark scheme, shared `LedgerLayout` metrics, one `LedgerShelf` carousel for
-every rail, one `LedgerViewAll` link and one `ledgerSearch` field (`LedgerSearch`) across screens, a configurable
+every rail, one `LedgerViewAll` link and one `ledgerSearch` bar (`LedgerSearch`: a Liquid Glass capsule field with
+round glass buttons, on screen only while its button is open) across screens, a configurable
 tint (White default; eight other accent choices), Liquid Glass on iOS 26 with material/bordered fallbacks,
 `ViewThatFits` and adaptive grids for accessibility sizes, empty states as page blocks or `ContentUnavailableView`,
 `.sensoryFeedback` on controls plus success/error haptics, `SkeletonBlock` first-load placeholders on title pages,
@@ -283,7 +292,9 @@ and an in-app `SFSafariViewController` whose controls use the selected accent.
 ## 10. Settings and personalization
 
 All preferences are stored in `UserDefaults.standard` under `aniswift.settings.*` and read with `@AppStorage`,
-so a change updates open screens without a restart. They are **device-wide**: switching MyAnimeList accounts or
+so a change updates open screens without a restart. The 31 Details Page toggles are the exception: a title page
+reads them once into a `DetailPreferences` value per kind and refreshes it on `UserDefaults` changes, instead of
+asking `UserDefaults` thirty-one times on every body pass. They are **device-wide**: switching MyAnimeList accounts or
 signing out does not reset them, and they never sync.
 
 | Preference | Key | Default | Effect |
@@ -409,16 +420,21 @@ its `commits` job are gone: one push is one build, and a release is a tag.
     answered, so a Jikan Edge failure delays a friend's older pages instead of dropping them for the session.
     A page that cannot be read also sets `feedPageStalled`, which stops the feed asking for a page that will not
     arrive until the reader refreshes; a batch that answers with nothing this feed can show still advances the
-    page counter, so pagination continues instead of stopping silently.
+    page counter, so pagination continues instead of stopping silently. A page that recent activity cannot fill is
+    filled from those list pages before it is drawn, and `openFeed()` refreshes a saved page older than ten
+    minutes, so a thin snapshot from an earlier run cannot keep the feed short for good.
 19. **A title page scans a bounded set of friends.** Friends' list activity checks at most 18 friends per title
-    page (`TitleScreen.friendScanLimit`); every other friend is still reachable from the feed and their profile.
+    page (`TitleScreen.friendScanLimit`), and each friend costs one `userupdates` request: the row shows their
+    recent activity, not the whole list, so a friend who liked the title long ago is not in it. Every other friend
+    is still reachable from the feed and their profile.
 20. **The nightly asset is overwritten in place.** `Aniswift-Nightly-Unsigned.ipa` keeps its name so the download
     link is stable, which means a rebuild replaces it under the same URL: a cached or CDN copy can still hand out
     the previous nightly, and the build number in About is how two of them are told apart.
-21. **Search lives behind a button the app draws, and Discover's media switch rides with it.** `ledgerSearch` puts
-    the field behind a round glass search button of its own — the toolbar's field on iOS 26, the drawer's field
-    before that — so a scope bar exists only while the field is open. If an iOS release declines to draw scopes for
-    that presentation, Discover's anime/manga switch has no visible control while searching.
+21. **Search is the app's own bar, so there is no system scope bar.** `ledgerSearch` draws the field itself and
+    shows it only while its round button is open — `.searchable` could not promise that, because a placement
+    decides whether its field shows on its own. While the bar is open it hides the navigation bar, so the field
+    sits at the very top and its own round X stands in for the back button; closing it restores both. Discover's
+    anime/manga switch therefore sits under the field as a segmented picker rather than in a scope bar.
 
 ## 13. How this analysis was produced
 

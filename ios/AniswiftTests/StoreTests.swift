@@ -49,6 +49,18 @@ private final class StubAPI: APIClient {
         return try Self.fields(#"{"data": []}"#)
     }
 
+    func friendUpdates(
+        _ friend: Friend, refresh: Bool
+    ) async throws -> (updates: [FriendUpdate], freshness: CatalogFreshness) {
+        if let failure { throw failure }
+        return ([], CatalogFreshness())
+    }
+
+    func friendListPage(_ friend: Friend, kind: Kind, page: Int, limit: Int) async throws -> Page<FriendUpdate> {
+        if let failure { throw failure }
+        return Page(items: [], more: false)
+    }
+
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] { [:] }
 
     func resolveTitle(_ title: Title) async -> Title? { nil }
