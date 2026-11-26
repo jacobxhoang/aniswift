@@ -43,17 +43,17 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 
 | Path | Lines | Contents |
 | --- | ---: | --- |
-| `README.md` | 64 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
-| `ios/README.md` | 277 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 473 | This analysis: structure, APIs, state, caching, settings, CI and risks |
-| `ios/Aniswift/API.swift` | 888 | `APIError`, `Page` (with the provider's total), `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, batched English titles with the remembered `TitleNameCache`, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
-| `ios/Aniswift/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/Aniswift/Store.swift` | 972 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures (plus an `entries` index, so a poster tile reads its saved row in one step), custom-list organisation, friend feed batching (twelve friends per group, then list pages, until the page holds 30 rows), a friend's public list read in batches of pages (`FriendListBatch`), `resolveNames(in:)` (the English titles of one page, batched per kind) and `named(_:)`, `openFeed()` (a saved page older than ten minutes is refreshed on open) and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics (reusing one formatter per format), `plainMessage` (one plain sentence for every failure) |
-| `ios/Aniswift/Persistence.swift` | 228 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, `TitleNameCache` (the English titles resolved so far), profile statistics models and `ProfileCache` |
-| `ios/Aniswift/AniswiftApp.swift` | 1445 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `Art`, `PreferredTitle` (which reads the remembered name before it asks for one), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`, one round `ledgerGlassCircle` control for a button that floats over a picture), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen` (which reads the list to its end and counts the rows it holds), `AboutScreen` |
-| `ios/Aniswift/SettingsScreen.swift` | 605 | `AccentChoice`, `SettingKey`, `DetailSection` (and its `all` list), `DetailPreferences` (the Details Page toggles for one kind, read once), `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
+| `README.md` | 69 | Product overview, release channels, requirements, data sources, documentation links, repository layout |
+| `ios/README.md` | 314 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, nightly and tagged releases, development tools, manual verification checklist |
+| `ARCHITECTURE.md` | 491 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/Aniswift/API.swift` | 1227 | `APIError`, `Page` (with the provider's total), `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, batched English titles with the remembered `TitleNameCache`, title lookup gate, private request queue), the AniList client (implicit-grant sign-in, the client ID the build ships, `AniListCallback`, `AniListSession`, `AniListEntry` and its Keychain), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrappers |
+| `ios/Aniswift/Models.swift` | 568 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview` (reading both providers' key shapes), interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
+| `ios/Aniswift/Store.swift` | 992 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures (plus an `entries` index, so a poster tile reads its saved row in one step), custom-list organisation, friend feed batching (twelve friends per group, then list pages, until the page holds 30 rows), a friend's public list read in batches of pages (`FriendListBatch`), `resolveNames(in:)` (the English titles of one page, batched per kind) and `named(_:)`, `openFeed()` (a saved page older than ten minutes is refreshed on open) and paging, `PublicDataStatus` and public-refresh backoff, profile cache (statistics, favorites, favorite characters and people), activity-date heuristics (reusing one formatter per format), `plainMessage` (one plain sentence for every failure) |
+| `ios/Aniswift/Persistence.swift` | 230 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, `TitleNameCache` (the English titles resolved so far), profile statistics and favorites models (with the favorite characters and people) and `ProfileCache` |
+| `ios/Aniswift/AniswiftApp.swift` | 1531 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `Art`, `PreferredTitle` (which reads the remembered name before it asks for one), `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`, one round `ledgerGlassCircle` control for a button that floats over a picture), `AccountScreen` (whose friends, days and favorite shelves follow the Profile toggles), `FriendProfileScreen`, `FriendMediaListScreen` (which reads the list to its end and counts the rows it holds), `AboutScreen` |
+| `ios/Aniswift/SettingsScreen.swift` | 854 | `AccentChoice`, `SettingKey`, `DetailSection` (and its `all` list, the sections switch included), `DetailPreferences` (the Details Page toggles for one kind, read once), `ProfileSection` and `ProfilePreferences` (the Profile page toggles, read once), `SettingsScreen` (including the AniList section, About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen` (with the switch for everything below a summary), `ProfileSettingsScreen` (the appearance switches), `HeaderSettingsScreen`, `InfoSettingsScreen`, `AniListListsScreen` (the read-only lists), `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
 | `ios/Aniswift/CatalogScreens.swift` | 1346 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a media switch under the search bar + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/Aniswift/TitleScreen.swift` | 2055 | Title detail fan-out and layout, `DetailPreferences` (the Details Page toggles, read once per kind), `TitleFacts` (the payload's studios, authors, genres, themes and serializations, decoded once), collapsible summary, details-page preference gating, full-screen poster (which closes from a white 44-point glass circle where a back button would sit), stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader (the card keeps the verdict and the date on separate lines), `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/Aniswift/TitleScreen.swift` | 2107 | Title detail fan-out and layout, `DetailPreferences` (the Details Page toggles, read once per kind), `TitleFacts` (the payload's studios, authors, genres, themes and serializations, decoded once), collapsible summary, details-page preference gating (one switch hides every section under the summary and stops its requests), full-screen poster (which closes from a white 44-point glass circle where a back button would sit), stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews shelf (published before the characters and retried in place when its page failed) and reader, `FlowLayout`, `ListEditor` (full and quick modes) |
 | `ios/Aniswift/CharacterScreen.swift` | 759 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits named in one batched request per kind, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniswiftTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniswiftTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
@@ -116,11 +116,12 @@ State ownership:
 | MyAnimeList v2 | `https://api.myanimelist.net/v2` (OAuth: `https://myanimelist.net/v1/oauth2`) | Sign-in, identity, private lists, list edits |
 | Tenrai | `https://api.tenrai.org/v1` | Preferred catalog: search, seasons, rankings, details, relations, cast, reviews, themes, genres, stacks |
 | Jikan Edge | `https://jikan.lucashdo.com/v1` | **All** `users/*` data (statistics, favorites, friends, activity, public lists) and catalog fallback |
+| AniList | `https://graphql.anilist.co` (OAuth: `https://anilist.co/api/v2/oauth/authorize`) | Settings → AniList: sign-in and a **read-only** view of the account's lists |
 
 Schema differences, confirmed with live read-only requests:
 
 - **Tenrai** is Jikan-v4 compatible and uses **snake_case**: `data.mal_id`, `title_english`, `titles[]`,
-  `images.jpg.large_image_url`, `pagination.has_next_page`, reviews with `mal_id`/`review`/`is_spoiler`/`tags`/`user`,
+  `images.jpg.large_image_url`, `pagination.has_next_page`, reviews with `mal_id`/`review`/`is_spoiler`/`tags`/`user` or Jikan Edge's `reviewId`/`reviewText`/`isSpoiler`/`tag`/`username`/`imageUrl`,
   `/external` = `[{name,url}]`, `/seasons/now` and `/top/anime` shaped like Jikan v4.
 - **Jikan Edge** uses **camelCase** and wraps responses in `{data, meta}` with
   `meta = {cached, stale, refreshFailed, fetchedAt}`. Public list rows are
@@ -233,6 +234,13 @@ On top of that:
    rotation and list edits stay ordered.
 8. **Sign-out**: deletes the Keychain item, bumps `sessionGeneration`, clears account state, list snapshot and
    friends-feed cache. Custom lists and settings remain on the device.
+9. **AniList** is a second, read-only sign-in: its implicit grant opens the same `ASWebAuthenticationSession` on
+   `anilist.co/api/v2/oauth/authorize?client_id=…&response_type=token`, and the token arrives in the redirect's
+   **fragment** (`#access_token=…&token_type=Bearer&expires_in=…`), which `AniListCallback` reads apart from the
+   MyAnimeList query. The client ID is the one saved in Settings or, when that is empty, the one the build ships
+   in Info.plist (`AniswiftAniListClientID`, `58162`). The session (token, expiry, account id and name) is a Keychain
+   item under account `anilist-session`. Nothing is written back to AniList: `MediaListCollection` is read through
+   its GraphQL API and drawn in Settings → AniList.
 
 ## 8. Caching and concurrency
 
@@ -245,7 +253,7 @@ On top of that:
 | List snapshot | `Aniswift-lists-v1.json`: account + `[Kind: SavedList(items, page, more, needsReconciliation)]` |
 | Friends feed | `Aniswift-friends-feed-v1.json`: account ID, friends, activity, checked count, history cursors, page |
 | English titles | `Aniswift-title-names-v1.json`: `kind-id` → English name for rows a provider sends without one, plus the ids a batch answered as having none. Capped at 4000 names, written once per burst of resolutions, and dropped by Clear Cache. |
-| Public profiles | `Aniswift-profiles-v1.json`: stats/favorites per user with **15-minute** freshness |
+| Public profiles | `Aniswift-profiles-v1.json`: stats, favorites, favorite characters and people per user with **15-minute** freshness |
 | Saved-data state | Per-profile and feed `PublicDataStatus` (stale flag, last failure, snapshot time). Public refreshes honour Jikan Edge `meta.stale`/`refreshFailed`, keep the previous snapshot on screen, and back off 15/30/60 s (three automatic attempts, reset by pull-to-refresh or Retry). |
 | Custom lists | UserDefaults `aniswift.organization.v1.<accountID>` |
 | Settings | UserDefaults `aniswift.settings.*`; Clear Cache does not touch them |
@@ -274,16 +282,16 @@ Concurrency patterns:
 
 | Tab / screen | Reads | Writes |
 | --- | --- | --- |
-| Anime, Manga (`ListsScreen`) | cached list grouped by status (on-hold/dropped collapsed), search across loaded entries, sort by recent/title/rating, pagination; the empty state appears only for a loaded, empty snapshot | swipe +1 episode/chapter, swipe remove, full editor |
+| Anime, Manga (`ListsScreen`) | cached list grouped by status (on-hold/dropped collapsed), search across loaded entries, sorted by title unless the reader picks recent or rating, pagination; the empty state appears only for a loaded, empty snapshot | swipe +1 episode/chapter, swipe remove, full editor |
 | Discover | 10 shelves, per-kind search, genre/theme/studio/producer facets, catalog browser with season/year pickers | — |
 | Feed | friends list, per-friend `userupdates` (anime + manga), older pages via persisted cursors, English-name backfill; keeps the saved feed with a “Showing saved data” note and retry when Jikan Edge fails or reports stale data | — |
-| Profile | account, public statistics, favorites, custom lists, legacy favorites, About/version; saved snapshot stays visible with a note and retry when the public data cannot be refreshed | sign in/out, client-ID change |
-| Title | detail, relations, cast, recommendations, trailer, themes, interest stacks, reviews, friends' activity; tapping the header poster opens it full screen, and a manga's authors open their own page; header, content and information groups follow the Details Page settings, and the hidden character and recommendation sections are never requested | add/edit/remove entry, mark completed, quick status/progress/score, full editor (rewatch count, dates, notes ≤ 4000 bytes, custom lists, hide), share, open on MAL |
+| Profile | account, public statistics, favorites (anime, manga, characters and people), friends, custom lists, About/version; saved snapshot stays visible with a note and retry when the public data cannot be refreshed; the appearance toggles decide which of those the page draws | sign in/out, client-ID change |
+| Title | detail, relations, cast, recommendations, trailer, themes, interest stacks, reviews, friends' activity; tapping the header poster opens it full screen, and a manga's authors open their own page; header, content and information groups follow the Details Page settings, so a hidden section is never requested and one switch hides everything below the summary | add/edit/remove entry, mark completed, quick status/progress/score, full editor (rewatch count, dates, notes ≤ 4000 bytes, custom lists, hide), share, open on MAL |
 | Character | biography, member favorites, Japanese-preferred voice actors (each opening their own page), anime/manga appearances | — |
 | Voice actor or mangaka (`PersonScreen`) | `people/{id}/full`: portrait, alternate names, birthday, member favorites, biography, voiced roles (main parts first, 12 then all) and anime/manga staff credits (8 then all); a role opens its character, a credit opens its title through `PreferredTitle`, which takes the credit's English name from one batched `titleNames` request per kind. Opened from a character's voice actors and from the authors a manga's header lists | — |
 | Friend profile | stats header, list buttons only for non-empty lists, recent updates, favorites, pull-to-refresh | — |
 | Friend's anime or manga list | `users/{name}/{kind}list` read to its end in batches of four 100-row pages, grouped by status (completed/on-hold/dropped collapsed), the loaded count against `meta.pagination.total` while it reads, a retry for the page that failed | — |
-| Settings | `@AppStorage` preferences, cache sizes, version and service credits | accent, language, link handling, score prompt, launch screen, tab bar, 31 detail toggles, cache clearing |
+| Settings | `@AppStorage` preferences, cache sizes, version and service credits; the AniList session and its read-only lists | accent, language, link handling, score prompt, launch screen, tab bar, 33 detail toggles, 8 profile toggles, the AniList client ID and sign-in, cache clearing |
 
 Design system: black canvas, forced dark scheme, shared `LedgerLayout` metrics, one `LedgerShelf` carousel for
 every rail, one `LedgerViewAll` link across shelves, a configurable
@@ -296,13 +304,14 @@ and an in-app `SFSafariViewController` whose controls use the selected accent.
 ## 10. Settings and personalization
 
 All preferences are stored in `UserDefaults.standard` under `aniswift.settings.*` and read with `@AppStorage`,
-so a change updates open screens without a restart. The 31 Details Page toggles are the exception: a title page
+so a change updates open screens without a restart. The 33 Details Page toggles are the exception: a title page
 reads them once into a `DetailPreferences` value per kind and refreshes it on `UserDefaults` changes, instead of
-asking `UserDefaults` thirty-one times on every body pass. They are **device-wide**: switching MyAnimeList accounts or
+asking `UserDefaults` thirty-three times on every body pass. They are **device-wide**: switching MyAnimeList accounts or
 signing out does not reset them, and they never sync.
 
-| Preference | Key | Default | Effect |
-| --- | --- | --- | --- |
+| Preferences | Preference | Key | Default | Effect |
+| --- | --- | --- | --- | --- |
+| AniList Client ID | `aniListClientID` | `58162` | The AniList app's client ID, digits only and shown by its last four characters. The build ships one in Info.plist (`AniswiftAniListClientID`); a value saved here replaces it, and an empty field goes back to the shipped one, which `Connect` uses. |
 | Accent Color | `accent` | `White` | `.tint` at the app root, controls, links, highlights and the in-app browser's controls. Choices: White, Blue, Red, Green, Brown, Cyan, Gray, Purple, Mint. The selection ring/checkmark animation is skipped under Reduce Motion. |
 | Preferred Title Language | `titleLanguage` | `English` | Display-only name choice through `Title.displayName(for:)`; English falls back to Romaji and vice versa. Used by title pages, `PreferredTitle` tiles/rows, list sorting, stack entries, review headers/reader and editor prompts. List search matches either name. |
 | Open Links In-App | `openLinksInApp` | `true` | `OpenURLAction` presents http(s) links in `SFSafariViewController`; if no foreground scene can present it, the action returns `.systemAction` so the link still opens. |
@@ -313,18 +322,26 @@ signing out does not reset them, and they never sync.
 | Tab Bar Behavior | `tabBarBehavior` | `never` | iOS 26 only: `never` (always visible) or `onScrollDown` (`.tabBarMinimizeBehavior`). |
 
 Details Page toggles use `aniswift.settings.details.<anime|manga>.<section>` and all default to `true`. There
-are 17 anime keys and 14 manga keys (31 total):
+are 18 anime keys and 15 manga keys (33 total):
 
 | Group | Section keys | UI |
 | --- | --- | --- |
+| Sections | `sections` | One switch that hides everything under a title's summary — information, background, related titles, characters, recommendations, stacks, trailer, theme songs, friends' activity and reviews — and skips the requests those sections make |
 | Header | `header.poster`, `header.score`, `header.rank`, `header.popularity`, `header.creators` | Poster, average score, MAL rank, popularity, studios (anime) / authors (manga) |
 | Content | `characters`, `trailer`, `related`, `source`, `openings`, `endings`, `recommendations` | Character list, trailer, related titles, source, openings, endings, recommendations; trailer/openings/endings are anime-only and the manga screen omits them |
 | Information | `info.series`, `info.alternatives`, `info.genres`, `info.themes`, `info.creators` | Series information, alternative titles, genres, themes, studios and producers (anime) / serialization (manga) |
 
 `source` is rendered inside the Series Information block, so hiding Series Information also hides the source line.
-The following stay visible regardless of settings: summary, background, interest stacks, friends' list activity
-and reviews. Hiding groups changes rendering only; the title page still requests
-its usual five catalog payloads.
+The summary stays visible regardless of settings. “Show Sections Below Summary” hides everything under it —
+background, interest stacks, friends' list activity and reviews included — and stops their requests; the
+per-section toggles then change what it leaves visible.
+
+Profile toggles use `aniswift.settings.profile.<section>`, default to `true`, and are read the same way through
+`ProfilePreferences` (8 keys):
+
+| Group | Section keys | UI |
+| --- | --- | --- |
+| Appearance | `friends`, `days`, `anime.statistics`, `manga.statistics`, `favorite.anime`, `favorite.manga`, `favorite.characters`, `favorite.people` | Friends shelf, days watched in the header, the anime and manga statistics, and the favorite anime, manga, characters and people shelves; the friends shelf is the only one that costs a request (`users/{name}/friends`) and it is skipped while hidden |
 
 Clear Cache (`CacheRow`) clears `ImageCache` memory and disk, `URLCache.shared`, and `API.cached`. It does not
 touch the Keychain session, list/feed/profile snapshot files, custom lists or any preference. The row shows the
@@ -413,9 +430,10 @@ its `commits` job are gone: one push is one build, and a release is a tag.
 13. **Xcode 26 is mandatory in CI** even for the iOS 17 target, so older runner images cannot build the app.
 14. **No background refresh.** Data refreshes on view tasks, pull-to-refresh, the 5-minute title-detail TTL, the
     1-minute `users/*` TTL and the 15-minute profile freshness window only.
-15. **Details toggles cover two of six requests.** Characters and recommendations are no longer requested when
-    their section is hidden, but the `/full` payload, reviews and stacks always run, and header
-    toggles still fetch the payload behind them.
+15. **The sections switch stops the requests, not the `/full` payload.** With “Show Sections Below Summary” off,
+    a title page hides every section under the summary and skips the requests they make — characters,
+    recommendations, reviews, stacks and the friends scan included — and one section's own toggle does the same
+    for its request. The `/full` payload and the header toggles always run.
 16. **Clear Cache does not cancel in-flight work.** `catalogRequests` is left intact, so a response that arrives
     after clearing can be cached (and its detail JSON re-written) again immediately. It also measures only
     image-disk and URL-cache bytes, not the in-memory catalog dictionary or the saved title pages.

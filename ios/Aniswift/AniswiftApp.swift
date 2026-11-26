@@ -672,6 +672,8 @@ struct AccountScreen: View {
     @EnvironmentObject private var store: Store
     @State private var loadingProfile = false
     @State private var profileUnavailable = false
+    /// Every Profile toggle, read once and refreshed when Settings writes one.
+    @State private var preferences = ProfilePreferences()
 
     var body: some View {
         ScrollView {
@@ -683,7 +685,8 @@ struct AccountScreen: View {
                     ProfileStatsHeader(
                         image: account.image, stats: profile.stats?.value,
                         loadedAnime: store.lists[.anime, default: []].count,
-                        loadedManga: store.lists[.manga, default: []].count)
+                        loadedManga: store.lists[.manga, default: []].count,
+                        showsDays: preferences.shows(ProfileSection.days))
                     if let status, status.isShowingSavedData, hasSavedProfile {
                         SavedDataNote(savedAt: status.savedAt, message: status.failure, isBusy: loadingProfile) {
                             await loadProfile(refresh: true)
@@ -695,9 +698,18 @@ struct AccountScreen: View {
                         Button("Retry loading profile") { Task { await loadProfile(refresh: true) } }
                             .padding(.horizontal, LedgerLayout.inset)
                     }
-                    ProfileStatistics(stats: profile.stats?.value)
+                    if preferences.shows(ProfileSection.friends) { friendsShelf }
+                    ProfileStatistics(
+                        stats: profile.stats?.value,
+                        showsAnime: preferences.shows(ProfileSection.animeStatistics),
+                        showsManga: preferences.shows(ProfileSection.mangaStatistics))
                     customListsLink
-                    ForEach(Kind.allCases) { kind in favoriteShelf(kind) }
+                    ForEach(Kind.allCases) { kind in
+                        let section = kind == .anime ? ProfileSection.favoriteAnime : ProfileSection.favoriteManga
+                        if preferences.shows(section) { favoriteShelf(kind) }
+                    }
+                    if preferences.shows(ProfileSection.favoriteCharacters) { favoriteCharactersShelf }
+                    if preferences.shows(ProfileSection.favoritePeople) { favoritePeopleShelf }
                 } else {
                     VStack(alignment: .leading, spacing: 12) {
                         if store.checking {
@@ -738,6 +750,9 @@ struct AccountScreen: View {
             await loadProfile()
         }
         .refreshable { await loadProfile(refresh: true) }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            preferences = ProfilePreferences()
+        }
     }
 
     @ViewBuilder
@@ -765,6 +780,62 @@ struct AccountScreen: View {
         }
     }
 
+    @ViewBuilder
+    private var friendsShelf: some View {
+        if !store.friends.isEmpty {
+            portraitShelf(
+                "Friends", items: store.friends, value: { $0 }, image: { $0.avatar }, name: { $0.name })
+        }
+    }
+
+    @ViewBuilder
+    private var favoriteCharactersShelf: some View {
+        let characters = store.malFavoriteCharacters
+        if !characters.isEmpty {
+            portraitShelf(
+                "Favorite characters", items: characters, value: { $0 }, image: { $0.image }, name: { $0.name })
+        }
+    }
+
+    @ViewBuilder
+    private var favoritePeopleShelf: some View {
+        let people = store.malFavoritePeople
+        if !people.isEmpty {
+            portraitShelf(
+                "Favorite people", items: people, value: { $0 }, image: { $0.image }, name: { $0.name })
+        }
+    }
+
+    /// A shelf of people — friends, favorite characters or favorite people —
+    /// each opening its own page.
+    private func portraitShelf<Item: Identifiable, Value: Hashable>(
+        _ heading: String, items: [Item], value: @escaping (Item) -> Value,
+        image: @escaping (Item) -> URL?, name: @escaping (Item) -> String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LedgerSectionTitle(heading).padding(.horizontal, LedgerLayout.inset)
+            LedgerShelf(spacing: LedgerLayout.gap, inset: LedgerLayout.inset) {
+                ForEach(items) { item in
+                    NavigationLink(value: value(item)) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Art(url: image(item), symbol: "person.fill")
+                                .frame(width: 88, height: 88)
+                                .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                            Text(name(item))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2, reservesSpace: true)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .frame(width: 88)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
     private func loadProfile(refresh: Bool = false) async {
         guard let user = store.account else {
             loadingProfile = false
@@ -772,6 +843,11 @@ struct AccountScreen: View {
         }
         loadingProfile = true
         defer { if store.account?.id == user.id { loadingProfile = false } }
+        // The friends rail reads the same list the feed uses, so it is asked for
+        // only while that rail shows.
+        if preferences.shows(ProfileSection.friends), store.friends.isEmpty {
+            try? await store.fetchFriends(user)
+        }
         let loaded = await store.loadProfile(user.name, refresh: refresh)
         guard !Task.isCancelled, store.account?.id == user.id else { return }
         profileUnavailable = !loaded
@@ -1114,6 +1190,8 @@ private struct ProfileStatsHeader: View {
     let stats: ProfileStats?
     var loadedAnime: Int? = nil
     var loadedManga: Int? = nil
+    /// Whether the days-watched metric shows: Profile settings can hide it.
+    var showsDays = true
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
@@ -1148,7 +1226,9 @@ private struct ProfileStatsHeader: View {
                     (manga ?? loadedManga)?.formatted() ?? "—")
             }
             HStack(alignment: .top, spacing: 12) {
-                metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
+                if showsDays {
+                    metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
+                }
                 metric("Chapters read", chapters?.formatted() ?? "—")
             }
         }
@@ -1166,10 +1246,16 @@ private struct ProfileStatsHeader: View {
 
 private struct ProfileStatistics: View {
     let stats: ProfileStats?
+    var showsAnime = true
+    var showsManga = true
+
+    private func shows(_ kind: Kind) -> Bool {
+        kind == .anime ? showsAnime : showsManga
+    }
 
     var body: some View {
         ForEach(Kind.allCases) { kind in
-            if let stats, !stats.isListEmpty(for: kind), let details = stats.details(for: kind) {
+            if shows(kind), let stats, !stats.isListEmpty(for: kind), let details = stats.details(for: kind) {
                 ProfileStatisticsSection(kind: kind, stats: details)
                     .padding(.horizontal, LedgerLayout.inset)
             }

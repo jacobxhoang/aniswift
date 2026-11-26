@@ -12,6 +12,7 @@
     <key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
     <key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
     <key>AniswiftMALClientID</key><string></string>
+    <key>AniswiftAniListClientID</key><string>58162</string>
     <key>CFBundleURLTypes</key>
     <array><dict><key>CFBundleURLName</key><string>org.aniswift.ios.auth</string><key>CFBundleURLSchemes</key><array><string>org.aniswift.ios</string></array></dict></array>
     <key>LSRequiresIPhoneOS</key><true/>

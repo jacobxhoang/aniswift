@@ -1,4 +1,5 @@
 import AuthenticationServices
+import Combine
 import Foundation
 import Security
 import UIKit
@@ -884,5 +885,343 @@ private final class LoginBrowser: NSObject, ASWebAuthenticationPresentationConte
                 continuation.resume(throwing: APIError(status: 0, message: "Unable to start MyAnimeList sign-in."))
             }
         }
+    }
+}
+
+/// A signed-in AniList account: the token its implicit grant returns, when it
+/// ends, and the account the lists belong to.
+struct AniListSession: Codable {
+    var token: String
+    var expiresAt: Date
+    var id: Int = 0
+    var name: String = ""
+}
+
+/// AniList returns its token in the redirect's **fragment**, where MyAnimeList
+/// puts a code in the query, so the two callbacks are read apart.
+enum AniListCallback {
+    static let scheme = MALCallback.scheme
+    static let url = "\(scheme)://oauth"
+
+    static func session(from url: URL) -> AniListSession? {
+        guard url.scheme == scheme, url.host == "oauth", let fragment = url.fragment else { return nil }
+        var values: [String: String] = [:]
+        for pair in fragment.split(separator: "&") {
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            values[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+        }
+        guard values["token_type"]?.lowercased() == "bearer", let token = values["access_token"] else {
+            return nil
+        }
+        // AniList tokens last a year by default, so a missing lifetime is read
+        // as one rather than as an expired session.
+        let lifetime = Double(values["expires_in"] ?? "") ?? 31_536_000
+        return AniListSession(token: token, expiresAt: Date().addingTimeInterval(lifetime))
+    }
+}
+
+/// One row of a signed-in account's AniList list, read-only: the media it
+/// names, the status and progress AniList holds, and its score out of 100.
+struct AniListEntry: Identifiable {
+    let id: Int
+    let malID: Int?
+    let kind: Kind
+    let name: String
+    let original: String
+    let image: URL?
+    let status: String
+    let progress: Int
+    let total: Int?
+    let score: Int
+
+    init?(_ fields: Fields, kind: Kind) {
+        guard let media: Fields = fields.read("media"), let id: Int = media.read("id") else { return nil }
+        let title: Fields? = media.read("title")
+        guard let original = title?.string("romaji") ?? title?.string("english") else { return nil }
+        self.id = id
+        malID = media.read("idMal")
+        self.kind = kind
+        self.original = original
+        name = title?.string("english") ?? original
+        let cover: Fields? = media.read("coverImage")
+        image = cover.flatMap { publicURL($0.string("large")) }
+        status = Self.statusLabel(fields.string("status"), kind: kind)
+        progress = fields.read("progress") ?? 0
+        let count: Int? = media.read(kind == .anime ? "episodes" : "chapters")
+        total = count.flatMap { $0 > 0 ? $0 : nil }
+        score = fields.read("score") ?? 0
+    }
+
+    /// The name a reader should see for the stored preferred-language setting.
+    func displayName(for language: String) -> String {
+        if language == TitleLanguage.romaji.rawValue { return original.isEmpty ? name : original }
+        return name.isEmpty ? original : name
+    }
+
+    /// AniList's status values as the app names them.
+    static func statusLabel(_ value: String?, kind: Kind) -> String {
+        switch value?.uppercased() {
+        case "CURRENT": kind == .anime ? "Watching" : "Reading"
+        case "REPEATING": kind == .anime ? "Rewatching" : "Rereading"
+        case "PLANNING": kind == .anime ? "Plan to watch" : "Plan to read"
+        case "COMPLETED": "Completed"
+        case "PAUSED": "On hold"
+        case "DROPPED": "Dropped"
+        default: value?.capitalized ?? "Other"
+        }
+    }
+
+    var progressLabel: String? {
+        if let total { return "\(progress)/\(total)" }
+        return progress > 0 ? "\(progress)" : nil
+    }
+
+    /// AniList scores out of 100, so it reads on the app's 10-point scale.
+    var scoreLabel: String? { score > 0 ? "★ \(score / 10)/10" : nil }
+}
+
+/// The AniList session, in the Keychain under the app's service: it is read
+/// once when the client is built and written whenever the account changes.
+private enum AniListKeychain {
+    static let key: [String: Any] = [
+        kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "org.aniswift.ios",
+        kSecAttrAccount as String: "anilist-session",
+    ]
+
+    static func read() -> AniListSession? {
+        var query = key
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess, let data = result as? Data else { return nil }
+        return try? JSONDecoder().decode(AniListSession.self, from: data)
+    }
+
+    static func write(_ session: AniListSession) throws {
+        let value = [kSecValueData as String: try JSONEncoder().encode(session)]
+        let status = SecItemUpdate(key as CFDictionary, value as CFDictionary)
+        if status == errSecItemNotFound {
+            var query = key.merging(value) { _, new in new }
+            query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else { throw failure() }
+        } else if status != errSecSuccess {
+            throw failure()
+        }
+    }
+
+    static func remove() {
+        SecItemDelete(key as CFDictionary)
+    }
+
+    static func failure() -> APIError {
+        APIError(status: 0, message: "Could not save the AniList session.")
+    }
+}
+
+/// The AniList section of Settings: one client that signs in through AniList's
+/// implicit grant and reads the account's lists through its GraphQL API. It is
+/// read-only — nothing here writes an entry back to AniList.
+@MainActor
+final class AniListClient: ObservableObject {
+    static let graphql = URL(string: "https://graphql.anilist.co")!
+    static let authorize = URL(string: "https://anilist.co/api/v2/oauth/authorize")!
+
+    /// The AniList app's client ID, kept with the app's other settings. The
+    /// build ships one, so Connect works out of the box; a value saved here
+    /// replaces it, and an empty field goes back to the bundled one.
+    @Published var clientID: String {
+        didSet { UserDefaults.standard.set(clientID, forKey: SettingKey.aniListClientID) }
+    }
+    @Published private(set) var session: AniListSession?
+    @Published private(set) var entries: [AniListEntry] = []
+    @Published private(set) var loading = false
+    @Published private(set) var connecting = false
+    @Published private(set) var message: String?
+    @Published private(set) var syncedAt: Date?
+    /// The sign-in sheet, the same browser the MyAnimeList sign-in presents.
+    private let browser = LoginBrowser()
+
+    /// The client ID the build ships with, read like the MyAnimeList one. It is
+    /// public: a distributed build's Info.plist is readable.
+    static var bundledClientID: String? {
+        guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniswiftAniListClientID") as? String else {
+            return nil
+        }
+        let trimmed = bundled.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !trimmed.isEmpty && trimmed.allSatisfy(\.isNumber) ? trimmed : nil
+    }
+
+    init() {
+        let saved = UserDefaults.standard.string(forKey: SettingKey.aniListClientID) ?? ""
+        clientID = saved.isEmpty ? (Self.bundledClientID ?? "") : saved
+        let cached = AniListKeychain.read()
+        session = (cached?.expiresAt ?? .distantPast) > .now ? cached : nil
+    }
+
+    var isSignedIn: Bool { (session?.expiresAt ?? .distantPast) > .now }
+
+    /// What the section says under the account row.
+    var summary: String {
+        if connecting { return "Waiting for AniList sign-in…" }
+        if loading { return "Syncing your lists…" }
+        if let message { return message }
+        if entries.isEmpty { return "Tap to sync your AniList lists" }
+        guard let syncedAt else { return "\(entries.count) entries" }
+        return "\(entries.count) entries · \(displayDate(syncedAt.formatted(.iso8601)))"
+    }
+
+    func signIn() async {
+        let saved = clientID.trimmingCharacters(in: .whitespacesAndNewlines)
+        // An empty field goes back to the ID the build ships with, so clearing
+        // it in Settings does not disable Connect.
+        let id = saved.isEmpty ? (Self.bundledClientID ?? "") : saved
+        guard !id.isEmpty else {
+            message = "Add your AniList client ID first."
+            return
+        }
+        guard !connecting else { return }
+        connecting = true
+        message = nil
+        defer { connecting = false }
+        do {
+            let redirect = try await authenticate(clientID: id)
+            guard var session = AniListCallback.session(from: redirect) else {
+                message = "AniList did not return a token."
+                return
+            }
+            let viewer = try await viewer(token: session.token)
+            guard let account: Int = viewer.read("id"), let name = viewer.string("name") else {
+                message = "AniList did not answer with the account."
+                return
+            }
+            session.id = account
+            session.name = name
+            self.session = session
+            try AniListKeychain.write(session)
+            await sync(refresh: true)
+        } catch {
+            guard !Task.isCancelled else { return }
+            message = plainMessage(error, fallback: "Could not sign in to AniList.")
+        }
+    }
+
+    func signOut() {
+        session = nil
+        entries = []
+        syncedAt = nil
+        message = nil
+        AniListKeychain.remove()
+    }
+
+    /// Brings the account's lists over, grouped by kind and status. The lists
+    /// are read again on each refresh, since they change on AniList.
+    func sync(refresh: Bool = false) async {
+        guard let saved = session else { return }
+        guard saved.expiresAt > .now else {
+            session = nil
+            AniListKeychain.remove()
+            message = "Your AniList session has expired. Connect again."
+            return
+        }
+        guard !loading else { return }
+        loading = true
+        message = nil
+        defer { loading = false }
+        do {
+            var loaded: [AniListEntry] = []
+            for kind in Kind.allCases {
+                loaded += try await list(kind, session: saved)
+            }
+            guard !Task.isCancelled else { return }
+            entries = loaded
+            syncedAt = .now
+        } catch {
+            guard !Task.isCancelled else { return }
+            message = plainMessage(error, fallback: "Could not read your AniList lists.")
+        }
+    }
+
+    private func authenticate(clientID: String) async throws -> URL {
+        var parts = URLComponents(url: Self.authorize, resolvingAgainstBaseURL: false)!
+        parts.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "response_type", value: "token"),
+        ]
+        guard let start = parts.url else {
+            throw APIError(status: 0, message: "Could not build the AniList sign-in.")
+        }
+        // The sheet is presented the way the MyAnimeList sign-in presents its
+        // own, so one browser serves both redirect URLs.
+        return try await browser.authenticate(start, scheme: AniListCallback.scheme)
+    }
+
+    private func viewer(token: String) async throws -> Fields {
+        let result = try await query(["query": "query { Viewer { id name } }"], token: token)
+        guard let data: Fields = result.read("data"), let viewer: Fields = data.read("Viewer") else {
+            throw APIError(status: 0, message: "AniList did not answer with the account.")
+        }
+        return viewer
+    }
+
+    private func list(_ kind: Kind, session: AniListSession) async throws -> [AniListEntry] {
+        let body: [String: Any] = [
+            "query": """
+            query ($id: Int, $type: MediaType) {
+              MediaListCollection(userId: $id, type: $type) {
+                lists {
+                  entries {
+                    status
+                    progress
+                    score
+                    media {
+                      id
+                      idMal
+                      title { romaji english }
+                      coverImage { large }
+                      episodes
+                      chapters
+                    }
+                  }
+                }
+              }
+            }
+            """,
+            "variables": ["id": session.id, "type": kind == .anime ? "ANIME" : "MANGA"],
+        ]
+        let result = try await query(body, token: session.token)
+        guard let data: Fields = result.read("data"),
+            let collection: Fields = data.read("MediaListCollection"),
+            let lists: [Fields] = collection.read("lists")
+        else {
+            throw APIError(status: 0, message: "AniList did not answer with your lists.")
+        }
+        let rows: [Fields] = lists.flatMap { list -> [Fields] in list.read("entries") ?? [] }
+        return rows.compactMap { AniListEntry($0, kind: kind) }
+    }
+
+    private func query(_ body: [String: Any], token: String?) async throws -> Fields {
+        var request = URLRequest(url: Self.graphql, timeoutInterval: 25)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError(status: 0, message: "AniList did not respond.")
+        }
+        let fields = try? JSONDecoder().decode(Fields.self, from: data)
+        guard (200..<300).contains(http.statusCode) else {
+            let errors: [Fields] = fields?.read("errors") ?? []
+            throw APIError(
+                status: http.statusCode,
+                message: errors.first?.string("message") ?? "AniList could not answer.")
+        }
+        guard let fields else {
+            throw APIError(status: 0, message: "AniList answered with something unreadable.")
+        }
+        return fields
     }
 }

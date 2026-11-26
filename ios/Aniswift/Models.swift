@@ -354,19 +354,27 @@ struct TitleReview: Identifiable, Hashable {
     }
 
     init?(_ fields: Fields) {
-        guard let text = fields.string("review", "text") else { return nil }
+        // Tenrai serves Jikan's shape (`review`, `mal_id`, `user`), and the Jikan
+        // Edge fallback serves its own (`reviewText`, `reviewId`, `username`):
+        // reading only one of them dropped every review the fallback answered,
+        // so a title page showed a Reviews section with nothing in it.
+        guard let text = fields.string("review", "text", "reviewText") else { return nil }
         let user: Fields? = fields.read("user")
         let tags: [String] = fields.read("tags") ?? [fields.string("tag")].compactMap { $0 }
         self.text = text
-        author = user?.string("username", "name") ?? fields.string("user", "username") ?? "MyAnimeList member"
+        author =
+            user?.string("username", "name") ?? fields.string("username", "user")
+            ?? "MyAnimeList member"
         avatar = user?.image ?? fields.image
         date = fields.string("date")
         url = publicURL(fields.string("url"))
-        let malID: Int? = fields.read("mal_id", "malId", "id")
+        let malID: Int? = fields.read("mal_id", "malId", "reviewId", "id")
         id = malID.map(String.init) ?? url?.absoluteString ?? "\(author)|\(date ?? "")|\(text)"
         tag = tags.first { ["Recommended", "Mixed Feelings", "Not Recommended"].contains($0) }
         rating = fields.read("score")
-        spoiler = (fields.read("is_spoiler", "isSpoiler") ?? false) || tags.contains { $0.localizedCaseInsensitiveContains("spoiler") }
+        spoiler =
+            (fields.read("is_spoiler", "isSpoiler") ?? false)
+            || tags.contains { $0.localizedCaseInsensitiveContains("spoiler") }
     }
 }
 

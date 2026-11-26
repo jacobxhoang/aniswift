@@ -63,7 +63,7 @@ struct ListsScreen: View {
     let kind: Kind
     @State private var collapsed: Set<String> = []
     @State private var query = ""
-    @State private var sort = ListSort.recent
+    @State private var sort = ListSort.title
     @State private var paging = false
     @State private var listPageError: String?
     @State private var pendingRemoval: ListEntry?
@@ -71,8 +71,8 @@ struct ListsScreen: View {
     private let rowInset: CGFloat = 10
 
     private enum ListSort: String, CaseIterable {
-        case recent = "Recently updated"
         case title = "Title"
+        case recent = "Recently updated"
         case rating = "My rating"
     }
 

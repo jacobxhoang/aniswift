@@ -38,7 +38,7 @@ struct TitleScreen: View {
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
 
-    /// Every Details Page toggle, read once per kind: the thirty-one `@AppStorage`
+    /// Every Details Page toggle, read once per kind: the thirty-three `@AppStorage`
     /// wrappers this page used each read `UserDefaults` on access, on every pass
     /// of the busiest screen.
     @State private var animePreferences = DetailPreferences(.anime)
@@ -62,6 +62,10 @@ struct TitleScreen: View {
     private var showsTrailer: Bool { title.kind == .anime && shows(DetailSection.trailer) }
     private var showsOpenings: Bool { title.kind == .anime && shows(DetailSection.openings) }
     private var showsEndings: Bool { title.kind == .anime && shows(DetailSection.endings) }
+    /// One switch for everything under the summary: its information, background,
+    /// related titles, characters, recommendations, stacks, trailer, theme songs,
+    /// friends' activity and reviews.
+    private var showsSectionsBelowSummary: Bool { shows(DetailSection.sections) }
     private var showsHeaderPoster: Bool { shows(DetailSection.headerPoster) }
     private var showsHeaderScore: Bool { shows(DetailSection.headerScore) }
     private var showsHeaderRank: Bool { shows(DetailSection.headerRank) }
@@ -105,19 +109,21 @@ struct TitleScreen: View {
                     if let description = record?.string("synopsis") {
                         block("Summary") { summary(description) }
                     }
-                    if showsMetadata { metadata }
-                    if let background = record?.string("background") { block("Background") { Text(background) } }
-                    if showsRelated, !related.isEmpty { relations }
-                    if showsCharacters, !characters.isEmpty { cast }
-                    if showsRecommendations, !suggested.isEmpty { mediaRail("Recommended", titles: suggested) }
-                    if !stacks.isEmpty { interestStacks }
-                    if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
-                    if title.kind == .anime { themeRows }
-                    if !friendRows.isEmpty { friends }
-                    if let reviews, !reviews.items.isEmpty || reviews.more {
-                        reviewRows(reviews)
-                    } else if reviewsUnavailable {
-                        reviewRows(nil)
+                    if showsSectionsBelowSummary {
+                        if showsMetadata { metadata }
+                        if let background = record?.string("background") { block("Background") { Text(background) } }
+                        if showsRelated, !related.isEmpty { relations }
+                        if showsCharacters, !characters.isEmpty { cast }
+                        if showsRecommendations, !suggested.isEmpty { mediaRail("Recommended", titles: suggested) }
+                        if !stacks.isEmpty { interestStacks }
+                        if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
+                        if title.kind == .anime { themeRows }
+                        if !friendRows.isEmpty { friends }
+                        if let reviews, !reviews.items.isEmpty || reviews.more {
+                            reviewRows(reviews)
+                        } else if reviewsUnavailable {
+                            reviewRows(nil, failed: true)
+                        }
                     }
                 }
                 .padding(LedgerLayout.inset)
@@ -169,6 +175,9 @@ struct TitleScreen: View {
             friendOffset = 0
             completedFriendBatches = 0
             checkingFriends = false
+            // A hidden friends section is not scanned, and the friends are only
+            // asked about while the page shows everything below its summary.
+            guard showsSectionsBelowSummary else { return }
             await loadFriendBatch()
         }
         .sheet(item: $editor) { mode in
@@ -658,7 +667,7 @@ struct TitleScreen: View {
         }
     }
 
-    private func reviewRows(_ firstPage: Page<TitleReview>?) -> some View {
+    private func reviewRows(_ firstPage: Page<TitleReview>?, failed: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack {
                 shelfHeading("Reviews")
@@ -681,10 +690,30 @@ struct TitleScreen: View {
                         .buttonStyle(.plain)
                     }
                 }
+            } else if failed {
+                // The reviews are retried here rather than through View All, so a
+                // failed page says so and can recover where it is.
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Could not load reviews.").foregroundStyle(.secondary)
+                    Button("Retry") { Task { await loadReviews() } }.ledgerGlassButton()
+                }
+                .padding(.top, 4)
             }
         }
         .padding(.top, 12)
         .overlay(alignment: .top) { Divider() }
+    }
+
+    /// Retries just the reviews, so a failed section does not reload the page.
+    private func loadReviews() async {
+        do {
+            let page = try await store.api.titleReviews(title, page: 1)
+            guard !Task.isCancelled else { return }
+            reviews = page
+            reviewsUnavailable = false
+        } catch {
+            if !Task.isCancelled { reviewsUnavailable = true }
+        }
     }
 
     private func block<Content: View>(_ name: String, @ViewBuilder content: () -> Content) -> some View {
@@ -709,11 +738,15 @@ struct TitleScreen: View {
         // one request instead of four. A section the reader hid from the Details
         // Page settings is never requested, not just hidden: the settings shape
         // the fan-out.
+        // A hidden section is never requested, the switch for everything below
+        // the summary included, so turning those sections off costs only the
+        // details the page still draws.
+        let belowSummary = showsSectionsBelowSummary
         async let detail = store.api.catalog(path + "/full", [], refresh: false)
-        async let reviewData = store.api.titleReviews(title, page: 1)
-        async let stackData = store.api.interestStacks(for: title, page: 1)
-        async let castData = loadSection(showsCharacters, path + "/characters")
-        async let recsData = loadSection(showsRecommendations, path + "/recommendations")
+        async let reviewData = loadReviewsIfWanted(belowSummary)
+        async let stackData = loadStacksIfWanted(belowSummary)
+        async let castData = loadSection(belowSummary && showsCharacters, path + "/characters")
+        async let recsData = loadSection(belowSummary && showsRecommendations, path + "/recommendations")
         do {
             let result = try await detail
             if let full: Fields = result.read("data") {
@@ -739,28 +772,47 @@ struct TitleScreen: View {
                 }
             }
         }
+        // The reviews are awaited before the characters so a slow cast request
+        // cannot hold them off the page, and each section is published as it lands.
+        let review = await reviewData
+        if !Task.isCancelled {
+            if let page = review.page {
+                reviews = page
+                reviewsUnavailable = false
+            } else if review.failure != nil {
+                reviewsUnavailable = true
+            }
+        }
         if let result = await castData {
             let items: [Fields] = result.read("data") ?? []
             let cast = unique(items.compactMap(CastMember.init))
             characters = cast.filter { $0.role?.lowercased() == "main" }
                 + cast.filter { $0.role?.lowercased() != "main" }
         }
-        do {
-            let result = try await reviewData
-            if !Task.isCancelled {
-                reviews = result
-                reviewsUnavailable = false
-            }
-        } catch {
-            if !Task.isCancelled { reviewsUnavailable = true }
-        }
         if let result = await recsData {
             suggested = unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }
         }
-        if let page = try? await stackData {
+        if let page = await stackData {
             stacks = page.items
             stacksMore = page.more
         }
+    }
+
+    /// The reviews, asked for only while the sections below the summary show,
+    /// with a failure kept apart from the page so the shelf can say so.
+    private func loadReviewsIfWanted(_ wanted: Bool) async -> (page: Page<TitleReview>?, failure: Error?) {
+        guard wanted else { return (nil, nil) }
+        do {
+            return (try await store.api.titleReviews(title, page: 1), nil)
+        } catch {
+            return (nil, error)
+        }
+    }
+
+    /// The interest stacks, asked for only while those sections show.
+    private func loadStacksIfWanted(_ wanted: Bool) async -> Page<InterestStack>? {
+        guard wanted else { return nil }
+        return try? await store.api.interestStacks(for: title, page: 1)
     }
 
     /// Reads the related titles and theme songs that `/full` returns with the details.

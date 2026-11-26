@@ -25,10 +25,10 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, sort and search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
+| Anime and Manga | Expand status groups, sort by title, recent update or your rating, and search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
-| Profile | View account statistics and public favorites, open custom lists, share your MyAnimeList profile, and open **Settings** from the toolbar gear. |
+| Profile | View account statistics, friends and public favorites, open custom lists, share your MyAnimeList profile, choose what appears under **Settings → Profile**, and open Settings from the toolbar gear. |
 
 Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite
 or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to
@@ -86,12 +86,19 @@ checkmark, or updates without animation when Reduce Motion is on.
 | Tab Bar Behavior (iOS 26) | Always Visible | Keeps the tab bar visible or lets it minimize while scrolling down. Earlier iOS versions always show the tab bar. |
 | Clear Cache | — | Clears Kingfisher's memory and disk image cache, the shared URL cache, the in-memory catalog response cache and the saved title pages. Sign-in, lists, feed/profile snapshots, custom lists and settings are kept. The row reports the measured image and URL cache size, or notes when only catalog responses are cached. |
 
-Preferences are read live: changing the accent, language or a detail toggle updates open screens immediately.
+Preferences are read live: changing the accent, language, a detail toggle or a profile toggle updates open
+screens immediately.
 
 ### Details Page
 
 Details Page settings control what a title page draws. Every toggle defaults to on, for both anime and manga,
 and the groups are configured separately.
+
+**Sections** (Anime and Manga)
+
+- Show Sections Below Summary — one switch that hides everything under a title's summary: its information,
+  background, related titles, characters, recommendations, stacks, trailer, theme songs, friends' activity and
+  reviews
 
 **Header** (Anime and Manga)
 
@@ -126,9 +133,39 @@ and the groups are configured separately.
 - Themes
 - Studios and Producers (anime) or Serialization (manga)
 
-The summary, background, interest stacks, friends' list activity and reviews are not configurable and always
-appear when data exists. Hiding Characters or Recommendations also skips its request,
-so the title page asks for less. The remaining groups only change what is drawn.
+The summary is not configurable and always appears when data exists. With **Show Sections Below Summary** off, a
+title page draws only its header and summary, and the section requests are skipped. Hiding Characters or
+Recommendations on their own also skips its request, so the title page asks for less. The remaining toggles only
+change what is drawn.
+
+### Profile
+
+Profile settings, under **Settings → Profile**, choose what the Profile tab draws. Every switch defaults to on.
+
+**Appearance**
+
+- Friends — the shelf of MyAnimeList friends, each opening their profile; hiding it skips the friends request
+- Days Watching — the days-watched metric in the header
+- Anime Statistics and Manga Statistics — the status counts, mean score and totals for each kind
+- Favorite Anime and Favorite Manga — the favorite shelves
+- Favorite Characters and Favorite People — the favorite character and voice actor shelves
+
+### AniList
+
+**Settings → AniList** signs this device in to AniList and shows its lists, read-only, beside MyAnimeList.
+Nothing is written back to AniList.
+
+1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer) with the redirect URL
+   `org.aniswift.ios://oauth`, and copy its client ID. The build already ships one (ending in **8162**), so you
+   can skip this and connect straight away; your own ID replaces it.
+2. Tap **AniList Client ID** only to use your own app: paste the number and save. Clearing the field goes back to
+   the ID the build ships with.
+3. Tap **Connect AniList** and finish the sign-in sheet. The section then lists the account's anime and manga
+   entries grouped by status, with posters, progress and scores, and **Sign Out of AniList** ends the session
+   without touching the MyAnimeList one.
+
+The lists are read through AniList's GraphQL API when the screen opens and on pull-to-refresh; the session is
+kept in the Keychain and lasts a year.
 
 ### About
 

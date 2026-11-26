@@ -211,6 +211,8 @@ struct CachedProfileValue<Value: Codable>: Codable {
 struct ProfileSnapshot: Codable {
     var stats: CachedProfileValue<ProfileStats>?
     var favorites: CachedProfileValue<[Kind: [Title]]>?
+    var favoriteCharacters: CachedProfileValue<[CharacterReference]>?
+    var favoritePeople: CachedProfileValue<[PersonReference]>?
 }
 
 enum ProfileCache {

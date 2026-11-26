@@ -15,16 +15,20 @@ its own.
   profile, their voice actors and a manga’s authors open a page of their roles and staff credits.
 - **Friends feed** — public updates from MyAnimeList friends, older pages, and native friend profiles with
   statistics, favorites and recent activity.
-- **Profile** — account statistics, public favorites, custom lists, and a share link to the MyAnimeList profile.
+- **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
+  lists, and a share link to the MyAnimeList profile.
 - **Settings** — accent color, preferred title language, in-app link handling, a post-completion score prompt,
   preferred launch screen, iOS 26 tab-bar behavior, cache clearing, per-kind control over what a title page
-  shows, plus About Aniswift and sign out.
+  shows (including one switch that hides everything below its summary), profile appearance switches, an AniList
+  sign-in with its lists read-only, plus About Aniswift and sign out.
 
 ## Requirements
 
 - iPhone or iPad running iOS 17 or newer.
 - Xcode 26 and the iOS 26 SDK to build from source.
 - A MyAnimeList API application with the redirect URL `org.aniswift.ios://oauth` for sign-in.
+- No AniList app is needed for the read-only AniList section: the build ships a client ID, and one you register
+  with the same redirect URL replaces it.
 
 ## Data sources
 
@@ -33,6 +37,7 @@ its own.
 | MyAnimeList | OAuth sign-in, private lists and list edits |
 | Tenrai | Preferred catalog source for search, rankings, details, reviews and stacks |
 | Jikan Edge | Catalog fallback and public friends, favorites, statistics and activity |
+| AniList | Settings → AniList: sign-in and a read-only view of the account's lists |
 | Device storage | Keychain tokens, list and feed snapshots, cached images and responses, preferences |
 
 ## Documentation

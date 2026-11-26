@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct CharacterReference: Hashable, Identifiable {
+struct CharacterReference: Hashable, Identifiable, Codable {
     let id: Int
     let name: String
     let image: URL?
@@ -16,7 +16,7 @@ struct CharacterReference: Hashable, Identifiable {
 }
 
 /// A voice actor, mangaka or staff member, addressable as its own page.
-struct PersonReference: Hashable, Identifiable {
+struct PersonReference: Hashable, Identifiable, Codable {
     let id: Int
     let name: String
     /// The name as the provider writes it (`Takanaga, Hinako`), for the title

@@ -51,14 +51,20 @@ enum SettingKey {
     static let launchTab = "aniswift.settings.launchTab"
     static let lastTab = "aniswift.settings.lastTab"
     static let tabBarBehavior = "aniswift.settings.tabBarBehavior"
+    static let aniListClientID = "aniswift.settings.aniListClientID"
 
     static func detail(_ kind: Kind, _ section: String) -> String {
         "aniswift.settings.details.\(kind.rawValue).\(section)"
+    }
+
+    static func profile(_ section: String) -> String {
+        "aniswift.settings.profile.\(section)"
     }
 }
 
 /// Section names used inside `SettingKey.detail`.
 enum DetailSection {
+    static let sections = "sections"
     static let characters = "characters"
     static let trailer = "trailer"
     static let related = "related"
@@ -80,17 +86,17 @@ enum DetailSection {
 
 extension DetailSection {
     /// Every section key, so a page reads them once instead of through
-    /// thirty-one separate property wrappers.
+    /// thirty-three separate property wrappers.
     static let all = [
-        characters, trailer, related, source, openings, endings, recommendations,
+        sections, characters, trailer, related, source, openings, endings, recommendations,
         headerPoster, headerScore, headerRank, headerPopularity, headerCreators,
         infoSeries, infoAlternatives, infoGenres, infoThemes, infoCreators,
     ]
 }
 
 /// Every Details Page toggle for one kind, read once: an `@AppStorage` wrapper
-/// reads `UserDefaults` on each access, and a title page asked for all thirty-one
-/// of them on every body pass. Defaults are on, as before.
+/// reads `UserDefaults` on each access, and a title page asked for all
+/// thirty-three of them on every body pass. Defaults are on, as before.
 struct DetailPreferences: Equatable {
     private var values: [String: Bool] = [:]
 
@@ -105,12 +111,51 @@ struct DetailPreferences: Equatable {
     func shows(_ section: String) -> Bool { values[section] ?? true }
 }
 
+/// Section names used inside `SettingKey.profile`, for the Profile page.
+enum ProfileSection {
+    static let friends = "friends"
+    static let days = "days"
+    static let animeStatistics = "anime.statistics"
+    static let mangaStatistics = "manga.statistics"
+    static let favoriteAnime = "favorite.anime"
+    static let favoriteManga = "favorite.manga"
+    static let favoriteCharacters = "favorite.characters"
+    static let favoritePeople = "favorite.people"
+
+    static let all = [
+        friends, days, animeStatistics, mangaStatistics,
+        favoriteAnime, favoriteManga, favoriteCharacters, favoritePeople,
+    ]
+}
+
+/// Every Profile page toggle, read once: the page reads the eight values from
+/// here on each body pass instead of through eight `@AppStorage` wrappers.
+/// Defaults are on.
+struct ProfilePreferences: Equatable {
+    private var values: [String: Bool] = [:]
+
+    init() {
+        var values: [String: Bool] = [:]
+        for section in ProfileSection.all {
+            values[section] = UserDefaults.standard.object(forKey: SettingKey.profile(section)) as? Bool ?? true
+        }
+        self.values = values
+    }
+
+    func shows(_ section: String) -> Bool { values[section] ?? true }
+}
+
 struct SettingsScreen: View {
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: Store
     @State private var confirmSignOut = false
+    /// The AniList section keeps one client: it holds the session and the
+    /// entries the read-only lists screen draws.
+    @StateObject private var aniList = AniListClient()
+    @State private var editingAniListID = false
+    @State private var aniListIDDraft = ""
 
     var body: some View {
         List {
@@ -140,6 +185,14 @@ struct SettingsScreen: View {
                         detail: "Choose what appears on anime and manga pages")
                 }
                 .settingsRow()
+                NavigationLink {
+                    ProfileSettingsScreen()
+                } label: {
+                    SettingsRow(
+                        icon: "person.crop.circle", title: "Profile",
+                        detail: "Choose what appears on your profile")
+                }
+                .settingsRow()
             }
             Section {
                 NavigationLink {
@@ -150,6 +203,57 @@ struct SettingsScreen: View {
                         detail: "Version, services and open-source libraries")
                 }
                 .settingsRow()
+            }
+            Section {
+                if aniList.isSignedIn, let session = aniList.session {
+                    NavigationLink {
+                        AniListListsScreen(client: aniList)
+                    } label: {
+                        SettingsRow(
+                            icon: "list.bullet.rectangle",
+                            title: session.name.isEmpty ? "AniList Lists" : session.name,
+                            detail: aniList.summary)
+                    }
+                    .settingsRow()
+                    Button(role: .destructive) {
+                        aniList.signOut()
+                    } label: {
+                        SettingsRow(
+                            icon: "rectangle.portrait.and.arrow.right", title: "Sign Out of AniList",
+                            detail: "Keeps your MyAnimeList session")
+                    }
+                    .settingsRow()
+                } else {
+                    Button {
+                        aniListIDDraft = aniList.clientID
+                        editingAniListID = true
+                    } label: {
+                        SettingsRow(
+                            icon: "person.badge.key", title: "AniList Client ID",
+                            detail: aniList.clientID.isEmpty
+                                ? "Not set" : "Ending in \(aniList.clientID.suffix(4))")
+                    }
+                    .settingsRow()
+                    Button {
+                        Task { await aniList.signIn() }
+                    } label: {
+                        if aniList.connecting {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Text("Connect AniList").frame(maxWidth: .infinity)
+                        }
+                    }
+                    .ledgerGlassButton()
+                    .settingsRow()
+                    if let message = aniList.message {
+                        Text(message).font(.footnote).foregroundStyle(.secondary)
+                            .settingsRow()
+                    }
+                }
+            } header: {
+                Text("AniList")
+            } footer: {
+                Text("Shows your AniList lists beside MyAnimeList, read-only: nothing is written back to AniList. Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
             }
             if store.account != nil {
                 Section {
@@ -177,6 +281,14 @@ struct SettingsScreen: View {
                 if store.account == nil { dismiss() }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .alert("AniList Client ID", isPresented: $editingAniListID) {
+            TextField("Client ID", text: $aniListIDDraft)
+                .keyboardType(.numberPad)
+            Button("Save") { aniList.clientID = aniListIDDraft }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
         }
     }
 
@@ -343,6 +455,8 @@ struct DetailsSettingsScreen: View {
     var body: some View {
         List {
             Section {
+                PreferenceToggle(
+                    "Show Sections Below Summary", key: SettingKey.detail(.anime, DetailSection.sections))
                 NavigationLink {
                     HeaderSettingsScreen(kind: .anime)
                 } label: {
@@ -365,8 +479,12 @@ struct DetailsSettingsScreen: View {
                 .settingsRow()
             } header: {
                 Text("Anime")
+            } footer: {
+                Text("“Show Sections Below Summary” hides everything under a title's summary.")
             }
             Section {
+                PreferenceToggle(
+                    "Show Sections Below Summary", key: SettingKey.detail(.manga, DetailSection.sections))
                 NavigationLink {
                     HeaderSettingsScreen(kind: .manga)
                 } label: {
@@ -386,12 +504,41 @@ struct DetailsSettingsScreen: View {
                 .settingsRow()
             } header: {
                 Text("Manga")
+            } footer: {
+                Text("“Show Sections Below Summary” hides everything under a title's summary.")
             }
         }
         .listStyle(.insetGrouped)
         .scrollContentBackground(.hidden)
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Details Page")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ProfileSettingsScreen: View {
+    var body: some View {
+        List {
+            Section {
+                PreferenceToggle("Friends", key: SettingKey.profile(ProfileSection.friends))
+                PreferenceToggle("Days Watching", key: SettingKey.profile(ProfileSection.days))
+                PreferenceToggle("Anime Statistics", key: SettingKey.profile(ProfileSection.animeStatistics))
+                PreferenceToggle("Manga Statistics", key: SettingKey.profile(ProfileSection.mangaStatistics))
+                PreferenceToggle("Favorite Anime", key: SettingKey.profile(ProfileSection.favoriteAnime))
+                PreferenceToggle("Favorite Manga", key: SettingKey.profile(ProfileSection.favoriteManga))
+                PreferenceToggle(
+                    "Favorite Characters", key: SettingKey.profile(ProfileSection.favoriteCharacters))
+                PreferenceToggle("Favorite People", key: SettingKey.profile(ProfileSection.favoritePeople))
+            } header: {
+                Text("Appearance")
+            } footer: {
+                Text("Choose what appears on your profile.")
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Profile")
         .navigationBarTitleDisplayMode(.inline)
     }
 }
@@ -601,5 +748,107 @@ enum InAppBrowser {
         browser.preferredBarTintColor = UIColor(Palette.sheet)
         top.present(browser, animated: true)
         return true
+    }
+}
+
+
+/// A signed-in account's AniList lists, read-only: the entries grouped by kind
+/// and status the way AniList holds them, with a Sync to bring them over again.
+struct AniListListsScreen: View {
+    @ObservedObject var client: AniListClient
+    @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LedgerLayout.sectionGap) {
+                if client.loading, client.entries.isEmpty {
+                    ProgressView("Loading AniList lists").padding(.horizontal, LedgerLayout.inset)
+                } else if client.entries.isEmpty, let message = client.message {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(message).foregroundStyle(.secondary)
+                        Button("Try again") { Task { await client.sync(refresh: true) } }
+                            .ledgerGlassButton()
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
+                } else if client.entries.isEmpty {
+                    ContentUnavailableView(
+                        "No AniList entries yet",
+                        systemImage: "list.bullet.rectangle",
+                        description: Text("The entries on your AniList lists appear here."))
+                        .padding(.horizontal, LedgerLayout.inset)
+                } else {
+                    ForEach(Kind.allCases) { kind in
+                        shelf(kind)
+                    }
+                }
+            }
+            .padding(.vertical, 18)
+            .frame(maxWidth: 800)
+            .frame(maxWidth: .infinity)
+        }
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("AniList")
+        .navigationBarTitleDisplayMode(.inline)
+        .refreshable { await client.sync(refresh: true) }
+        .task { await client.sync() }
+    }
+
+    @ViewBuilder
+    private func shelf(_ kind: Kind) -> some View {
+        let entries = client.entries.filter { $0.kind == kind }
+        if !entries.isEmpty {
+            VStack(alignment: .leading, spacing: 14) {
+                LedgerSectionTitle(kind.label)
+                ForEach(Self.statuses(for: kind), id: \.self) { status in
+                    let rows = entries.filter { $0.status == status }
+                    if !rows.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("\(status) · \(rows.count)")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .accessibilityAddTraits(.isHeader)
+                            ForEach(rows) { entry in
+                                row(entry)
+                                if entry.id != rows.last?.id {
+                                    Divider().overlay(Color.white.opacity(0.12))
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            .padding(.horizontal, LedgerLayout.inset)
+        }
+    }
+
+    private func row(_ entry: AniListEntry) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Art(url: entry.image, symbol: entry.kind == .anime ? "film" : "book")
+                .frame(width: 52, height: 74)
+                .clipShape(.rect(cornerRadius: 7))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(entry.displayName(for: titleLanguage))
+                    .font(.subheadline)
+                    .lineLimit(2)
+                let details = [entry.progressLabel, entry.scoreLabel].compactMap { $0 }
+                if !details.isEmpty {
+                    Text(details.joined(separator: " · "))
+                        .font(.caption)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.vertical, 5)
+        .accessibilityElement(children: .combine)
+    }
+
+    /// AniList's own order of priorities, so a group keeps its place.
+    private static func statuses(for kind: Kind) -> [String] {
+        kind == .anime
+            ? ["Watching", "Rewatching", "Plan to watch", "Completed", "On hold", "Dropped"]
+            : ["Reading", "Rereading", "Plan to read", "Completed", "On hold", "Dropped"]
     }
 }

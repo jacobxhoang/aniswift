@@ -66,6 +66,16 @@ final class Store: ObservableObject {
         account.flatMap { profile(for: $0.name).favorites?.value } ?? [:]
     }
 
+    /// The favorite characters and people the profile page can draw, read from
+    /// the same favorites payload as the anime and manga shelves.
+    var malFavoriteCharacters: [CharacterReference] {
+        account.flatMap { profile(for: $0.name).favoriteCharacters?.value } ?? []
+    }
+
+    var malFavoritePeople: [PersonReference] {
+        account.flatMap { profile(for: $0.name).favoritePeople?.value } ?? []
+    }
+
     func profile(for name: String) -> ProfileSnapshot {
         profiles[name.lowercased()] ?? ProfileSnapshot()
     }
@@ -148,6 +158,8 @@ final class Store: ObservableObject {
         switch favorites {
         case .success(.some(let fetch)):
             updated.favorites = CachedProfileValue(value: fetch.favorites, savedAt: .now)
+            updated.favoriteCharacters = CachedProfileValue(value: fetch.characters, savedAt: .now)
+            updated.favoritePeople = CachedProfileValue(value: fetch.people, savedAt: .now)
             stale = stale || fetch.freshness.isStale
             providerFetchedAt = fetch.freshness.fetchedAt ?? providerFetchedAt
             wrote = true
@@ -174,6 +186,8 @@ final class Store: ObservableObject {
 
     private struct ProfileFavoritesFetch {
         let favorites: [Kind: [Title]]
+        let characters: [CharacterReference]
+        let people: [PersonReference]
         let freshness: CatalogFreshness
     }
 
@@ -224,7 +238,13 @@ final class Store: ObservableObject {
             // A profile's favorite rails are Edge rows, so their names are
             // resolved in a batch before the shelves are drawn.
             await resolveNames(in: favorites.values.flatMap { $0 })
-            return .success(ProfileFavoritesFetch(favorites: favorites, freshness: CatalogFreshness(response.read("meta"))))
+            let characters: [Fields] = data.read("characters") ?? []
+            let people: [Fields] = data.read("people") ?? []
+            return .success(ProfileFavoritesFetch(
+                favorites: favorites,
+                characters: characters.compactMap(CharacterReference.init),
+                people: people.compactMap(PersonReference.init),
+                freshness: CatalogFreshness(response.read("meta"))))
         } catch {
             return .failure(error)
         }
