@@ -12,7 +12,7 @@ its own.
 - **Discover** — seasonal and ranked shelves, per-kind search, and genre, theme, studio and producer facets.
 - **Title pages** — summary, metadata, relations, characters, recommendations, trailer, theme songs, reviews,
   interest stacks, and friends’ list activity. Tapping a poster shows it full screen. Characters open their own
-  profile, and their voice actors open a page of their roles and staff credits.
+  profile, their voice actors and a manga’s authors open a page of their roles and staff credits.
 - **Friends feed** — public updates from MyAnimeList friends, older pages, and native friend profiles with
   statistics, favorites and recent activity.
 - **Profile** — account statistics, public favorites, custom lists, and a share link to the MyAnimeList profile.

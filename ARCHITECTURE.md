@@ -44,17 +44,17 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | Path | Lines | Contents |
 | --- | ---: | --- |
 | `README.md` | 55 | Product overview, requirements, data sources, documentation links, repository layout |
-| `ios/README.md` | 256 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, development tools, manual verification checklist |
-| `ARCHITECTURE.md` | 428 | This analysis: structure, APIs, state, caching, settings, CI and risks |
-| `ios/AniLedger/API.swift` | 654 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on, the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
+| `ios/README.md` | 261 | Simulator/device setup, feature walkthrough, settings reference, data sources, MAL OAuth registration, CI secrets, development tools, manual verification checklist |
+| `ARCHITECTURE.md` | 430 | This analysis: structure, APIs, state, caching, settings, CI and risks |
+| `ios/AniLedger/API.swift` | 667 | `APIError`, `Page`, `MALCallback` redirect validation, Keychain-backed `MALSession`, redirect-blocking `MALTransport`, `SessionKeychain`, the `APIClient` protocol the store runs on (including the client ID it reads and writes), the `API` client (OAuth, lists, catalog cache with saved title pages, title lookup gate, private request queue), title-page section requests, catalog decoding helpers, `ASWebAuthenticationSession` wrapper |
 | `ios/AniLedger/Models.swift` | 560 | `Kind`, `statusLabel`, tolerant `Fields` decoder, `CatalogFreshness`, `TitleLanguage`, `publicURL`, `Title` (with `displayName(for:)`), list models, custom-list models, `Account`, `Friend`, `FriendUpdate`, `TitleReview`, interest stacks, `StackLink` (stack URLs inside a description), navigation route types |
-| `ios/AniLedger/Store.swift` | 840 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics |
+| `ios/AniLedger/Store.swift` | 855 | `@MainActor` `ObservableObject`: account lifecycle, list sync with revision guards and reported failures, custom-list organisation, friend feed batching and paging, `PublicDataStatus` and public-refresh backoff, profile cache, activity-date heuristics, `plainMessage` (one plain sentence for every failure) |
 | `ios/AniLedger/Persistence.swift` | 205 | `SnapshotWriter` (one serial queue for every snapshot file), `PublicDataStatus`, `SavedList`, `ListCache`, `FriendHistoryCursor` and `advancedHistoryCursors`, `FriendFeedCache`, profile statistics models and `ProfileCache` |
-| `ios/AniLedger/AniLedgerApp.swift` | 1331 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
-| `ios/AniLedger/SettingsScreen.swift` | 545 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen`, `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
-| `ios/AniLedger/CatalogScreens.swift` | 1301 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed), Discover shelves + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser`, `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
-| `ios/AniLedger/TitleScreen.swift` | 1974 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
-| `ios/AniLedger/CharacterScreen.swift` | 705 | `CharacterReference`, `PersonReference`, `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
+| `ios/AniLedger/AniLedgerApp.swift` | 1376 | App entry, five-tab root (iOS 26 `Tab` API with legacy `tabItem` fallback), launch-tab selection, accent tint and open-URL handling, navigation destinations, palette/layout constants, `Haptics`, shared components (`LedgerShelf`, `LedgerViewAll`, `ledgerSearch`/`LedgerSearch`, `Art`, `PreferredTitle`, `CoverTile`, `Rail`, `TitleRow`, `SignInButton`, `SavedDataNote`), `AccountScreen`, `FriendProfileScreen`, `FriendMediaListScreen`, `AboutScreen` |
+| `ios/AniLedger/SettingsScreen.swift` | 578 | `AccentChoice`, `SettingKey`, `DetailSection`, `SettingsScreen` (including About, sign out and cache), `BehaviorSettingsScreen` (including the MyAnimeList client ID), `DetailsSettingsScreen`, `HeaderSettingsScreen`, `InfoSettingsScreen`, `PreferenceToggle`, `CacheRow`, settings rows/icons, `InAppBrowser` |
+| `ios/AniLedger/CatalogScreens.swift` | 1319 | List status header, `ListsScreen` (with an inline retry when a kind's sync failed and a page-level empty state), Discover shelves with a `searchScopes` media switch + `PosterShelf`/`DiscoverScreen`, `CatalogFacet*`, `PosterResults`, `CatalogBrowser` (mode, season and year in one toolbar menu), `FriendsScreen`, `NextPageIndicator` (which retires itself when a page does not advance), `SearchResultCard`, list/Discover/feed skeleton loaders |
+| `ios/AniLedger/TitleScreen.swift` | 2019 | Title detail fan-out and layout, collapsible summary, details-page preference gating, full-screen poster, stack shelf and stack detail (with `StackSummary`, which makes the stack links in a description tappable), list controls, friends' activity (bounded friend scan), reviews list/reader, `FlowLayout`, `ListEditor` (full and quick modes) |
+| `ios/AniLedger/CharacterScreen.swift` | 710 | `CharacterReference`, `PersonReference` (with the name as the provider writes it, for a manga header), `CastMember` (prefers Japanese voice actor, keeps their person id), `CastCard`, `CharactersScreen` (grid/list toggle), `CharacterScreen`, `PersonScreen` (voiced roles + anime/manga staff credits, opened by a voice actor or a mangaka), `PersonRole`, `PersonCredit`, `CharacterVoice`, `PortraitCard`, `displayPersonName` |
 | `ios/AniLedgerTests/DecodingTests.swift` | 47 | `Fields` decoder and fallback-key tests |
 | `ios/AniLedgerTests/TitleTests.swift` | 76 | Title parsing, naming and sparse-title tests |
 | `ios/AniLedgerTests/ActivityDateTests.swift` | 47 | Activity-date parsing heuristics |
@@ -64,7 +64,7 @@ configs). Those were deleted in `5fe096a "Retire the web app and remove review t
 | `ios/AniLedger/Info.plist` | 24 | Bundle keys, MAL client-ID placeholder, URL type, orientations |
 | `ios/AniLedger/PrivacyInfo.xcprivacy` | 31 | Privacy manifest: no tracking, no collected data types, UserDefaults and file-timestamp reasons |
 | `ios/build-signed.sh` | 83 | Ad Hoc IPA export: temporary keychain, profile validation, manual signing, `release-testing` export |
-| `.github/workflows/ios.yml` | 266 | Format check (skipping the unformatted TitleScreen), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release |
+| `.github/workflows/ios.yml` | 271 | Format check (skipping the unformatted files), unit tests, optional client-ID injection, build-number stamping, unsigned/signed IPA build, tagged release |
 | `.gitignore` | 3 | `.env`, `.env.*`, `artifacts/` |
 
 ## 4. Architecture
@@ -204,8 +204,8 @@ On top of that:
 ## 7. Authentication and session flow
 
 1. **Client ID**: UserDefaults `aniledger.mal.nativeClientID` → Info.plist `AniLedgerMALClientID` (CI can inject it)
-   → prompt in `SignInButton` (alert, also reachable by long-press “Change MyAnimeList Client ID”). It must match
-   `^[A-Za-z0-9]{32}$`.
+   → prompt in `SignInButton` on a first sign-in. Settings → Behavior also sets or clears it, validating the same
+   `^[A-Za-z0-9]{32}$` shape and showing only the last four characters.
 2. **PKCE**: 32 bytes from `SecRandomCopyBytes`, base64url-unpadded, used as `code_verifier` **and** `code_challenge`
    with `code_challenge_method=plain`; a second random value is the OAuth `state`.
 3. **Authorize**: `ASWebAuthenticationSession` on the key window. Session, `code`, and redirect are validated
@@ -261,18 +261,19 @@ Concurrency patterns:
 | Discover | 10 shelves, per-kind search, genre/theme/studio/producer facets, catalog browser with season/year pickers | — |
 | Feed | friends list, per-friend `userupdates` (anime + manga), older pages via persisted cursors, English-name backfill; keeps the saved feed with a “Showing saved data” note and retry when Jikan Edge fails or reports stale data | — |
 | Profile | account, public statistics, favorites, custom lists, legacy favorites, About/version; saved snapshot stays visible with a note and retry when the public data cannot be refreshed | sign in/out, client-ID change |
-| Title | detail, relations, cast, recommendations, trailer, themes, interest stacks, reviews, friends' activity; tapping the header poster opens it full screen; header, content and information groups follow the Details Page settings, and the hidden character and recommendation sections are never requested | add/edit/remove entry, mark completed, quick status/progress/score, full editor (rewatch count, dates, notes ≤ 4000 bytes, custom lists, hide), share, open on MAL |
+| Title | detail, relations, cast, recommendations, trailer, themes, interest stacks, reviews, friends' activity; tapping the header poster opens it full screen, and a manga's authors open their own page; header, content and information groups follow the Details Page settings, and the hidden character and recommendation sections are never requested | add/edit/remove entry, mark completed, quick status/progress/score, full editor (rewatch count, dates, notes ≤ 4000 bytes, custom lists, hide), share, open on MAL |
 | Character | biography, member favorites, Japanese-preferred voice actors (each opening their own page), anime/manga appearances | — |
-| Voice actor (`PersonScreen`) | `people/{id}/full`: portrait, alternate names, birthday, member favorites, biography, voiced roles (main parts first, 12 then all) and anime/manga staff credits (8 then all); a role opens its character, a credit opens its title | — |
+| Voice actor or mangaka (`PersonScreen`) | `people/{id}/full`: portrait, alternate names, birthday, member favorites, biography, voiced roles (main parts first, 12 then all) and anime/manga staff credits (8 then all); a role opens its character, a credit opens its title. Opened from a character's voice actors and from the authors a manga's header lists | — |
 | Friend profile | stats header, list buttons only for non-empty lists, recent updates, favorites, pull-to-refresh | — |
 | Settings | `@AppStorage` preferences, cache sizes, version and service credits | accent, language, link handling, score prompt, launch screen, tab bar, 31 detail toggles, cache clearing |
 
-Design system: black canvas with a radial glow, forced dark scheme, shared `LedgerLayout` metrics, one
-`LedgerShelf` carousel for every rail, a configurable tint (White default; eight other accent choices), Liquid
-Glass on iOS 26 with material/bordered fallbacks, `ViewThatFits` and adaptive grids for accessibility sizes,
-empty states via `ContentUnavailableView`, `.sensoryFeedback` on controls plus success/error haptics, `SkeletonBlock`
-first-load placeholders on title pages, lists, Discover and the feed, VoiceOver labels and hints throughout, and
-an in-app `SFSafariViewController` whose controls use the selected accent.
+Design system: black canvas, forced dark scheme, shared `LedgerLayout` metrics, one `LedgerShelf` carousel for
+every rail, one `LedgerViewAll` link and one `ledgerSearch` field (`LedgerSearch`) across screens, a configurable
+tint (White default; eight other accent choices), Liquid Glass on iOS 26 with material/bordered fallbacks,
+`ViewThatFits` and adaptive grids for accessibility sizes, empty states as page blocks or `ContentUnavailableView`,
+`.sensoryFeedback` on controls plus success/error haptics, `SkeletonBlock` first-load placeholders on title pages,
+lists, Discover and the feed, `plainMessage` for every failure sentence, VoiceOver labels and hints throughout,
+and an in-app `SFSafariViewController` whose controls use the selected accent.
 
 ## 10. Settings and personalization
 
@@ -318,9 +319,10 @@ the workflow, and manually with a `signed` flag. A newer push of the same branch
 pull requests never publish.
 
 1. `format` (macos-15) selects Xcode 26 and runs `swift-format lint --strict` on the Swift files changed against
-   the pull-request base (or the push `before` SHA). It skips when there is no usable base, and it skips
-   `TitleScreen.swift`, which predates the formatter and has never been formatted in bulk. The job is advisory:
-   it is not in the `ipa` job's `needs`, so a lint failure is reported without stopping a build.
+   the pull-request base (or the push `before` SHA). It skips when there is no usable base, and it skips the files
+   listed in `UNFORMATTED` (`TitleScreen`, `CatalogScreens`, `SettingsScreen`, `Store` and `API`), which predate the
+   formatter and have never been formatted in bulk. The job is advisory: it is not in the `ipa` job's `needs`, so a
+   lint failure is reported without stopping a build.
 2. `test` (macos-15) selects Xcode 26 and the newest available iPhone simulator, runs `xcodebuild test` for the
    `AniLedger` scheme (arm64, signing disabled) against the six suites in `AniLedgerTests`, and uploads the
    `.xcresult` when the run fails. The Swift package cache is restored between runs.

@@ -94,7 +94,7 @@ struct ListsScreen: View {
 
     var body: some View {
         if store.account != nil {
-            list.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+            list.ledgerSearch(text: $query, prompt: "Search")
         } else {
             list
         }
@@ -123,11 +123,17 @@ struct ListsScreen: View {
             } else if store.lists[kind]?.isEmpty == true, searchTerm.isEmpty, store.nextList[kind] == nil,
                 !store.refreshingLists.contains(kind)
             {
-                ContentUnavailableView {
+                // An empty state belongs in the page, not in a row: inside a List
+                // it centres against the row's insets instead of the screen.
+                VStack(spacing: 6) {
                     Label("No \(kind.label.lowercased()) yet", systemImage: kind == .anime ? "tv" : "books.vertical")
-                } description: {
+                        .font(.headline)
                     Text("Titles you add from Discover or a title page appear here.")
+                        .foregroundStyle(.secondary)
                 }
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 28)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else {
@@ -426,24 +432,18 @@ struct DiscoverScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Discover")
         .navigationBarTitleDisplayMode(.inline)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if !searchTerm.isEmpty {
-                Picker("Search category", selection: $searchKind) {
-                    ForEach(Kind.allCases) { Text($0.label).tag($0) }
-                }
-                .pickerStyle(.segmented)
-                .sensoryFeedback(.selection, trigger: searchKind)
-                .padding(.horizontal, LedgerLayout.inset)
-                .padding(.vertical, 6)
-                .background(Palette.background)
+        .ledgerSearch(text: $search, prompt: "Search")
+        // The media type is a search scope, not a second bar above the results.
+        .searchScopes($searchKind) {
+            ForEach(Kind.allCases) { kind in
+                Text(kind.label).tag(kind)
             }
         }
-        .scrollDismissesKeyboard(.interactively)
-        .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .sensoryFeedback(.selection, trigger: searchKind)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: CatalogBrowserRoute()) {
-                    Label("Browse catalog", systemImage: "line.3.horizontal.decrease")
+                    Label("Browse catalog", systemImage: "square.grid.2x2")
                 }
             }
         }
@@ -463,12 +463,8 @@ struct DiscoverScreen: View {
                             ) {
                                 NavigationLink(value: CatalogResultsRoute(
                                     name: shelf.heading, shelf: shelf, query: "", kind: shelf.kind)) {
-                                    Image(systemName: "chevron.right").font(.caption.weight(.semibold))
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 44, height: 36, alignment: .trailing)
-                                        .contentShape(Rectangle())
+                                    LedgerViewAll(section: shelf.rawValue.lowercased())
                                 }
-                                .accessibilityLabel("View all \(shelf.rawValue.lowercased())")
                             }
                         }
                     }
@@ -568,7 +564,8 @@ struct CatalogFacet: Hashable, Identifiable {
     var id: String { name.lowercased() }
 
     @MainActor
-    func page(_ page: Int, query: String, sort: CatalogFacetSort, api: any APIClient) async throws -> Page<Title> {
+    func page(_ page: Int, query: String, sort: CatalogFacetSort, api: any APIClient,
+              refresh: Bool = false) async throws -> Page<Title> {
         let id: Int
         if let malID, malID > 0 {
             id = malID
@@ -583,7 +580,7 @@ struct CatalogFacet: Hashable, Identifiable {
             filters.append(URLQueryItem(name: "nulls", value: "first"))
         }
         if !query.isEmpty { filters.append(URLQueryItem(name: "q", value: query)) }
-        return catalogPage(try await api.catalog(kind.rawValue, filters, refresh: false), kind: kind)
+        return catalogPage(try await api.catalog(kind.rawValue, filters, refresh: refresh), kind: kind)
     }
 
     @MainActor
@@ -616,15 +613,8 @@ struct CatalogFacetScreen: View {
         Group {
             if facet.category.usesGenreIndex {
                 results
-            } else if #available(iOS 26.0, *) {
-                results
-                    .searchable(text: $search, placement: .toolbar, prompt: "Search titles")
-                    .toolbar { DefaultToolbarItem(kind: .search, placement: .topBarTrailing) }
-                    .scrollDismissesKeyboard(.interactively)
             } else {
-                results
-                    .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .automatic), prompt: "Search titles")
-                    .scrollDismissesKeyboard(.interactively)
+                results.ledgerSearch(text: $search, prompt: "Search titles")
             }
         }
         .navigationTitle(facet.category.usesGenreIndex ? facet.name : "More from \(facet.name)")
@@ -876,7 +866,16 @@ struct PosterResults: View {
             .frame(maxWidth: 900).frame(maxWidth: .infinity)
         }
         .scrollPosition(id: $visibleResult)
-        .background(Palette.background)
+        .background(Palette.background.ignoresSafeArea())
+        .refreshable {
+            generation = UUID()
+            titles = []
+            visibleResult = nil
+            page = 1
+            more = false
+            failed = false
+            await load(refresh: true)
+        }
         .task(id: requestKey) {
             if activeRequest != requestKey {
                 generation = UUID()
@@ -916,7 +915,7 @@ struct PosterResults: View {
         }
     }
 
-    private func load() async {
+    private func load(refresh: Bool = false) async {
         let current = generation
         loading = true
         failed = false
@@ -924,11 +923,13 @@ struct PosterResults: View {
         do {
             let result: Page<Title>
             if page == 1, !query.isEmpty { try await Task.sleep(for: .milliseconds(300)) }
-            if let shelf { result = try await shelf.page(page, api: store.api) }
-            else if let facet { result = try await facet.page(page, query: query, sort: sort, api: store.api) }
-            else {
+            if let shelf { result = try await shelf.page(page, api: store.api, refresh: refresh) }
+            else if let facet {
+                result = try await facet.page(page, query: query, sort: sort, api: store.api, refresh: refresh)
+            } else {
                 let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]
-                result = catalogPage(try await store.api.catalog(kind.rawValue, filters, refresh: false), kind: kind)
+                result = catalogPage(
+                    try await store.api.catalog(kind.rawValue, filters, refresh: refresh), kind: kind)
             }
             guard !Task.isCancelled, current == generation else { return }
             titles = unique(titles + result.items)
@@ -971,6 +972,7 @@ struct CatalogBrowser: View {
     @State private var loadedRequest: String?
 
     private var requestKey: String { "\(kind)-\(mode)-\(search)-\(year)-\(season)-\(reload)" }
+    private var searchTerm: String { search.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     var body: some View {
         ScrollView {
@@ -980,28 +982,7 @@ struct CatalogBrowser: View {
                 }
                 .pickerStyle(.segmented)
                 .sensoryFeedback(.selection, trigger: kind)
-                if search.isEmpty && kind == .anime {
-                    Picker("Catalog", selection: $mode) {
-                        ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
-                    }
-                    .pickerStyle(.segmented)
-                    .sensoryFeedback(.selection, trigger: mode)
-                    if mode == .season {
-                        HStack {
-                            Picker("Season", selection: $season) {
-                                ForEach(["winter", "spring", "summer", "fall"], id: \.self) { Text($0.capitalized).tag($0) }
-                            }
-                            .sensoryFeedback(.selection, trigger: season)
-                            Picker("Year", selection: $year) {
-                                ForEach((1917...(Calendar.current.component(.year, from: Date()) + 2)).reversed(), id: \.self) {
-                                    Text(String($0)).tag($0)
-                                }
-                            }
-                            .sensoryFeedback(.selection, trigger: year)
-                        }
-                    }
-                }
-                if search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                if searchTerm.isEmpty {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 105), spacing: 12)], spacing: 14) {
                         ForEach(titles) { CoverTile(title: $0) }
                     }
@@ -1029,15 +1010,50 @@ struct CatalogBrowser: View {
             }.padding()
         }
         .navigationTitle("Browse catalog")
-        .searchable(text: $search, prompt: "Search anime or manga")
-        .background(Palette.canvas)
+        .ledgerSearch(text: $search, prompt: "Search anime or manga")
+        // Mode, season and year live in one toolbar menu: three rows of pickers
+        // above the grid used a third of the first screen for controls.
+        .toolbar {
+            if searchTerm.isEmpty && kind == .anime {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Picker("Catalog", selection: $mode) {
+                            ForEach(BrowseMode.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        if mode == .season {
+                            Picker("Season", selection: $season) {
+                                ForEach(["winter", "spring", "summer", "fall"], id: \.self) { season in
+                                    Text(season.capitalized).tag(season)
+                                }
+                            }
+                            Picker("Year", selection: $year) {
+                                ForEach(
+                                    (1917...(Calendar.current.component(.year, from: Date()) + 2)).reversed(),
+                                    id: \.self
+                                ) { year in
+                                    Text(String(year)).tag(year)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label("Catalog filters", systemImage: "slider.horizontal.3")
+                    }
+                    .accessibilityValue(mode.rawValue)
+                }
+            }
+        }
+        .sensoryFeedback(.selection, trigger: mode)
+        .sensoryFeedback(.selection, trigger: season)
+        .sensoryFeedback(.selection, trigger: year)
+        .background(Palette.background.ignoresSafeArea())
+        .refreshable { await load(reset: true, refresh: true) }
         .task(id: requestKey) {
             guard loadedRequest != requestKey else { return }
             await load(reset: true)
         }
     }
 
-    private func load(reset: Bool) async {
+    private func load(reset: Bool, refresh: Bool = false) async {
         let request = UUID()
         let key = requestKey
         activeQuery = request
@@ -1045,7 +1061,7 @@ struct CatalogBrowser: View {
         message = nil
         if reset { page = 1; titles = []; next = false }
         let selected = kind
-        let query = search.trimmingCharacters(in: .whitespacesAndNewlines)
+        let query = searchTerm
         var params = [URLQueryItem(name: "page", value: String(page))]
         let path: String
         if !query.isEmpty {
@@ -1062,11 +1078,11 @@ struct CatalogBrowser: View {
         do {
             if !query.isEmpty { try await Task.sleep(for: .milliseconds(350)) }
             let response: Fields
-            do { response = try await store.api.catalog(path, params, refresh: false) }
+            do { response = try await store.api.catalog(path, params, refresh: refresh) }
             catch {
                 try Task.checkCancellation()
                 guard query.isEmpty, selected == .anime, mode == .upcoming else { throw error }
-                response = try await store.api.catalog("seasons/upcoming", [params[0]], refresh: false)
+                response = try await store.api.catalog("seasons/upcoming", [params[0]], refresh: refresh)
             }
             guard !Task.isCancelled, activeQuery == request else { return }
             let result = catalogPage(response, kind: selected)
@@ -1075,7 +1091,9 @@ struct CatalogBrowser: View {
             next = result.more
             page += 1
         } catch {
-            if !Task.isCancelled && activeQuery == request { message = error.localizedDescription }
+            if !Task.isCancelled && activeQuery == request {
+                message = plainMessage(error, fallback: "Could not load the catalog.")
+            }
         }
     }
 }
@@ -1139,7 +1157,7 @@ struct FriendsScreen: View {
             }
         }
         .background(Palette.background.ignoresSafeArea())
-        .navigationTitle("Friends Feed")
+        .navigationTitle("Feed")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             if store.account != nil {

@@ -192,12 +192,15 @@ struct SettingsScreen: View {
 }
 
 struct BehaviorSettingsScreen: View {
+    @EnvironmentObject private var store: Store
     @AppStorage(SettingKey.titleLanguage) private var language = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
     @AppStorage(SettingKey.preferredLaunch) private var usesPreferredLaunch = false
     @AppStorage(SettingKey.launchTab) private var launchTab = "anime"
     @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
+    @State private var editingClientID = false
+    @State private var clientIDDraft = ""
 
     private let launchTabs = [
         (id: "anime", label: "Anime"),
@@ -266,6 +269,19 @@ struct BehaviorSettingsScreen: View {
                 }
             }
             Section {
+                Button {
+                    clientIDDraft = store.api.configuredClientID ?? ""
+                    editingClientID = true
+                } label: {
+                    SettingsRow(
+                        icon: "key", title: "MyAnimeList Client ID",
+                        detail: store.api.configuredClientID.map { "Ending in \($0.suffix(4))" } ?? "Not set")
+                }
+                .settingsRow()
+            } footer: {
+                Text("The iOS app ID from myanimelist.net/apiconfig, registered with \(API.redirectURI).")
+            }
+            Section {
                 CacheRow()
             } footer: {
                 Text("Removes downloaded posters and catalog responses. Sign-in, your lists and settings are kept.")
@@ -276,6 +292,23 @@ struct BehaviorSettingsScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Behavior")
         .navigationBarTitleDisplayMode(.inline)
+        .alert("MyAnimeList Client ID", isPresented: $editingClientID) {
+            TextField("Client ID", text: $clientIDDraft)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Save") { store.api.configuredClientID = clientIDDraft }
+                .disabled(!clientIDDraft.isEmpty && !Self.isClientID(clientIDDraft))
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Register an iOS app at myanimelist.net/apiconfig with redirect URL \(API.redirectURI).")
+        }
+    }
+
+    /// MyAnimeList iOS client IDs are 32 letters and digits. An empty field
+    /// clears the saved ID, so the app falls back to the one its build ships with.
+    private static func isClientID(_ value: String) -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.count == 32 && trimmed.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber) }
     }
 }
 

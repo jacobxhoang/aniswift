@@ -215,8 +215,7 @@ final class Store: ObservableObject {
     }
 
     private func failureMessage(_ error: Error) -> String {
-        if let apiError = error as? APIError { return apiError.message }
-        return error.localizedDescription
+        plainMessage(error, fallback: "Some public profile details are unavailable.")
     }
 
     private func canAttemptPublicRefresh(_ key: String) -> Bool {
@@ -281,7 +280,7 @@ final class Store: ObservableObject {
             guard accountGeneration == generation else { return }
             checking = false
             if !api.hasSession { setAccount(nil) }
-            if account == nil { message = error.localizedDescription }
+            if account == nil { message = plainMessage(error, fallback: "Could not check your session.") }
         }
     }
 
@@ -299,7 +298,7 @@ final class Store: ObservableObject {
         do {
             try api.signOut()
             setAccount(nil)
-        } catch { message = error.localizedDescription }
+        } catch { message = plainMessage(error, fallback: "Could not sign out.") }
     }
 
     private func setAccount(_ user: Account?) {
@@ -400,7 +399,7 @@ final class Store: ObservableObject {
     func handle(_ error: Error) {
         Haptics.error()
         if (error as? APIError)?.status == 401 { disconnect() }
-        message = error.localizedDescription
+        message = plainMessage(error, fallback: "Could not finish that request.")
     }
 
     func loadLists(force: Bool = false) async {
@@ -806,6 +805,22 @@ final class Store: ObservableObject {
 func unique<T: Identifiable>(_ values: [T]) -> [T] {
     var seen = Set<T.ID>()
     return values.filter { seen.insert($0.id).inserted }
+}
+
+/// What a failure is told as: a provider's own sentence when it wrote one, and a
+/// plain fallback for a transport or decoding failure instead of the system's
+/// jargon. Every screen that shows an error goes through here.
+func plainMessage(_ error: Error, fallback: String) -> String {
+    if let api = error as? APIError { return api.message }
+    guard let failure = error as? URLError else { return fallback }
+    switch failure.code {
+    case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+        return "AniLedger could not reach the internet."
+    case .timedOut:
+        return "The request took too long. Try again."
+    default:
+        return fallback
+    }
 }
 
 func activityDate(_ value: String?) -> Date {

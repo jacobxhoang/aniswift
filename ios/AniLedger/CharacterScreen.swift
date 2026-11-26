@@ -15,10 +15,13 @@ struct CharacterReference: Hashable, Identifiable {
     }
 }
 
-/// A voice actor or staff member, addressable as its own page.
+/// A voice actor, mangaka or staff member, addressable as its own page.
 struct PersonReference: Hashable, Identifiable {
     let id: Int
     let name: String
+    /// The name as the provider writes it (`Takanaga, Hinako`), for the title
+    /// header that lists authors family name first the way MyAnimeList does.
+    let rawName: String
     let image: URL?
 
     init?(_ fields: Fields) {
@@ -27,6 +30,7 @@ struct PersonReference: Hashable, Identifiable {
         else { return nil }
         self.id = id
         self.name = displayPersonName(name)
+        rawName = name
         image = fields.image
     }
 }
@@ -293,8 +297,9 @@ struct CharacterScreen: View {
     }
 }
 
-/// A voice actor or staff member: their roles, their credits and what
-/// MyAnimeList knows about them. Opened from a character's voice actors.
+/// A voice actor, mangaka or staff member: their roles, their credits and what
+/// MyAnimeList knows about them. Opened from a character's voice actors, and from
+/// the authors a manga's header lists.
 struct PersonScreen: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -331,12 +336,12 @@ struct PersonScreen: View {
                     ForEach(Kind.allCases) { kind in creditList(kind) }
                 } else if failed {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Voice actor details are unavailable.").foregroundStyle(.secondary)
+                        Text("Person details are unavailable.").foregroundStyle(.secondary)
                         Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 } else {
-                    ProgressView("Loading voice actor").padding(.horizontal, LedgerLayout.inset)
+                    ProgressView("Loading person").padding(.horizontal, LedgerLayout.inset)
                 }
             }
             .padding(.vertical, 16)

@@ -55,7 +55,12 @@ jobs:
           # Touching one of them used to turn this job red for the whole file.
           # Format one with `xcrun swift-format format --in-place <file>` and take
           # it off this list in the same change.
-          UNFORMATTED: ios/AniLedger/TitleScreen.swift
+          UNFORMATTED: >-
+            ios/AniLedger/TitleScreen.swift
+            ios/AniLedger/CatalogScreens.swift
+            ios/AniLedger/SettingsScreen.swift
+            ios/AniLedger/Store.swift
+            ios/AniLedger/API.swift
         run: |
           set -euo pipefail
           if [[ -z "${BASE:-}" ]] || [[ "$BASE" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then

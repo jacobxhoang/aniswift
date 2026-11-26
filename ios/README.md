@@ -26,14 +26,15 @@ xcodebuild -project ios/AniLedger.xcodeproj -scheme AniLedger \
 | Tab | What you can do |
 | --- | --- |
 | Anime and Manga | Expand status groups, sort and search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
-| Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
+| Discover | Search anime and manga from the search field and switch media on its scope bar, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | View account statistics and public favorites, open custom lists, share your MyAnimeList profile, and open **Settings** from the toolbar gear. |
 
 Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite
 or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to
-refresh the profile. Lists, Discover and the Feed draw skeleton placeholders while their first page of content
-loads, then replace them with the real rows and shelves.
+refresh the profile. Every list, a friend's list, catalog results, the catalog browser, reviews and interest
+stacks refresh the same way. Lists, Discover and the Feed draw skeleton placeholders while their first page of
+content loads, then replace them with the real rows and shelves.
 
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
@@ -43,7 +44,8 @@ serializations wrap onto additional lines. Relations, Characters and Recommended
 compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked
 appearances. A voice actor opens their own page: portrait, alternate names, birthday, member favorites,
 biography, their voiced roles with main parts first, and their anime and manga staff credits — a role leads
-back to its character, a credit to its title. Reviews and friends' title activity appear when entries exist.
+back to its character, a credit to its title. A manga's header lists its authors the way a title lists its
+studios, and tapping one opens that page. Reviews and friends' title activity appear when entries exist.
 Open **View All** in Reviews to browse and read reviews inside the app, including a spoiler reveal control in
 the reader. Interest stacks open from a title and list their entries with positions, scores and notes; in a
 stack flagged **Spoilers**, each author note stays behind **Reveal note**. Many stacks chain themselves together
@@ -80,6 +82,7 @@ checkmark, or updates without animation when Reduce Motion is on.
 | Ask for Score After Watching an Anime | On | After an anime is marked completed with no score — from the title's completion action, the quick status editor or the full editor — presents a score sheet. It never appears for manga or from the score editor itself; the editor path also skips an entry that was already completed. |
 | Enable Preferred Launch Screen | Off | When on, the app opens the selected screen (Anime, Manga, Discover, Feed or Profile) on every cold launch. When off, it restores the last tab you used. |
 | Preferred Screen | Anime | The tab used when preferred launch is enabled. |
+| MyAnimeList Client ID | The ID the build ships with | Sets the 32-character iOS app ID used to sign in. The row shows only its last four characters; an empty field goes back to the bundled ID. |
 | Tab Bar Behavior (iOS 26) | Always Visible | Keeps the tab bar visible or lets it minimize while scrolling down. Earlier iOS versions always show the tab bar. |
 | Clear Cache | — | Clears Kingfisher's memory and disk image cache, the shared URL cache, the in-memory catalog response cache and the saved title pages. Sign-in, lists, feed/profile snapshots, custom lists and settings are kept. The row reports the measured image and URL cache size, or notes when only catalog responses are cached. |
 
@@ -161,7 +164,7 @@ stored on the device.
 1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create an application with App Type `iOS`.
 2. Register the exact redirect URL `org.aniledger.ios://oauth`.
 3. In AniLedger, tap **Sign in with MyAnimeList**, enter that iOS app's Client ID, and complete the browser
-   sign-in. To change it later, sign out from Settings and long-press the sign-in button.
+   sign-in. To change it later, open **Settings → Behavior → MyAnimeList Client ID**.
 
 The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in
 the device-only Keychain. Sign-in, live list sync, and catalog updates require an internet connection.
@@ -223,7 +226,7 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   ```
 ## Verification checklist
 
-- Build in Xcode and exercise search in Anime, Manga and Discover.
+- Build in Xcode and exercise search in Anime, Manga and Discover, including Discover's anime/manga scope bar.
 - Open a title with several genres or producers. Check wrapping at standard and large text sizes.
 - Swipe the Relations, Characters and Recommended shelves. Open **View All** and select an item.
 - Open **Settings** from the Profile gear. Change the accent and confirm controls, links and the Safari sheet
@@ -243,6 +246,8 @@ The workflow uses the App ID and team from the provisioning profile and exports 
   returns to the same profile. Repeat for a recent list update and for a title opened directly from the Feed.
 - Open a character with a Japanese voice actor and tap one. Confirm the voice actor page shows their roles and
   staff credits, that a role opens its character, and that Back returns to the same voice actor.
+- Open a manga and tap an author in its header. Confirm their page lists the manga they worked on, that a
+  credit opens that title, and that Back returns to the manga.
 - Open a stack flagged **Spoilers**. Confirm each note shows **Reveal note** until tapped, and that a stack
   without the flag still shows its notes immediately. On a stack whose description links to other stacks,
   confirm a link opens that stack in the app and Back returns to the first one.

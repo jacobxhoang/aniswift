@@ -267,18 +267,34 @@ struct TitleScreen: View {
                 .accessibilityAddTraits(.isHeader)
             if showsHeaderCreators {
                 let studios = catalogFacets("studios", category: .studio)
-                let authors = fieldNames("authors").joined(separator: " · ")
                 if title.kind == .anime, !studios.isEmpty {
                     FlowLayout {
                         ForEach(studios) { studio in
                             NavigationLink(value: studio) {
-                                Text(studio.name.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                                Text(studio.name.uppercased()).font(.subheadline)
                             }
                             .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .accessibilityHint("Opens this studio's titles")
                         }
                     }
-                } else if title.kind == .manga, !authors.isEmpty {
-                    Text(authors.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                } else if title.kind == .manga, !authorPeople.isEmpty {
+                    FlowLayout {
+                        ForEach(authorPeople) { author in
+                            NavigationLink(value: author) {
+                                Text(author.rawName.uppercased()).font(.subheadline)
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .frame(minHeight: 44)
+                            .contentShape(Rectangle())
+                            .accessibilityHint("Opens this mangaka's page")
+                        }
+                    }
+                } else if title.kind == .manga, !authorNames.isEmpty {
+                    Text(authorNames.uppercased()).font(.subheadline).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else if current.original != current.name {
                     Text(current.original).font(.subheadline).foregroundStyle(.secondary)
@@ -369,6 +385,18 @@ struct TitleScreen: View {
     private func fieldNames(_ key: String) -> [String] {
         let rows: [Fields] = record?.read(key) ?? []
         return (record?.read(key) as [String]?) ?? rows.compactMap { $0.string("name") }
+    }
+
+    /// The manga's authors, each carrying the person id that opens their page.
+    /// Tenrai nests a `mal_id` in every author row, so the header can open one;
+    /// a provider that flattens the list into names leaves them as plain text.
+    private var authorPeople: [PersonReference] {
+        let rows: [Fields] = record?.read("authors") ?? []
+        return unique(rows.compactMap { PersonReference($0) })
+    }
+
+    private var authorNames: String {
+        fieldNames("authors").joined(separator: " · ")
     }
 
     /// A synopsis longer than one paragraph starts collapsed. MAL puts its
@@ -591,14 +619,7 @@ struct TitleScreen: View {
     }
 
     private func viewAllLabel(_ section: String) -> some View {
-        Text("View All")
-            .font(.subheadline)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Palette.surface, in: .rect(cornerRadius: 7))
-            .frame(minHeight: 44)
-            .contentShape(Rectangle())
-            .accessibilityLabel("View all \(section.lowercased())")
+        LedgerViewAll(section: section)
     }
 
     private func trailerCard(_ url: URL) -> some View {
@@ -686,7 +707,7 @@ struct TitleScreen: View {
                 LedgerShelf {
                     ForEach(firstPage.items.prefix(3)) { review in
                         NavigationLink(value: TitleReviewRoute(title: current, review: review)) {
-                            TitleReviewPreview(review: review)
+                            TitleReviewPreview(review: review, keepsShelfHeight: true)
                                 .frame(width: 220, alignment: .leading)
                                 .padding(12)
                                 .ledgerPanel(radius: 12)
@@ -746,7 +767,7 @@ struct TitleScreen: View {
                     loadBundledSections(saved.fields)
                     savedAt = saved.savedAt
                 } else {
-                    failure = error.localizedDescription
+                    failure = plainMessage(error, fallback: "Title details are unavailable.")
                 }
             }
         }
@@ -1114,7 +1135,7 @@ struct StackScreen: View {
         do {
             detail = try await store.api.stackDetail(stack.id)
         } catch {
-            if !Task.isCancelled { failure = error.localizedDescription }
+            if !Task.isCancelled { failure = plainMessage(error, fallback: "This stack is unavailable.") }
         }
     }
 }
@@ -1162,6 +1183,8 @@ private struct StackSummary: View {
                         }
                         .buttonStyle(.plain)
                         .accessibilityHint("Opens this stack in AniLedger")
+                        .padding(.vertical, 2)
+                        .contentShape(Rectangle())
                     }
                 }
             }
@@ -1296,6 +1319,13 @@ struct TitleStacksScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Interest Stacks")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            loadingPage = nil
+            failed = false
+            stacks = []
+            nextPage = 1
+            await load(1)
+        }
     }
 
     private func load(_ page: Int) async {
@@ -1373,6 +1403,12 @@ struct TitleReviewsScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Reviews")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            failed = false
+            reviews = []
+            nextPage = 1
+            await load()
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Link(destination: title.malURL.appending(path: "_/reviews")) {
@@ -1400,6 +1436,11 @@ struct TitleReviewsScreen: View {
 
 private struct TitleReviewPreview: View {
     let review: TitleReview
+    /// Whether the card keeps the height of the tallest card beside it. A row of
+    /// shelf cards lines up only when every card reserves the same lines, because
+    /// the verdict wraps to two lines on one review and one on the next; the
+    /// reviews list leaves each row its own height instead.
+    var keepsShelfHeight = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -1409,12 +1450,16 @@ private struct TitleReviewPreview: View {
                 Text(review.author).font(.subheadline.weight(.semibold)).lineLimit(1)
             }
             Text(review.spoiler ? "Contains spoilers" : review.text)
-                .font(.subheadline).lineLimit(4)
+                .font(.subheadline).lineLimit(4, reservesSpace: keepsShelfHeight)
             let metadata = [review.tag, review.ratingLabel, review.displayedDate].compactMap { $0 }
             if !metadata.isEmpty {
                 Text(metadata.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                    .lineLimit(2, reservesSpace: keepsShelfHeight)
+            } else if keepsShelfHeight {
+                Text(" ").font(.caption).lineLimit(2, reservesSpace: true).accessibilityHidden(true)
             }
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -1822,7 +1867,7 @@ struct ListEditor: View {
             change = Self.listChange(title, entry)
             ready = true
         } catch {
-            if !Task.isCancelled { self.error = error.localizedDescription }
+            if !Task.isCancelled { self.error = plainMessage(error, fallback: "Could not load this entry.") }
         }
     }
 
@@ -1967,7 +2012,7 @@ struct ListEditor: View {
                 dismiss()
             } catch {
                 if (error as? APIError)?.status == 401 { store.handle(error) } else { Haptics.error() }
-                self.error = error.localizedDescription
+                self.error = plainMessage(error, fallback: "Could not save this entry.")
             }
         }
     }

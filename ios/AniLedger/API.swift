@@ -92,7 +92,7 @@ private enum SessionKeychain {
 @MainActor
 protocol APIClient: AnyObject {
     var hasSession: Bool { get }
-    var configuredClientID: String? { get }
+    var configuredClientID: String? { get set }
     var hasCachedCatalog: Bool { get }
 
     func session() async throws -> Account?
@@ -427,10 +427,23 @@ final class API: APIClient {
     }
 
     var configuredClientID: String? {
-        if let saved = UserDefaults.standard.string(forKey: Self.clientIDKey), !saved.isEmpty { return saved }
-        guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniLedgerMALClientID") as? String,
-              !bundled.isEmpty else { return nil }
-        return bundled
+        get {
+            if let saved = UserDefaults.standard.string(forKey: Self.clientIDKey), !saved.isEmpty { return saved }
+            guard let bundled = Bundle.main.object(forInfoDictionaryKey: "AniLedgerMALClientID") as? String,
+                !bundled.isEmpty
+            else { return nil }
+            return bundled
+        }
+        set {
+            // A cleared ID falls back to the bundled one, so the app can go back
+            // to the value its build shipped with.
+            let value = newValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if value.isEmpty {
+                UserDefaults.standard.removeObject(forKey: Self.clientIDKey)
+            } else {
+                UserDefaults.standard.set(value, forKey: Self.clientIDKey)
+            }
+        }
     }
     var hasSession: Bool { malSession != nil }
 

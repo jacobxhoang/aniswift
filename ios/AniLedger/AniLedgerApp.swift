@@ -57,7 +57,7 @@ struct AniLedgerApp: App {
                 .environmentObject(store)
                 .task { await store.restore() }
                 .alert(
-                    "AniLedger",
+                    "Something went wrong",
                     isPresented: Binding(
                         get: { store.message != nil }, set: { if !$0 { store.message = nil } }
                     )
@@ -141,6 +141,7 @@ struct AniLedgerApp: App {
                 .navigationDestination(for: CatalogResultsRoute.self) { route in
                     PosterResults(name: route.name, shelf: route.shelf, query: route.query, kind: route.kind)
                         .navigationTitle(route.name)
+                        .navigationBarTitleDisplayMode(.inline)
                 }
                 .navigationDestination(for: CustomListsRoute.self) { _ in
                     List(store.organization.lists) { collection in
@@ -152,6 +153,7 @@ struct AniLedgerApp: App {
                     .scrollContentBackground(.hidden)
                     .background(Palette.background)
                     .navigationTitle("Custom Lists")
+                    .navigationBarTitleDisplayMode(.inline)
                 }
                 .navigationDestination(for: CustomListRoute.self) { route in
                     List(route.list.titles) { title in
@@ -166,6 +168,7 @@ struct AniLedgerApp: App {
                     .scrollContentBackground(.hidden)
                     .background(Palette.background)
                     .navigationTitle(route.list.name)
+                    .navigationBarTitleDisplayMode(.inline)
                 }
         }
     }
@@ -208,17 +211,6 @@ enum Palette {
     static let background: Color = .black
     static let surface = Color(white: 0.12)
     static let sheet = Color(white: 0.08)
-    static let glow = Color(white: 0.16)
-
-    static var canvas: some View {
-        ZStack {
-            background
-            RadialGradient(
-                colors: [glow.opacity(0.8), background], center: .topTrailing,
-                startRadius: 0, endRadius: 570)
-        }
-        .ignoresSafeArea()
-    }
 }
 
 enum LedgerLayout {
@@ -260,6 +252,29 @@ struct LedgerSectionTitle: View {
         Text(title)
             .font(.headline)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// The one control for "see everything in this section". A shelf link on a title
+/// page, on Discover and on Profile read the same instead of a grey pill in one
+/// place, a bare chevron in another and a caption in a third.
+struct LedgerViewAll: View {
+    let section: String
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text("View All").font(.subheadline)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .accessibilityHidden(true)
+        }
+        .foregroundStyle(.tint)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("View all \(section.lowercased())")
     }
 }
 
@@ -342,6 +357,26 @@ extension View {
                     .strokeBorder(.white.opacity(0.08))
                     .allowsHitTesting(false)
             }
+    }
+
+    /// One search field for every searchable screen, so a search never sits in a
+    /// different place just because it lives on another screen.
+    func ledgerSearch(text: Binding<String>, prompt: String) -> some View {
+        modifier(LedgerSearch(text: text, prompt: prompt))
+    }
+}
+
+private struct LedgerSearch: ViewModifier {
+    @Binding var text: String
+    let prompt: String
+
+    func body(content: Content) -> some View {
+        // Always on screen, so a screenshot of any search screen looks the same
+        // and a scope bar has somewhere to sit. The iOS 26 toolbar field hides
+        // the search behind a button, which is why it is not used here yet.
+        content
+            .searchable(text: $text, placement: .navigationBarDrawer(displayMode: .always), prompt: prompt)
+            .scrollDismissesKeyboard(.interactively)
     }
 }
 
@@ -574,9 +609,6 @@ struct SignInButton: View {
         }
         .disabled(working)
         .ledgerProminentButton()
-        .contextMenu {
-            Button("Change MyAnimeList Client ID") { configure() }
-        }
         .alert("MyAnimeList iOS Client ID", isPresented: $configuring) {
             TextField("Client ID", text: $clientID)
                 .textInputAutocapitalization(.never)
@@ -700,7 +732,7 @@ struct AccountScreen: View {
                     value: TitleCollectionRoute(
                         label: "Favorite \(kind.rawValue)", titles: unique(titles), showsScore: true)
                 ) {
-                    Text("View all").font(.caption.weight(.semibold))
+                    LedgerViewAll(section: "favorite \(kind.rawValue.lowercased())")
                 }
             }
         }
@@ -911,11 +943,17 @@ private struct FriendMediaListScreen: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else if entries.isEmpty {
-                ContentUnavailableView(
-                    "No \(kind.rawValue) in this list",
-                    systemImage: kind == .anime ? "film" : "books.vertical"
-                )
+                VStack(spacing: 6) {
+                    Label("No \(kind.rawValue) in this list", systemImage: kind == .anime ? "film" : "books.vertical")
+                        .font(.headline)
+                    Text("This list is empty on MyAnimeList.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 28)
                 .listRowBackground(Color.clear)
+                .listRowSeparator(.hidden)
             }
         }
         .listStyle(.plain)
@@ -923,6 +961,13 @@ private struct FriendMediaListScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("\(friend.name)’s \(kind.label) List")
         .navigationBarTitleDisplayMode(.inline)
+        .refreshable {
+            entries = []
+            nextPage = 1
+            errorMessage = nil
+            isPrivate = false
+            await load()
+        }
     }
 
     private var statusGroups: some View {
