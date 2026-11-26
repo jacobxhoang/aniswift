@@ -728,7 +728,11 @@ final class API: APIClient {
 
     private func titleFields(_ kind: Kind) -> String {
         let total = kind == .anime ? "num_episodes" : "num_chapters"
-        return "id,title,main_picture,alternative_titles,mean,media_type,\(total)"
+        // A list row draws its release year and, for a title still on the
+        // air, when its next episode is due, so the payload carries the
+        // status, the date it started and — for anime — the weekly slot.
+        let airing = kind == .anime ? ",status,start_date,broadcast" : ",status,start_date"
+        return "id,title,main_picture,alternative_titles,mean,media_type,\(total)\(airing)"
     }
 
     private func statusFields(_ kind: Kind) -> String {
@@ -790,11 +794,17 @@ extension API {
     /// Stacks that contain this title. Tenrai answers 25 per page, and it is the
     /// only source that serves this path, so a first answer that failed is
     /// asked again rather than reported as a failure the reader has to clear.
+    /// Adult stacks are asked for by name: the catalog hides them by default,
+    /// and a title that is itself adult has no other stacks at all.
     func interestStacks(
         for title: Title, page: Int, refresh: Bool = false
     ) async throws -> Page<InterestStack> {
         let path = "\(title.kind.rawValue)/\(title.malID)/stacks"
-        let query = [URLQueryItem(name: "page", value: String(page))]
+        let query = [
+            URLQueryItem(name: "page", value: String(page)),
+            URLQueryItem(name: "sfw", value: "false"),
+            URLQueryItem(name: "sfw-strict", value: "false"),
+        ]
         let response: Fields
         do {
             response = try await catalog(path, query, refresh: refresh)
@@ -809,8 +819,14 @@ extension API {
         return Page(items: unique(rows.compactMap(InterestStack.init)), more: more)
     }
 
+    /// One stack with every entry it lists, adult entries included: the catalog
+    /// hides them by default, and a stack whose titles are adult would read as
+    /// an empty one.
     func stackDetail(_ id: Int) async throws -> StackDetail {
-        let response = try await catalog("stacks/\(id)", [], refresh: false)
+        let response = try await catalog(
+            "stacks/\(id)",
+            [URLQueryItem(name: "sfw", value: "false"), URLQueryItem(name: "sfw-strict", value: "false")],
+            refresh: false)
         guard let detail = StackDetail(response) else {
             throw APIError(status: 0, message: "This stack could not be read.")
         }

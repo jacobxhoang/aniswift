@@ -440,6 +440,28 @@ struct ListsScreen: View {
         return filter.descending ? Array(sorted.reversed()) : sorted
     }
 
+    /// When a title that is still on the air next airs, under the row's facts:
+    /// amber while an episode that already aired is unwatched, green once the
+    /// reader is caught up with every one of them, and the same in words for
+    /// VoiceOver, which cannot see the colour.
+    private func airingLine(_ airing: AiringProgress, progress: Int) -> some View {
+        let behind = (airing.aired ?? 0) > progress
+        let colour = airing.aired == nil
+            ? Color.secondary : (behind ? Palette.airingBehind : Palette.airingCaughtUp)
+        let state = airing.aired == nil ? nil : (behind ? "You are behind." : "You are caught up.")
+        let label = [airing.line(), state].compactMap { $0 }.joined(separator: " ")
+        return HStack(spacing: 5) {
+            Image(systemName: "antenna.radiowaves.left.and.right")
+                .font(.caption)
+                .accessibilityHidden(true)
+            Text(airing.line()).font(.subheadline)
+        }
+        .foregroundStyle(colour)
+        .padding(.top, 3)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(label)
+    }
+
     private func entryRow(_ item: ListEntry) -> some View {
         let link = NavigationLink(value: item.title) {
             HStack(alignment: .top, spacing: 8) {
@@ -466,6 +488,9 @@ struct ListsScreen: View {
                         .foregroundStyle(.secondary)
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("My rating \(item.rating) out of ten")
+                    }
+                    if let airing = item.title.nextAiring() {
+                        airingLine(airing, progress: item.progress)
                     }
                 }
                 .font(.subheadline)
@@ -1187,6 +1212,10 @@ private struct SearchResultCard: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var posterWidth: CGFloat = 96
 
+    /// The card is as tall as its poster, so the text beside it stops there
+    /// instead of stretching the row past the artwork.
+    private var posterHeight: CGFloat { posterWidth / LedgerLayout.posterRatio }
+
     private var summary: String {
         var values = [title.format ?? title.kind.label]
         if let total = title.total {
@@ -1202,27 +1231,18 @@ private struct SearchResultCard: View {
     var body: some View {
         PreferredTitle(title: title) { item, name in
             NavigationLink(value: item) {
-                let layout = typeSize.isAccessibilitySize
+                let stacked = typeSize.isAccessibilitySize
+                let layout = stacked
                     ? AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
                     : AnyLayout(HStackLayout(alignment: .top, spacing: 12))
                 layout {
                     poster(item)
                     details(item, name: name)
+                        .frame(height: stacked ? nil : posterHeight, alignment: .top)
                 }
                 .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background {
-                    ZStack {
-                        Palette.surface
-                        if let image = item.image {
-                            Art(url: image)
-                                .overlay {
-                                    LinearGradient(colors: [.black.opacity(0.67), .black.opacity(0.95)],
-                                                   startPoint: .top, endPoint: .bottom)
-                                }
-                        }
-                    }
-                }
+                .background(Palette.surface)
                 .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                 .overlay {
                     RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
@@ -1239,17 +1259,24 @@ private struct SearchResultCard: View {
             .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
     }
 
+    /// The name, its facts and its genres around a summary that takes the room
+    /// left between them: a long one is cut at the poster's edge rather than
+    /// growing the card.
     private func details(_ item: Title, name: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(name).font(.headline).foregroundStyle(.white).lineLimit(2)
-            Text(summary).font(.footnote).foregroundStyle(.white.opacity(0.78))
+            Text(name).font(.headline).lineLimit(2)
+            Text(summary).font(.footnote).foregroundStyle(.secondary)
             if let synopsis = item.synopsis {
-                Text(synopsis).font(.subheadline).foregroundStyle(.white.opacity(0.82)).lineLimit(6)
+                Text(synopsis)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .clipped()
             }
             if let genres = item.genres, !genres.isEmpty {
                 FlowLayout {
                     ForEach(Array(genres.prefix(3)), id: \.self) { genre in
-                        Text(genre).font(.caption).foregroundStyle(.white)
+                        Text(genre).font(.caption)
                             .padding(.horizontal, 8).padding(.vertical, 4)
                             .background(Palette.fill, in: .capsule)
                             .overlay { Capsule().strokeBorder(Palette.border) }

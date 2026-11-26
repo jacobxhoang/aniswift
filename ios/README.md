@@ -25,7 +25,7 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. |
+| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | View account statistics, friends and public favorites, open custom lists, share your MyAnimeList profile, choose what appears under **Settings → Profile**, and open Settings from the toolbar gear. |
@@ -41,8 +41,9 @@ uses for its **Showing saved data** note, so a failure reads the same everywhere
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
 it is missing. An anime that is still on the air says when its next episode is due, in a band under its header
-("Next episode in 2 days · Sunday at 23:15 JST"), counted from the weekly slot MyAnimeList publishes for it;
-a title whose payload names no slot shows no band instead of a guess. The same rule applies to posters and
+("Episode 9 airs in 2 days · Sunday at 23:15 JST"), counted from the weekly slot MyAnimeList publishes for it;
+the episode is named while the run still fits the length it was announced with, and a title whose payload names
+no slot shows no band instead of a guess. The same rule applies to posters and
 rows, list sorting, interest-stack entries, review headers, and editor prompts. Genres, themes, producers and
 serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing,
 compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked
@@ -52,7 +53,9 @@ back to its character, a credit to its title. A manga's header lists its authors
 studios, and tapping one opens that page. Reviews and friends' title activity appear when entries exist.
 Open **View All** in Reviews to browse and read reviews inside the app, including a spoiler reveal control in
 the reader. Interest stacks open from a title and list their entries with positions, scores and notes; in a
-stack flagged **Spoilers**, each author note stays behind **Reveal note**. Many stacks chain themselves together
+stack flagged **Spoilers**, each author note stays behind **Reveal note**. Adult stacks are asked for, so a title
+that is itself adult lists them too; one MyAnimeList never hands over — a stack made only of adult titles — opens
+from the title page's **Stacks on MyAnimeList** link instead. Many stacks chain themselves together
 with lines like `Part 2: https://myanimelist.net/stacks/6746`; those links open the stack they name inside the
 app rather than in a browser, so the parts can be read one after another. A title page you opened before can
 be drawn from its saved copy without a connection, marked **Showing saved data** with a Retry. Tapping the

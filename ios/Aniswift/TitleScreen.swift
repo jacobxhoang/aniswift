@@ -138,15 +138,33 @@ struct TitleScreen: View {
             }
         } else {
             block("Interest stacks") {
-                LedgerProblem(
-                    message: stacksUnavailable
-                        ? "Could not load interest stacks."
-                        : "No interest stacks for this title."
-                ) {
-                    await loadStacks(refresh: true)
+                VStack(alignment: .leading, spacing: 10) {
+                    LedgerProblem(
+                        message: stacksUnavailable
+                            ? "Could not load interest stacks."
+                            : "No interest stacks for this title."
+                    ) {
+                        await loadStacks(refresh: true)
+                    }
+                    // The catalog does not index adult stacks, so a title whose
+                    // stacks are all adult has none to hand over. MyAnimeList
+                    // keeps the list the app cannot read.
+                    if !stacksUnavailable, let url = stacksOnMyAnimeList {
+                        Link(destination: url) {
+                            Label("Stacks on MyAnimeList", systemImage: "arrow.up.right")
+                        }
+                        .font(.subheadline.weight(.semibold))
+                        .frame(minHeight: 44)
+                        .accessibilityHint("Opens this title's interest stacks in a browser")
+                    }
                 }
             }
         }
+    }
+
+    /// This title's interest stacks on MyAnimeList itself.
+    private var stacksOnMyAnimeList: URL? {
+        publicURL("https://myanimelist.net/\(title.kind.rawValue)/\(title.malID)/stacks")
     }
 
     /// A section that could not be read, with the retry that asks again, so a
@@ -391,8 +409,8 @@ struct TitleScreen: View {
     }
 
     /// The next airing of an anime that is still on the air: its weekly slot
-    /// and how long it is away, in a band under the header. A payload that
-    /// names no slot draws nothing instead of a guess.
+    /// and how long it is away, in a slim band under the header rather than a
+    /// panel of its own. A payload that names no slot draws nothing.
     @ViewBuilder
     private var airingSchedule: some View {
         if let airingLine {
@@ -401,33 +419,17 @@ struct TitleScreen: View {
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, LedgerLayout.inset)
-                .padding(.vertical, 8)
+                .padding(.vertical, 3)
                 .background(Palette.surface)
-                .padding(.top, 14)
+                .padding(.top, 6)
         }
     }
 
     private var airingLine: String? {
-        guard title.kind == .anime, shows(DetailSection.headerAiringSchedule), let record else {
-            return nil
-        }
-        let airing: Bool? = record.read("airing")
-        let status = (record.string("status") ?? "").lowercased()
-        guard airing == true || status == "currently airing" else { return nil }
-        let broadcast: Fields? = record.read("broadcast")
-        guard let slot = AiringSlot(broadcast), let next = slot.next() else { return nil }
-        let away = Self.relative.localizedString(for: next, relativeTo: .now)
-        return "Next episode \(away) · \(slot.label)"
+        guard title.kind == .anime, shows(DetailSection.headerAiringSchedule) else { return nil }
+        guard let airing = record?.airingProgress() else { return nil }
+        return "\(airing.line()) · \(airing.slot.label)"
     }
-
-    /// One formatter for every countdown the page draws: building one per
-    /// body pass is the cost a relative date would pay.
-    private static let relative: RelativeDateTimeFormatter = {
-        let formatter = RelativeDateTimeFormatter()
-        formatter.unitsStyle = .full
-        formatter.dateTimeStyle = .named
-        return formatter
-    }()
 
     /// The header's numbers, each only when it has a value: a column of em
     /// dashes under three labels says less than the numbers it does have.
@@ -1328,7 +1330,18 @@ struct StackScreen: View {
                 } else if loading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 12)
                 } else if let failure {
-                    LedgerProblem(message: failure) { await load() }
+                    VStack(alignment: .leading, spacing: 10) {
+                        LedgerProblem(message: failure) { await load() }
+                        // A stack the catalog does not index is still on
+                        // MyAnimeList, so the page offers the way there.
+                        if let url = publicURL("https://myanimelist.net/stacks/\(stack.id)") {
+                            Link(destination: url) {
+                                Label("Open this stack on MyAnimeList", systemImage: "arrow.up.right")
+                            }
+                            .font(.subheadline.weight(.semibold))
+                            .frame(minHeight: 44)
+                        }
+                    }
                 }
             }
             .padding(LedgerLayout.inset)

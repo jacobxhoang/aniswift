@@ -222,6 +222,10 @@ enum Palette {
     /// The fill behind a chip or a status pill. A fill carries no boundary, so
     /// it stays softer than a hairline.
     static let fill = Color.white.opacity(0.12)
+    /// The two states of an airing row: amber while an episode that already
+    /// aired is unwatched, green once the reader has caught up with the run.
+    static let airingBehind = Color(red: 0.97, green: 0.82, blue: 0.42)
+    static let airingCaughtUp = Color(red: 0.45, green: 0.85, blue: 0.55)
 }
 
 enum LedgerLayout {

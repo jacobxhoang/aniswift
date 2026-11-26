@@ -146,6 +146,12 @@ struct Title: Identifiable, Hashable, Codable {
     let genres: [String]?
     let releaseYear: Int?
     let catalogStatus: String?
+    /// The weekly slot a title that is still on the air takes, the date its
+    /// first episode aired and whether it is on the air: together they say
+    /// which episode comes next and whether the reader is caught up.
+    let slot: AiringSlot?
+    let premiere: Date?
+    let isAiring: Bool
     var id: String { "\(kind.rawValue)-\(malID)" }
     var malURL: URL { URL(string: "https://myanimelist.net/\(kind.rawValue)/\(malID)")! }
 
@@ -175,6 +181,19 @@ struct Title: Identifiable, Hashable, Codable {
         let year = (fields.read("year") as Int?) ?? (start?.read("year") as Int?) ?? dateYear
         releaseYear = year.flatMap { $0 > 0 ? $0 : nil }
         catalogStatus = fields.string("status")
+        slot = AiringSlot(fields.read("broadcast"))
+        let airing: Bool? = fields.read("airing")
+        let status = (catalogStatus ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
+        isAiring = airing == true || status == "currently airing"
+        premiere = (dates?.string("from") ?? fields.string("start_date")).flatMap { raw -> Date? in
+            let date = activityDate(raw)
+            return date == .distantPast ? nil : date
+        }
+    }
+
+    /// The next airing of this title, while it is still on the air.
+    func nextAiring(after now: Date = .now) -> AiringProgress? {
+        AiringProgress.next(slot: slot, premiere: premiere, total: total, isAiring: isAiring, after: now)
     }
 
     func fillingEnglishName(from cachedName: String?) -> Title {
@@ -539,7 +558,7 @@ struct StackRoute: Hashable {
 /// The weekly slot an airing anime takes, as MyAnimeList publishes it: a
 /// weekday and a time in Japan's zone, which is the one every slot is given
 /// in. The title page turns the slot into the countdown it shows.
-struct AiringSlot: Equatable {
+struct AiringSlot: Hashable, Codable {
     /// The weekday, numbered the way `Calendar` numbers it: 1 is Sunday.
     let weekday: Int
     let hour: Int
@@ -586,6 +605,76 @@ struct AiringSlot: Equatable {
         components.hour = hour
         components.minute = minute
         return calendar.nextDate(after: now, matching: components, matchingPolicy: .nextTime)
+    }
+}
+
+/// What a title's airing says right now: when its next episode is due, which
+/// one that is, and how many have aired. MyAnimeList publishes neither the
+/// next episode nor an aired count, so both come from the weekly slot and the
+/// premiere date — exact for a run without breaks, and silent about the
+/// episode once a run outlasts the length it was announced with.
+struct AiringProgress: Equatable {
+    let slot: AiringSlot
+    let date: Date
+    /// The episode that airs at `date`, when the run still fits its length.
+    let episode: Int?
+    /// How many episodes have aired by now, when that is known.
+    let aired: Int?
+
+    /// The line a list row and a title page draw: "Episode 9 airs in 14
+    /// hours", or "Next episode in 14 hours" when the episode is not known.
+    func line(relativeTo now: Date = .now) -> String {
+        let away = Self.relative.localizedString(for: date, relativeTo: now)
+        guard let episode else { return "Next episode \(away)" }
+        return "Episode \(episode) airs \(away)"
+    }
+
+    /// One formatter for every countdown: building one per row pass is the
+    /// cost a relative date would pay.
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        return formatter
+    }()
+
+    /// When a title that is still on the air next airs, from the pieces a
+    /// payload carries: its weekly slot, the date it started and the length
+    /// it was announced with.
+    static func next(
+        slot: AiringSlot?, premiere: Date?, total: Int?, isAiring: Bool, after now: Date = .now
+    ) -> AiringProgress? {
+        guard isAiring, let slot, let date = slot.next(after: now) else { return nil }
+        guard let premiere else {
+            return AiringProgress(slot: slot, date: date, episode: nil, aired: nil)
+        }
+        // One episode a week, from the first: the slot's place in the run is
+        // how many have aired, and the one after it is next. The episode is
+        // named only while the run fits the length it was announced with, so a
+        // long run with breaks counts slots and says nothing rather than a
+        // wrong number; how many aired is still known, and colours the row.
+        let aired = max(Int((date.timeIntervalSince(premiere) / (7 * 24 * 60 * 60)).rounded()), 0)
+        let episode = total.flatMap { aired + 1 <= $0 ? aired + 1 : nil }
+        return AiringProgress(slot: slot, date: date, episode: episode, aired: aired)
+    }
+}
+
+extension Fields {
+    /// The next airing this payload describes, when the title it names is
+    /// still on the air.
+    func airingProgress(after now: Date = .now) -> AiringProgress? {
+        let airing: Bool? = read("airing")
+        let status = (string("status") ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
+        let dates: Fields? = read("aired") ?? read("published")
+        let premiere = (dates?.string("from") ?? string("start_date")).flatMap { raw -> Date? in
+            let date = activityDate(raw)
+            return date == .distantPast ? nil : date
+        }
+        let count: Int? = read("episodes", "num_episodes", "chapters", "num_chapters")
+        return AiringProgress.next(
+            slot: AiringSlot(read("broadcast")), premiere: premiere,
+            total: count.flatMap { $0 > 0 ? $0 : nil },
+            isAiring: airing == true || status == "currently airing", after: now)
     }
 }
 
