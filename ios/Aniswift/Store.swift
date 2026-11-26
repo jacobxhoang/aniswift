@@ -520,6 +520,9 @@ final class Store: ObservableObject {
             snapshot.items.insert(ListEntry(response, title: savedTitle, fallback: change, previous: previous), at: 0)
         }
         updateList(kind, snapshot)
+        // The change is carried to AniList, one way: AniList never writes back,
+        // so an entry edited there cannot overwrite this one.
+        Task { await AniListClient.shared.push(title, change: change) }
     }
 
     func organize(_ title: Title, lists selected: Set<UUID>, adding newLists: [CustomTitleList],

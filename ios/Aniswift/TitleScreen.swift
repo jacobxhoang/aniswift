@@ -18,6 +18,9 @@ struct TitleScreen: View {
     @State private var themes: Fields?
     @State private var reviews: Page<TitleReview>?
     @State private var reviewsUnavailable = false
+    @State private var charactersUnavailable = false
+    @State private var recommendationsUnavailable = false
+    @State private var stacksUnavailable = false
     @State private var stacks: [InterestStack] = []
     @State private var stacksMore = false
     @State private var showingPoster = false
@@ -66,6 +69,70 @@ struct TitleScreen: View {
     /// related titles, characters, recommendations, stacks, trailer, theme songs,
     /// friends' activity and reviews.
     private var showsSectionsBelowSummary: Bool { shows(DetailSection.sections) }
+    /// The paths a section is read from, for the page and for a section's retry.
+    private var detailPath: String { "\(title.kind.rawValue)/\(title.malID)" }
+    private var charactersPath: String { detailPath + "/characters" }
+    private var recommendationsPath: String { detailPath + "/recommendations" }
+
+    /// Every section under the summary, each drawn only when it has something to
+    /// show, and with a retry where its request failed instead of vanishing.
+    @ViewBuilder
+    private var sectionsBelowSummary: some View {
+        if showsMetadata { metadata }
+        if let background = record?.string("background") { block("Background") { Text(background) } }
+        if showsRelated, !related.isEmpty { relations }
+        if showsCharacters { characterSection }
+        if showsRecommendations { recommendationSection }
+        if !stacks.isEmpty || stacksUnavailable { stackSection }
+        if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
+        if title.kind == .anime { themeRows }
+        if !friendRows.isEmpty { friends }
+        if let reviews, !reviews.items.isEmpty || reviews.more {
+            reviewRows(reviews)
+        } else if reviewsUnavailable {
+            reviewRows(nil, failed: true)
+        }
+    }
+
+    @ViewBuilder
+    private var characterSection: some View {
+        if !characters.isEmpty {
+            cast
+        } else if charactersUnavailable {
+            unavailableSection("Characters") { await loadCharacters() }
+        }
+    }
+
+    @ViewBuilder
+    private var recommendationSection: some View {
+        if !suggested.isEmpty {
+            mediaRail("Recommended", titles: suggested)
+        } else if recommendationsUnavailable {
+            unavailableSection("Recommended") { await loadRecommendations() }
+        }
+    }
+
+    @ViewBuilder
+    private var stackSection: some View {
+        if !stacks.isEmpty {
+            interestStacks
+        } else if stacksUnavailable {
+            unavailableSection("Interest stacks") { await loadStacks() }
+        }
+    }
+
+    /// A section that could not be read, with the retry that asks again, so a
+    /// failed shelf says so instead of disappearing from the page.
+    private func unavailableSection(
+        _ heading: String, retry: @escaping () async -> Void
+    ) -> some View {
+        block(heading) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Could not load \(heading.lowercased()).").foregroundStyle(.secondary)
+                Button("Retry") { Task { await retry() } }.ledgerGlassButton()
+            }
+        }
+    }
     private var showsHeaderPoster: Bool { shows(DetailSection.headerPoster) }
     private var showsHeaderScore: Bool { shows(DetailSection.headerScore) }
     private var showsHeaderRank: Bool { shows(DetailSection.headerRank) }
@@ -110,20 +177,7 @@ struct TitleScreen: View {
                         block("Summary") { summary(description) }
                     }
                     if showsSectionsBelowSummary {
-                        if showsMetadata { metadata }
-                        if let background = record?.string("background") { block("Background") { Text(background) } }
-                        if showsRelated, !related.isEmpty { relations }
-                        if showsCharacters, !characters.isEmpty { cast }
-                        if showsRecommendations, !suggested.isEmpty { mediaRail("Recommended", titles: suggested) }
-                        if !stacks.isEmpty { interestStacks }
-                        if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
-                        if title.kind == .anime { themeRows }
-                        if !friendRows.isEmpty { friends }
-                        if let reviews, !reviews.items.isEmpty || reviews.more {
-                            reviewRows(reviews)
-                        } else if reviewsUnavailable {
-                            reviewRows(nil, failed: true)
-                        }
+                        sectionsBelowSummary
                     }
                 }
                 .padding(LedgerLayout.inset)
@@ -244,7 +298,7 @@ struct TitleScreen: View {
                         .frame(width: 144, height: 208)
                         .clipShape(.rect(cornerRadius: 10))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 10).strokeBorder(.white.opacity(0.14))
+                            RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline)
                                 .allowsHitTesting(false)
                         }
                         .contentShape(.rect(cornerRadius: 10))
@@ -365,7 +419,7 @@ struct TitleScreen: View {
             .frame(maxWidth: .infinity, minHeight: 46)
             .background(Palette.surface, in: .rect(cornerRadius: 9))
             .overlay {
-                RoundedRectangle(cornerRadius: 9).strokeBorder(.white.opacity(0.14))
+                RoundedRectangle(cornerRadius: 9).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
             .contentShape(.rect(cornerRadius: 9))
@@ -656,7 +710,7 @@ struct TitleScreen: View {
             .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 12))
             .overlay {
                 RoundedRectangle(cornerRadius: 12)
-                    .strokeBorder(.white.opacity(0.08))
+                    .strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
             if !friendScanComplete {
@@ -745,8 +799,8 @@ struct TitleScreen: View {
         async let detail = store.api.catalog(path + "/full", [], refresh: false)
         async let reviewData = loadReviewsIfWanted(belowSummary)
         async let stackData = loadStacksIfWanted(belowSummary)
-        async let castData = loadSection(belowSummary && showsCharacters, path + "/characters")
-        async let recsData = loadSection(belowSummary && showsRecommendations, path + "/recommendations")
+        async let castData = loadSection(belowSummary && showsCharacters, charactersPath)
+        async let recsData = loadSection(belowSummary && showsRecommendations, recommendationsPath)
         do {
             let result = try await detail
             if let full: Fields = result.read("data") {
@@ -783,18 +837,24 @@ struct TitleScreen: View {
                 reviewsUnavailable = true
             }
         }
-        if let result = await castData {
-            let items: [Fields] = result.read("data") ?? []
-            let cast = unique(items.compactMap(CastMember.init))
-            characters = cast.filter { $0.role?.lowercased() == "main" }
-                + cast.filter { $0.role?.lowercased() != "main" }
+        let cast = await castData
+        if let fields = cast.fields {
+            applyCharacters(fields)
+        } else if cast.failed {
+            charactersUnavailable = true
         }
-        if let result = await recsData {
-            suggested = unique(recommendations(result, kind: title.kind)).filter { $0.id != title.id }
+        let recs = await recsData
+        if let fields = recs.fields {
+            applyRecommendations(fields)
+        } else if recs.failed {
+            recommendationsUnavailable = true
         }
-        if let page = await stackData {
+        let stacksPage = await stackData
+        if let page = stacksPage.page {
             stacks = page.items
             stacksMore = page.more
+        } else if stacksPage.failed {
+            stacksUnavailable = true
         }
     }
 
@@ -809,10 +869,17 @@ struct TitleScreen: View {
         }
     }
 
-    /// The interest stacks, asked for only while those sections show.
-    private func loadStacksIfWanted(_ wanted: Bool) async -> Page<InterestStack>? {
-        guard wanted else { return nil }
-        return try? await store.api.interestStacks(for: title, page: 1)
+    /// The interest stacks, asked for only while those sections show, with a
+    /// failure kept apart so the shelf can offer a retry.
+    private func loadStacksIfWanted(
+        _ wanted: Bool
+    ) async -> (page: Page<InterestStack>?, failed: Bool) {
+        guard wanted else { return (nil, false) }
+        do {
+            return (try await store.api.interestStacks(for: title, page: 1), false)
+        } catch {
+            return (nil, !Task.isCancelled)
+        }
     }
 
     /// Reads the related titles and theme songs that `/full` returns with the details.
@@ -837,11 +904,60 @@ struct TitleScreen: View {
         if let songs: Fields = detail.read("themeSongs", "theme") { themes = songs }
     }
 
-    /// A catalog request for a section the reader may have hidden. The hidden
-    /// case answers without touching the network.
-    private func loadSection(_ wanted: Bool, _ path: String) async -> Fields? {
-        guard wanted else { return nil }
-        return try? await store.api.catalog(path, [], refresh: false)
+    /// A catalog request for a section the reader may have hidden, with a failure
+    /// kept apart from a hidden section so the page can offer a retry.
+    private func loadSection(_ wanted: Bool, _ path: String) async -> (fields: Fields?, failed: Bool) {
+        guard wanted else { return (nil, false) }
+        do {
+            return (try await store.api.catalog(path, [], refresh: false), false)
+        } catch {
+            return (nil, !Task.isCancelled)
+        }
+    }
+
+    private func applyCharacters(_ fields: Fields) {
+        let items: [Fields] = fields.read("data") ?? []
+        let cast = unique(items.compactMap(CastMember.init))
+        characters =
+            cast.filter { $0.role?.lowercased() == "main" }
+            + cast.filter { $0.role?.lowercased() != "main" }
+        charactersUnavailable = false
+    }
+
+    private func applyRecommendations(_ fields: Fields) {
+        suggested = unique(recommendations(fields, kind: title.kind)).filter { $0.id != title.id }
+        recommendationsUnavailable = false
+    }
+
+    /// Retries one section on its own, so a failed shelf recovers where it is
+    /// instead of reloading the whole page.
+    private func loadCharacters() async {
+        let result = await loadSection(true, charactersPath)
+        if let fields = result.fields {
+            applyCharacters(fields)
+        } else if result.failed {
+            charactersUnavailable = true
+        }
+    }
+
+    private func loadRecommendations() async {
+        let result = await loadSection(true, recommendationsPath)
+        if let fields = result.fields {
+            applyRecommendations(fields)
+        } else if result.failed {
+            recommendationsUnavailable = true
+        }
+    }
+
+    private func loadStacks() async {
+        let result = await loadStacksIfWanted(true)
+        if let page = result.page {
+            stacks = page.items
+            stacksMore = page.more
+            stacksUnavailable = false
+        } else if result.failed {
+            stacksUnavailable = true
+        }
     }
 
     private func loadFriendBatch() async {
@@ -880,7 +996,8 @@ struct TitleScreen: View {
     }
 }
 
-/// The poster on its own, filling the screen. Tap to close; pinch to look closer.
+/// The poster on its own, filling the screen. Double-tap or pinch to look
+/// closer, and the glass X closes it.
 private struct PosterScreen: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -888,6 +1005,8 @@ private struct PosterScreen: View {
     let symbol: String
     @State private var zoom: CGFloat = 1
     @State private var pinch: CGFloat = 1
+    /// A failed load asks again by rebuilding the image view.
+    @State private var attempt = 0
 
     private var scale: CGFloat { min(max(zoom * pinch, 1), 4) }
 
@@ -896,7 +1015,7 @@ private struct PosterScreen: View {
             Color.black.ignoresSafeArea()
             KFImage.url(url)
                 .placeholder { placeholder }
-                .onFailureView { placeholder }
+                .onFailureView { failure }
                 .resizable()
                 .scaledToFit()
                 .scaleEffect(scale)
@@ -909,13 +1028,23 @@ private struct PosterScreen: View {
                             pinch = 1
                         }
                 )
+                // A double tap zooms in and back out. The whole screen used to
+                // close on any tap, which fired at the end of a pinch and
+                // dismissed the poster by accident; the X is the only dismiss.
+                .onTapGesture(count: 2) {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+                        zoom = zoom > 1 ? 1 : 2
+                    }
+                }
                 .accessibilityLabel("Poster")
+                .accessibilityHint("Double tap to zoom")
+                .id(attempt)
         }
         .overlay(alignment: .topLeading) {
             // The close button is the size of the system's back button and sits
             // where a pushed screen puts it. Its glyph stays white like that
             // button's, rather than taking the accent the bar's other buttons
-            // wear; the poster itself still closes on a tap.
+            // wear.
             Button {
                 dismiss()
             } label: {
@@ -931,7 +1060,6 @@ private struct PosterScreen: View {
             .padding(.leading, 12)
             .padding(.top, 6)
         }
-        .onTapGesture { dismiss() }
         .statusBarHidden(true)
     }
 
@@ -939,6 +1067,15 @@ private struct PosterScreen: View {
         ZStack {
             Color.black
             Image(systemName: symbol).font(.largeTitle).foregroundStyle(.secondary)
+        }
+    }
+
+    /// A poster that could not load says so and can be asked for again, instead
+    /// of showing the glyph with nothing to do.
+    private var failure: some View {
+        VStack(spacing: 12) {
+            placeholder
+            Button("Try again") { attempt += 1 }.ledgerGlassButton()
         }
     }
 }
@@ -1035,7 +1172,7 @@ private struct StackBadges: View {
         Text(text)
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(.white.opacity(0.10), in: .capsule)
+            .background(Palette.fill, in: .capsule)
     }
 }
 
@@ -1591,7 +1728,7 @@ private struct TitleFriendActivityRow: View {
                                 .foregroundStyle(.primary)
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
-                                .background(.white.opacity(0.10), in: .capsule)
+                                .background(Palette.fill, in: .capsule)
                         }
                         if let progressLabel {
                             Text(progressLabel).foregroundStyle(.secondary)
@@ -1681,10 +1818,14 @@ struct ListEditor: View {
     @State private var newListName = ""
     @State private var busy = false
     @State private var confirmRemoval = false
+    @State private var confirmDiscard = false
+    @State private var saved = false
     @State private var error: String?
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @State private var askingForScore = false
+    /// The score sheet's star follows Dynamic Type like the text beside it.
+    @ScaledMetric(relativeTo: .largeTitle) private var starSize: CGFloat = 46
 
     init(title: Title, original: ListEntry?, mode: Mode = .full) {
         self.title = title
@@ -1730,6 +1871,21 @@ struct ListEditor: View {
             (!remoteChanged && (mode != .full || !organizationChanged))
     }
 
+    /// Whether the sheet holds something the reader has not saved, so a drag
+    /// down is ignored and the X asks before it throws the draft away.
+    private var hasDraft: Bool {
+        guard !saved else { return false }
+        if let original {
+            if original.status != change.status || original.progress != change.progress
+                || original.rating != change.rating
+            {
+                return true
+            }
+            return mode == .full && (details != (original.details ?? ListDetails()) || organizationChanged)
+        }
+        return change.progress > 0 || change.rating > 0 || details != ListDetails() || organizationChanged
+    }
+
     var body: some View {
         NavigationStack {
             Group {
@@ -1742,8 +1898,12 @@ struct ListEditor: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button { dismiss() } label: { Image(systemName: "xmark") }
-                        .accessibilityLabel("Cancel")
+                    // A sheet holding an unsaved edit asks before the X throws
+                    // it away, and a drag down does nothing instead.
+                    Button {
+                        if hasDraft { confirmDiscard = true } else { dismiss() }
+                    } label: { Image(systemName: "xmark") }
+                        .accessibilityLabel(hasDraft ? "Discard changes" : "Cancel")
                         .disabled(busy)
                 }
                 if mode == .full {
@@ -1756,12 +1916,18 @@ struct ListEditor: View {
                 Button("Remove", role: .destructive) { submit(nil) }
                 Button("Cancel", role: .cancel) {}
             }
+            .confirmationDialog("Discard your changes?", isPresented: $confirmDiscard) {
+                Button("Discard", role: .destructive) { dismiss() }
+                Button("Keep Editing", role: .cancel) {}
+            } message: {
+                Text("This edit was not saved.")
+            }
             .alert("Create Custom List", isPresented: $creatingList) {
                 TextField("List name", text: $newListName)
                 Button("Create") { createList() }
                 Button("Cancel", role: .cancel) {}
             }
-            .interactiveDismissDisabled(busy)
+            .interactiveDismissDisabled(busy || hasDraft)
             .task {
                 if mode == .full, !organizationLoaded {
                     selectedLists = originalListIDs
@@ -1978,7 +2144,7 @@ struct ListEditor: View {
         ScrollView {
             VStack(spacing: 16) {
                 Image(systemName: "star.circle.fill")
-                    .font(.system(size: 46))
+                    .font(.system(size: starSize))
                     .foregroundStyle(.tint)
                     .accessibilityHidden(true)
                 Text("How was \(title.displayName(for: titleLanguage))?")
@@ -2043,6 +2209,7 @@ struct ListEditor: View {
                     store.organize(title, lists: selectedLists, adding: newLists, hidden: hidden, accountID: accountID)
                 }
                 Haptics.success()
+                saved = true
                 if asksNow {
                     askingForScore = true
                     return

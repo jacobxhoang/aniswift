@@ -90,6 +90,7 @@ struct AniswiftApp: App {
                 }
             }
             .tabBarMinimizeBehavior(tabBarBehavior == "onScrollDown" ? .onScrollDown : .never)
+            .modifier(LedgerSidebarTabs())
         } else {
             TabView(selection: $tab) {
                 stack { ListsScreen(kind: .anime) }
@@ -108,6 +109,7 @@ struct AniswiftApp: App {
                     .tabItem { Label("Profile", systemImage: "person.crop.circle") }
                     .tag("profile")
             }
+            .modifier(LedgerSidebarTabs())
         }
     }
 
@@ -211,6 +213,15 @@ enum Palette {
     static let background: Color = .black
     static let surface = Color(white: 0.12)
     static let sheet = Color(white: 0.08)
+    /// The hairline around posters, panels and capsules: one step up from the
+    /// 8–14% white used before, which measured about 1.3:1 against the canvas,
+    /// so an edge that separates two surfaces could not be seen at all.
+    static let hairline = Color.white.opacity(0.22)
+    /// The edge of an active or selected control, one step above `hairline`.
+    static let border = Color.white.opacity(0.32)
+    /// The fill behind a chip or a status pill. A fill carries no boundary, so
+    /// it stays softer than a hairline.
+    static let fill = Color.white.opacity(0.12)
 }
 
 enum LedgerLayout {
@@ -221,6 +232,12 @@ enum LedgerLayout {
     static let sectionGap: CGFloat = 28
     static let posterWidth: CGFloat = 116
     static let posterRadius: CGFloat = 8
+    /// The corners a row's thumbnail and a chip share.
+    static let rowRadius: CGFloat = 7
+    /// The corners a panel, a shelf card and a preview share.
+    static let panelRadius: CGFloat = 12
+    /// The corners of a sheet's content, where the system rounds it.
+    static let sheetRadius: CGFloat = 26
 }
 
 /// One horizontal shelf for every carousel, so card width, gutters and snapping
@@ -327,7 +344,7 @@ struct SavedDataNote: View {
         .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 10))
         .overlay {
             RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.white.opacity(0.08))
+                .strokeBorder(Palette.hairline)
                 .allowsHitTesting(false)
         }
     }
@@ -367,7 +384,7 @@ extension View {
         } else {
             background(.ultraThinMaterial, in: .circle)
                 .overlay {
-                    Circle().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                    Circle().strokeBorder(Palette.border).allowsHitTesting(false)
                 }
         }
     }
@@ -376,7 +393,7 @@ extension View {
         background(.thinMaterial, in: .rect(cornerRadius: radius))
             .overlay {
                 RoundedRectangle(cornerRadius: radius)
-                    .strokeBorder(.white.opacity(0.08))
+                    .strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
     }
@@ -395,8 +412,22 @@ private struct LedgerPrimaryButtonStyle: ButtonStyle {
             .frame(minHeight: 44)
             .background(Color(white: fill), in: .capsule)
             .overlay {
-                Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                Capsule().strokeBorder(Palette.border).allowsHitTesting(false)
             }
+    }
+}
+
+/// A shelf tile that answers a touch: a small scale and a dim, without moving
+/// anything around it, and no motion at all under Reduce Motion. A tile in a
+/// scroll view used to give no sign that it had been pressed.
+struct LedgerTileButtonStyle: ButtonStyle {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed && !reduceMotion ? 0.97 : 1)
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: configuration.isPressed)
     }
 }
 
@@ -531,6 +562,7 @@ struct PosterArt: View {
 }
 
 struct CoverTile: View {
+    @EnvironmentObject private var store: Store
     let title: Title
     var showsScore = true
     var loadMissingImage = false
@@ -550,14 +582,16 @@ struct CoverTile: View {
                     .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
                     .overlay {
                         RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
-                            .strokeBorder(.white.opacity(0.10)).allowsHitTesting(false)
+                            .strokeBorder(Palette.hairline).allowsHitTesting(false)
                     }
                     .overlay(alignment: .topTrailing) {
                         if showsScore, let score = title.score, score > 0 {
                             Text(score.formatted(.number.precision(.fractionLength(2))))
-                                .font(.caption2.monospacedDigit().weight(.semibold))
+                                .font(.caption.monospacedDigit().weight(.semibold))
                                 .padding(.horizontal, 7).padding(.vertical, 5)
                                 .ledgerGlassBadge().padding(6)
+                                .accessibilityLabel(
+                                    "Score \(score.formatted(.number.precision(.fractionLength(2)))) out of 10")
                         }
                     }
                 Text(name)
@@ -565,8 +599,48 @@ struct CoverTile: View {
                     .lineLimit(2, reservesSpace: reservesCaptionSpace)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
+            // One tile reads as one row: the poster, its name and its score
+            // used to be three stops for VoiceOver.
+            .accessibilityElement(children: .combine)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LedgerTileButtonStyle())
+        // A long press opens the tile's quick actions, the way a poster in a
+        // shelf answers on iOS: progress, MyAnimeList and Share, over the poster.
+        .contextMenu {
+            if let saved = store.entries[title.kind]?[title.id] {
+                if (title.total ?? 0) <= 0 || saved.progress < (title.total ?? 0) {
+                    Button {
+                        Task {
+                            try? await store.change(
+                                title,
+                                ListChange(
+                                    status: saved.status, progress: saved.progress + 1, rating: saved.rating))
+                        }
+                    } label: {
+                        Label(title.kind == .anime ? "Add one episode" : "Add one chapter", systemImage: "plus")
+                    }
+                }
+            } else if store.account != nil {
+                Button {
+                    Task {
+                        try? await store.change(
+                            title,
+                            ListChange(
+                                status: title.kind.statuses.first ?? "watching", progress: 0, rating: 0))
+                    }
+                } label: {
+                    Label(title.kind == .anime ? "Start watching" : "Start reading", systemImage: "plus")
+                }
+            }
+            Link(destination: title.malURL) {
+                Label("Open on MyAnimeList", systemImage: "arrow.up.right")
+            }
+            ShareLink(item: title.malURL) { Label("Share", systemImage: "square.and.arrow.up") }
+        } preview: {
+            PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book")
+                .frame(width: 220)
+                .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
+        }
     }
 }
 
@@ -577,6 +651,11 @@ struct Rail: View {
     /// The dupes are dropped once per page instead of on every body pass, so a
     /// scroll does not rebuild the set for each shelf it redraws.
     @State private var items: [Title]
+    /// The poster follows Dynamic Type the way the names beside it do, and stops
+    /// growing at the accessibility sizes so a shelf keeps its shape.
+    @ScaledMetric(relativeTo: .subheadline) private var scaledPosterWidth: CGFloat = LedgerLayout.posterWidth
+
+    private var posterWidth: CGFloat { min(scaledPosterWidth, LedgerLayout.posterWidth * 1.4) }
 
     init(name: String, titles: [Title], empty: String = "No titles available.") {
         self.name = name
@@ -593,8 +672,8 @@ struct Rail: View {
             } else {
                 LedgerShelf(inset: LedgerLayout.inset) {
                     ForEach(items) { title in
-                        CoverTile(title: title, showsScore: false, posterWidth: LedgerLayout.posterWidth)
-                            .frame(width: LedgerLayout.posterWidth)
+                        CoverTile(title: title, showsScore: false, posterWidth: posterWidth)
+                            .frame(width: posterWidth)
                     }
                 }
             }
@@ -606,6 +685,10 @@ struct Rail: View {
 struct TitleRow: View {
     let title: Title
     let note: String
+    /// A row's thumbnail follows Dynamic Type with its labels.
+    @ScaledMetric(relativeTo: .subheadline) private var posterWidth: CGFloat = 40
+
+    private var posterHeight: CGFloat { posterWidth * 1.4 }
 
     var body: some View {
         PreferredTitle(title: title) { item, name in row(item, name: name) }
@@ -613,7 +696,8 @@ struct TitleRow: View {
 
     private func row(_ title: Title, name: String) -> some View {
         HStack(spacing: 12) {
-            Art(url: title.image).frame(width: 40, height: 56).clipShape(.rect(cornerRadius: 5))
+            Art(url: title.image).frame(width: posterWidth, height: posterHeight)
+                .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
             VStack(alignment: .leading, spacing: 4) {
                 Text(name).font(.subheadline.weight(.semibold))
                 if !note.isEmpty { Text(note).font(.caption).foregroundStyle(.secondary) }
@@ -1527,5 +1611,57 @@ struct AboutScreen: View {
             self.detail = detail
             self.url = URL(string: url)!
         }
+    }
+}
+
+
+/// A tab bar on iPhone and the sidebar iPadOS 18 puts beside it, so the five
+/// destinations keep their place on a large screen and can be reordered the way
+/// the system offers.
+private struct LedgerSidebarTabs: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.tabViewStyle(.sidebarAdaptable)
+        } else {
+            content
+        }
+    }
+}
+
+
+/// The searches kept on this device, so a search field offers them instead of
+/// opening blank, and the last one is a single tap away.
+enum SearchRecents {
+    private static let key = "aniswift.settings.recentSearches"
+    private static let limit = 6
+
+    static func values() -> [String] {
+        UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+
+    static func remember(_ term: String) {
+        let trimmed = term.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > 1 else { return }
+        var values = values().filter { $0.caseInsensitiveCompare(trimmed) != .orderedSame }
+        values.insert(trimmed, at: 0)
+        UserDefaults.standard.set(Array(values.prefix(limit)), forKey: key)
+    }
+
+    static func clear() {
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+}
+
+extension View {
+    /// The searches kept on this device, offered under a search field, so a
+    /// query starts from a recent one rather than from nothing.
+    func searchRecents(_ text: Binding<String>) -> some View {
+        self
+            .searchSuggestions {
+                ForEach(SearchRecents.values(), id: \.self) { term in
+                    Text(term).searchCompletion(term)
+                }
+            }
+            .onSubmit(of: .search) { SearchRecents.remember(text.wrappedValue) }
     }
 }

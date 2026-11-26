@@ -152,8 +152,9 @@ struct SettingsScreen: View {
     @EnvironmentObject private var store: Store
     @State private var confirmSignOut = false
     /// The AniList section keeps one client: it holds the session and the
-    /// entries the read-only lists screen draws.
-    @StateObject private var aniList = AniListClient()
+    /// entries the read-only lists screen draws, and the store sends it the
+    /// changes made on MyAnimeList.
+    @StateObject private var aniList = AniListClient.shared
     @State private var editingAniListID = false
     @State private var aniListIDDraft = ""
 
@@ -215,7 +216,7 @@ struct SettingsScreen: View {
                             detail: aniList.summary)
                     }
                     .settingsRow()
-                    Button(role: .destructive) {
+                    Button {
                         aniList.signOut()
                     } label: {
                         SettingsRow(
@@ -237,14 +238,14 @@ struct SettingsScreen: View {
                     Button {
                         Task { await aniList.signIn() }
                     } label: {
-                        if aniList.connecting {
-                            ProgressView().frame(maxWidth: .infinity)
-                        } else {
-                            Text("Connect AniList").frame(maxWidth: .infinity)
-                        }
+                        // A settings action reads as a settings row, like every
+                        // other action here, and says it is busy while it waits.
+                        SettingsRow(
+                            icon: "person.crop.circle.badge.plus", title: "Connect AniList",
+                            detail: aniList.connecting ? "Waiting for AniList…" : "Sign in to AniList")
                     }
-                    .ledgerGlassButton()
                     .settingsRow()
+                    .disabled(aniList.connecting)
                     if let message = aniList.message {
                         Text(message).font(.footnote).foregroundStyle(.secondary)
                             .settingsRow()
@@ -253,11 +254,11 @@ struct SettingsScreen: View {
             } header: {
                 Text("AniList")
             } footer: {
-                Text("Shows your AniList lists beside MyAnimeList, read-only: nothing is written back to AniList. Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
+                Text("Your MyAnimeList changes are copied to AniList; AniList is never read back into MyAnimeList. Create an app at anilist.co/settings/developer with redirect URL \(AniListCallback.url).")
             }
             if store.account != nil {
                 Section {
-                    Button(role: .destructive) {
+                    Button {
                         confirmSignOut = true
                     } label: {
                         SettingsRow(
@@ -707,10 +708,10 @@ private struct SettingsIcon: View {
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.tint)
             .frame(width: 28, height: 28)
-            .background(Color.white.opacity(0.10), in: .rect(cornerRadius: 7, style: .continuous))
+            .background(Palette.fill, in: .rect(cornerRadius: 7, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
-                    .strokeBorder(.white.opacity(0.08))
+                    .strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
             .accessibilityHidden(true)
@@ -757,6 +758,8 @@ enum InAppBrowser {
 struct AniListListsScreen: View {
     @ObservedObject var client: AniListClient
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+    /// A row's thumbnail follows Dynamic Type with its labels.
+    @ScaledMetric(relativeTo: .subheadline) private var thumbnailWidth: CGFloat = 52
 
     var body: some View {
         ScrollView {
@@ -771,11 +774,14 @@ struct AniListListsScreen: View {
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 } else if client.entries.isEmpty {
-                    ContentUnavailableView(
-                        "No AniList entries yet",
-                        systemImage: "list.bullet.rectangle",
-                        description: Text("The entries on your AniList lists appear here."))
-                        .padding(.horizontal, LedgerLayout.inset)
+                    ContentUnavailableView {
+                        Label("No AniList entries yet", systemImage: "list.bullet.rectangle")
+                    } description: {
+                        Text("The entries on your AniList lists appear here.")
+                    } actions: {
+                        Button("Sync AniList") { Task { await client.sync(refresh: true) } }
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
                 } else {
                     ForEach(Kind.allCases) { kind in
                         shelf(kind)
@@ -803,14 +809,15 @@ struct AniListListsScreen: View {
                     let rows = entries.filter { $0.status == status }
                     if !rows.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text("\(status) · \(rows.count)")
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .accessibilityAddTraits(.isHeader)
+                            // A group heading reads like the app's other list
+                            // groups instead of a bare caption.
+                            ListStatusHeader(
+                                title: status, count: rows.count, expanded: true, partial: false,
+                                isInteractive: false) {}
                             ForEach(rows) { entry in
                                 row(entry)
                                 if entry.id != rows.last?.id {
-                                    Divider().overlay(Color.white.opacity(0.12))
+                                    Divider().overlay(Palette.hairline)
                                 }
                             }
                         }
@@ -824,8 +831,8 @@ struct AniListListsScreen: View {
     private func row(_ entry: AniListEntry) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Art(url: entry.image, symbol: entry.kind == .anime ? "film" : "book")
-                .frame(width: 52, height: 74)
-                .clipShape(.rect(cornerRadius: 7))
+                .frame(width: thumbnailWidth, height: thumbnailWidth * 1.4)
+                .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
                 Text(entry.displayName(for: titleLanguage))

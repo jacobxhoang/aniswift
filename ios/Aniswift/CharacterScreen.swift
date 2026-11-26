@@ -212,7 +212,7 @@ struct CharacterScreen: View {
             .frame(width: 134, height: 196)
             .clipShape(.rect(cornerRadius: 8))
             .overlay {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.12))
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
     }
@@ -383,7 +383,7 @@ struct PersonScreen: View {
             .frame(width: 134, height: 196)
             .clipShape(.rect(cornerRadius: 8))
             .overlay {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(.white.opacity(0.12))
+                RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
     }

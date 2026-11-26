@@ -52,7 +52,7 @@ stack flagged **Spoilers**, each author note stays behind **Reveal note**. Many 
 with lines like `Part 2: https://myanimelist.net/stacks/6746`; those links open the stack they name inside the
 app rather than in a browser, so the parts can be read one after another. A title page you opened before can
 be drawn from its saved copy without a connection, marked **Showing saved data** with a Retry. Tapping the
-header poster shows it full screen, where a pinch looks closer and a tap closes it. A synopsis with more than
+header poster shows it full screen, where a double tap or pinch zooms and the glass X closes it. A synopsis with more than
 one paragraph starts with its first paragraph and a **Show more** control. Anime details can also include
 trailers and theme songs.
 

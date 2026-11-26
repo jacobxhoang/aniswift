@@ -10,7 +10,7 @@ private struct ListStatusGlass: ViewModifier {
             content
                 .background(.thinMaterial, in: .capsule)
                 .overlay {
-                    Capsule().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                    Capsule().strokeBorder(Palette.border).allowsHitTesting(false)
                 }
         }
     }
@@ -66,8 +66,9 @@ struct ListsScreen: View {
     @State private var sort = ListSort.title
     @State private var paging = false
     @State private var listPageError: String?
-    @State private var pendingRemoval: ListEntry?
+    @State private var removed: (entry: ListEntry, change: ListChange)?
     @State private var saving: Set<String> = []
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let rowInset: CGFloat = 10
 
     private enum ListSort: String, CaseIterable {
@@ -88,13 +89,11 @@ struct ListsScreen: View {
     private var searchTerm: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private func displayName(_ title: Title) -> String { title.displayName(for: titleLanguage) }
-    private var removalPresented: Binding<Bool> {
-        Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } })
-    }
 
     var body: some View {
         if store.account != nil {
             list.searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+                .searchRecents($query)
         } else {
             list
         }
@@ -196,10 +195,30 @@ struct ListsScreen: View {
             await store.loadLists(force: true)
             listPageError = nil
         }
-        .confirmationDialog("Remove from your MyAnimeList list?", isPresented: removalPresented, presenting: pendingRemoval) { item in
-            Button("Remove", role: .destructive) { update(item, change: nil) }
-            Button("Cancel", role: .cancel) {}
-        } message: { item in Text(displayName(item.title)) }
+        // A removal is a swipe and an Undo, not a question: the entry waits in
+        // the bar for a few seconds and then goes.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if let removed {
+                HStack(spacing: 12) {
+                    Text("Removed \(displayName(removed.entry.title))")
+                        .font(.subheadline)
+                        .lineLimit(1)
+                    Spacer(minLength: 8)
+                    Button("Undo") { undoRemoval() }
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.tint)
+                        .frame(minHeight: 44)
+                        .accessibilityHint("Puts the title back on your list")
+                }
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.vertical, 4)
+                .background(.regularMaterial)
+                .overlay(alignment: .top) { Divider().overlay(Palette.hairline) }
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+                .accessibilityElement(children: .combine)
+            }
+        }
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: removed != nil)
     }
 
     private func groupHeader(_ status: String, count: Int) -> some View {
@@ -272,9 +291,13 @@ struct ListsScreen: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-            Button(role: .destructive) { pendingRemoval = item } label: { Label("Remove", systemImage: "trash") }
-                .tint(.red)
-                .disabled(saving.contains(item.id))
+            Button(role: .destructive) {
+                remove(item)
+            } label: {
+                Label("Remove", systemImage: "trash")
+            }
+            .tint(.red)
+            .disabled(saving.contains(item.id))
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if (item.title.total ?? 0) <= 0 || item.progress < (item.title.total ?? 0) {
@@ -309,6 +332,24 @@ struct ListsScreen: View {
             do { try await store.change(item.title, change) }
             catch { store.handle(error) }
         }
+    }
+
+    /// A removal keeps the entry so the Undo can put it back exactly as it was.
+    private func remove(_ item: ListEntry) {
+        removed = (entry: item, change: ListChange(status: item.status, progress: item.progress, rating: item.rating))
+        update(item, change: nil)
+        Task {
+            try? await Task.sleep(for: .seconds(6))
+            guard !Task.isCancelled, removed?.entry.id == item.id else { return }
+            removed = nil
+        }
+    }
+
+    private func undoRemoval() {
+        guard let removed else { return }
+        self.removed = nil
+        Haptics.success()
+        update(removed.entry, change: removed.change)
     }
 }
 
@@ -393,7 +434,15 @@ struct PosterShelf<Trailing: View>: View {
         _items = State(initialValue: unique(titles))
     }
 
-    private var posterWidth: CGFloat { isDiscoverShelf ? LedgerLayout.detailPosterWidth : LedgerLayout.posterWidth }
+    /// The poster follows Dynamic Type the way the names beside it do, and stops
+    /// growing at the accessibility sizes so a shelf keeps its shape.
+    @ScaledMetric(relativeTo: .subheadline) private var scaledPosterWidth: CGFloat = LedgerLayout.posterWidth
+    @ScaledMetric(relativeTo: .subheadline) private var scaledDetailWidth: CGFloat = LedgerLayout.detailPosterWidth
+
+    private var posterWidth: CGFloat {
+        if isDiscoverShelf { return min(scaledDetailWidth, LedgerLayout.detailPosterWidth * 1.4) }
+        return min(scaledPosterWidth, LedgerLayout.posterWidth * 1.4)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: isDiscoverShelf ? 6 : 12) {
@@ -410,11 +459,16 @@ struct PosterShelf<Trailing: View>: View {
             LedgerShelf(spacing: isDiscoverShelf ? 8 : LedgerLayout.gap, inset: LedgerLayout.inset) {
                 ForEach(items) { title in
                     VStack(alignment: .leading, spacing: 3) {
-                        CoverTile(title: title, showsScore: false, reservesCaptionSpace: false, posterWidth: posterWidth)
+                        CoverTile(
+                            title: title, showsScore: false, reservesCaptionSpace: false,
+                            posterWidth: posterWidth)
                         if let entry = store.entries[title.kind]?[title.id] {
                             Text(statusLabel(entry.status)).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                         }
-                    }.frame(width: posterWidth)
+                    }
+                    .frame(width: posterWidth)
+                    // One tile reads as one row, name and status together.
+                    .accessibilityElement(children: .combine)
                 }
             }
         }
@@ -460,6 +514,7 @@ struct DiscoverScreen: View {
         }
         .scrollDismissesKeyboard(.interactively)
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+        .searchRecents($search)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: CatalogBrowserRoute()) {
@@ -743,7 +798,7 @@ private struct SearchResultCard: View {
                 .clipShape(.rect(cornerRadius: 12))
                 .overlay {
                     RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(.white.opacity(0.18)).allowsHitTesting(false)
+                        .strokeBorder(Palette.border).allowsHitTesting(false)
                 }
                 .contentShape(.rect(cornerRadius: 12))
             }
@@ -768,8 +823,8 @@ private struct SearchResultCard: View {
                     ForEach(Array(genres.prefix(3)), id: \.self) { genre in
                         Text(genre).font(.caption).foregroundStyle(.white)
                             .padding(.horizontal, 8).padding(.vertical, 4)
-                            .background(.white.opacity(0.10), in: .capsule)
-                            .overlay { Capsule().strokeBorder(.white.opacity(0.38)) }
+                            .background(Palette.fill, in: .capsule)
+                            .overlay { Capsule().strokeBorder(Palette.border) }
                     }
                 }
             }
@@ -1040,6 +1095,7 @@ struct CatalogBrowser: View {
         }
         .navigationTitle("Browse catalog")
         .searchable(text: $search, prompt: "Search anime or manga")
+        .searchRecents($search)
         // Mode, season and year live in one toolbar menu: three rows of pickers
         // above the grid used a third of the first screen for controls.
         .toolbar {
@@ -1161,7 +1217,7 @@ struct FriendsScreen: View {
                             feedRow(item, title: title, name: name)
                         }
                         .padding(rowInsets)
-                        Divider().overlay(Color.white.opacity(0.20))
+                        Divider().overlay(Palette.hairline)
                             .padding(.horizontal, LedgerLayout.inset)
                     }
                     if store.hasMoreFriendActivity {
@@ -1174,10 +1230,13 @@ struct FriendsScreen: View {
                     {
                         FeedSkeleton().padding(rowInsets)
                     } else if store.activity.isEmpty, store.friendMessage == nil {
-                        ContentUnavailableView(
-                            "No friend activity yet",
-                            systemImage: "person.2",
-                            description: Text("Recent updates from your MyAnimeList friends appear here."))
+                        ContentUnavailableView {
+                            Label("No friend activity yet", systemImage: "person.2")
+                        } description: {
+                            Text("Recent updates from your MyAnimeList friends appear here.")
+                        } actions: {
+                            Button("Refresh") { Task { await store.loadFriends(reset: true) } }
+                        }
                         .padding(rowInsets)
                     }
                 }
@@ -1325,7 +1384,7 @@ private struct FeedSkeleton: View {
     var body: some View {
         VStack(spacing: 0) {
             ForEach(0..<4, id: \.self) { index in
-                if index > 0 { Divider().overlay(Color.white.opacity(0.12)) }
+                if index > 0 { Divider().overlay(Palette.hairline) }
                 HStack(alignment: .top, spacing: 10) {
                     SkeletonBlock(height: 46, width: 46, radius: 7)
                     VStack(alignment: .leading, spacing: 7) {

@@ -924,7 +924,10 @@ enum AniListCallback {
 /// One row of a signed-in account's AniList list, read-only: the media it
 /// names, the status and progress AniList holds, and its score out of 100.
 struct AniListEntry: Identifiable {
+    /// The AniList media id, which the row is identified by.
     let id: Int
+    /// The list entry's own id, which a delete asks for.
+    let entryID: Int
     let malID: Int?
     let kind: Kind
     let name: String
@@ -940,6 +943,7 @@ struct AniListEntry: Identifiable {
         let title: Fields? = media.read("title")
         guard let original = title?.string("romaji") ?? title?.string("english") else { return nil }
         self.id = id
+        entryID = fields.read("id") ?? 0
         malID = media.read("idMal")
         self.kind = kind
         self.original = original
@@ -1021,10 +1025,12 @@ private enum AniListKeychain {
 }
 
 /// The AniList section of Settings: one client that signs in through AniList's
-/// implicit grant and reads the account's lists through its GraphQL API. It is
-/// read-only — nothing here writes an entry back to AniList.
+/// implicit grant, reads the account's lists through its GraphQL API, and
+/// carries MyAnimeList changes over. It runs one way — an AniList change is
+/// never written back to MyAnimeList.
 @MainActor
 final class AniListClient: ObservableObject {
+    static let shared = AniListClient()
     static let graphql = URL(string: "https://graphql.anilist.co")!
     static let authorize = URL(string: "https://anilist.co/api/v2/oauth/authorize")!
 
@@ -1042,6 +1048,13 @@ final class AniListClient: ObservableObject {
     @Published private(set) var syncedAt: Date?
     /// The sign-in sheet, the same browser the MyAnimeList sign-in presents.
     private let browser = LoginBrowser()
+    /// The AniList media and list entry ids by `Title.id`, learned from a sync
+    /// or a lookup, so a change does not need a second request for them.
+    private var mediaIDs: [String: Int] = [:]
+    private var entryIDs: [String: Int] = [:]
+    /// The changes queued for AniList, so two quick swipes reach it in the
+    /// order they were made instead of racing each other.
+    private var pushQueue: Task<Void, Never>?
 
     /// The client ID the build ships with, read like the MyAnimeList one. It is
     /// public: a distributed build's Info.plist is readable.
@@ -1112,7 +1125,90 @@ final class AniListClient: ObservableObject {
         entries = []
         syncedAt = nil
         message = nil
+        mediaIDs = [:]
+        entryIDs = [:]
         AniListKeychain.remove()
+    }
+
+    /// Carries a MyAnimeList change to AniList, one change at a time so two
+    /// quick swipes arrive in the order they were made. This is the whole
+    /// sync: AniList is written to, never read back into MyAnimeList.
+    func push(_ title: Title, change: ListChange?) async {
+        let previous = pushQueue
+        let job = Task { [weak self] in
+            _ = await previous?.value
+            await self?.send(title, change: change)
+        }
+        pushQueue = job
+        _ = await job.value
+    }
+
+    private func send(_ title: Title, change: ListChange?) async {
+        guard let session, session.expiresAt > .now else { return }
+        do {
+            if let change {
+                guard let mediaID = try await mediaID(for: title, session: session) else { return }
+                let body: [String: Any] = [
+                    "query": """
+                    mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
+                      SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, score: $score) {
+                        id
+                      }
+                    }
+                    """,
+                    "variables": [
+                        "mediaId": mediaID,
+                        "status": Self.status(change.status, kind: title.kind),
+                        "progress": change.progress,
+                        "score": Double(change.rating * 10),
+                    ],
+                ]
+                _ = try await query(body, token: session.token)
+            } else if let entryID = entryIDs[title.id] {
+                let body: [String: Any] = [
+                    "query": "mutation ($id: Int) { DeleteMediaListEntry(id: $id) { deleted } }",
+                    "variables": ["id": entryID],
+                ]
+                _ = try await query(body, token: session.token)
+                entryIDs[title.id] = nil
+                mediaIDs[title.id] = nil
+            }
+            message = nil
+        } catch {
+            guard !Task.isCancelled else { return }
+            // The MyAnimeList change already landed; this only says the copy on
+            // AniList did not.
+            message = plainMessage(error, fallback: "Could not copy that change to AniList.")
+        }
+    }
+
+    /// The AniList media id for a title: the one a sync learned, or the answer
+    /// to a lookup by its MyAnimeList id.
+    private func mediaID(for title: Title, session: AniListSession) async throws -> Int? {
+        if let cached = mediaIDs[title.id] { return cached }
+        let body: [String: Any] = [
+            "query": "query ($malId: Int, $type: MediaType) { Media(idMal: $malId, type: $type) { id } }",
+            "variables": ["malId": title.malID, "type": title.kind == .anime ? "ANIME" : "MANGA"],
+        ]
+        let result = try await query(body, token: session.token)
+        guard let data: Fields = result.read("data"),
+            let media: Fields = data.read("Media"),
+            let id: Int = media.read("id")
+        else { return nil }
+        mediaIDs[title.id] = id
+        return id
+    }
+
+    /// The AniList status a MyAnimeList status maps to.
+    private static func status(_ value: String, kind: Kind) -> String {
+        switch value.lowercased().replacingOccurrences(of: "_", with: " ") {
+        case "watching", "reading": "CURRENT"
+        case "completed": "COMPLETED"
+        case "on hold": "PAUSED"
+        case "dropped": "DROPPED"
+        case "plan to watch", "plan to read": "PLANNING"
+        default: "CURRENT"
+        }
     }
 
     /// Brings the account's lists over, grouped by kind and status. The lists
@@ -1136,6 +1232,14 @@ final class AniListClient: ObservableObject {
             }
             guard !Task.isCancelled else { return }
             entries = loaded
+            mediaIDs = [:]
+            entryIDs = [:]
+            for entry in loaded {
+                guard let malID = entry.malID else { continue }
+                let key = "\(entry.kind.rawValue)-\(malID)"
+                mediaIDs[key] = entry.id
+                if entry.entryID > 0 { entryIDs[key] = entry.entryID }
+            }
             syncedAt = .now
         } catch {
             guard !Task.isCancelled else { return }
