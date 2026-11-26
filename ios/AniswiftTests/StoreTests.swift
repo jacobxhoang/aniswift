@@ -98,7 +98,7 @@ private final class StubAPI: APIClient {
 
     func clearCatalogCache() { hasCachedCatalog = false }
 
-    func interestStacks(for title: Title, page: Int) async throws -> Page<InterestStack> {
+    func interestStacks(for title: Title, page: Int, refresh: Bool) async throws -> Page<InterestStack> {
         Page(items: [], more: false)
     }
 

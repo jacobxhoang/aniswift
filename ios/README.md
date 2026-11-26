@@ -34,7 +34,9 @@ Friend profiles show public stats, recent list updates newest first, and favorit
 or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to
 refresh the profile. Every list, a friend's list, catalog results, the catalog browser, reviews and interest
 stacks refresh the same way. Lists, Discover and the Feed draw skeleton placeholders while their first page of
-content loads, then replace them with the real rows and shelves.
+content loads, then replace them with the real rows and shelves. An empty list offers the catalog; a section,
+page or profile that could not be loaded says so in a notice panel with a Retry — the same panel a title page
+uses for its **Showing saved data** note, so a failure reads the same everywhere.
 
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
@@ -153,7 +155,7 @@ Profile settings, under **Settings → Profile**, choose what the Profile tab dr
 ### AniList
 
 **Settings → AniList** signs this device in to AniList and shows its lists, read-only, beside MyAnimeList.
-Nothing is written back to AniList.
+Changes you make on MyAnimeList are carried over to AniList; nothing is read back from AniList.
 
 1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer) with the redirect URL
    `org.aniswift.ios://oauth`, and copy its client ID. The build already ships one (ending in **8162**), so you
@@ -165,7 +167,9 @@ Nothing is written back to AniList.
    without touching the MyAnimeList one.
 
 The lists are read through AniList's GraphQL API when the screen opens and on pull-to-refresh; the session is
-kept in the Keychain and lasts a year.
+kept in the Keychain and lasts a year. Scores cross on AniList's 100-point scale in both directions — a
+MyAnimeList 8 is written as 80 and read back as 8/10 — so the number means the same whatever scoring format the
+AniList account uses.
 
 ### About
 

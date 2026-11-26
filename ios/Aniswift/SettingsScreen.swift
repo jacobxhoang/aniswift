@@ -708,9 +708,9 @@ private struct SettingsIcon: View {
             .font(.footnote.weight(.semibold))
             .foregroundStyle(.tint)
             .frame(width: 28, height: 28)
-            .background(Palette.fill, in: .rect(cornerRadius: 7, style: .continuous))
+            .background(Palette.fill, in: .rect(cornerRadius: LedgerLayout.rowRadius, style: .continuous))
             .overlay {
-                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                RoundedRectangle(cornerRadius: LedgerLayout.rowRadius, style: .continuous)
                     .strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
@@ -767,10 +767,8 @@ struct AniListListsScreen: View {
                 if client.loading, client.entries.isEmpty {
                     ProgressView("Loading AniList lists").padding(.horizontal, LedgerLayout.inset)
                 } else if client.entries.isEmpty, let message = client.message {
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(message).foregroundStyle(.secondary)
-                        Button("Try again") { Task { await client.sync(refresh: true) } }
-                            .ledgerGlassButton()
+                    LedgerProblem(message: message, retryLabel: "Try again") {
+                        await client.sync(refresh: true)
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 } else if client.entries.isEmpty {

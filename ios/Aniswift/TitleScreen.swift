@@ -2,6 +2,16 @@ import Combine
 import Kingfisher
 import SwiftUI
 
+/// One number in a title's header: a label over its value. A statistic the
+/// provider has no value for is never drawn, so the row never shows a column of
+/// em dashes under the labels it does have.
+private struct HeaderStatistic: Identifiable {
+    let label: String
+    let value: String
+
+    var id: String { label }
+}
+
 struct TitleScreen: View {
     @EnvironmentObject private var store: Store
     @Environment(\.dynamicTypeSize) private var typeSize
@@ -23,6 +33,10 @@ struct TitleScreen: View {
     @State private var stacksUnavailable = false
     @State private var stacks: [InterestStack] = []
     @State private var stacksMore = false
+    /// Whether the stacks request has answered at all, so an empty answer draws
+    /// its own section instead of leaving a gap where the shelf should be.
+    @State private var stacksChecked = false
+    @State private var loadingStacks = false
     @State private var showingPoster = false
     @State private var summaryExpanded = false
     @State private var failure: String?
@@ -83,7 +97,7 @@ struct TitleScreen: View {
         if showsRelated, !related.isEmpty { relations }
         if showsCharacters { characterSection }
         if showsRecommendations { recommendationSection }
-        if !stacks.isEmpty || stacksUnavailable { stackSection }
+        if !stacks.isEmpty || stacksUnavailable || stacksChecked { stackSection }
         if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
         if title.kind == .anime { themeRows }
         if !friendRows.isEmpty { friends }
@@ -112,12 +126,26 @@ struct TitleScreen: View {
         }
     }
 
+    /// The stacks a title is in. A page that found none says so and offers the
+    /// press that asks again, instead of leaving a gap where the shelf belongs.
     @ViewBuilder
     private var stackSection: some View {
         if !stacks.isEmpty {
             interestStacks
-        } else if stacksUnavailable {
-            unavailableSection("Interest stacks") { await loadStacks() }
+        } else if loadingStacks {
+            block("Interest stacks") {
+                ProgressView("Loading interest stacks")
+            }
+        } else {
+            block("Interest stacks") {
+                LedgerProblem(
+                    message: stacksUnavailable
+                        ? "Could not load interest stacks."
+                        : "No interest stacks for this title."
+                ) {
+                    await loadStacks(refresh: true)
+                }
+            }
         }
     }
 
@@ -127,10 +155,7 @@ struct TitleScreen: View {
         _ heading: String, retry: @escaping () async -> Void
     ) -> some View {
         block(heading) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Could not load \(heading.lowercased()).").foregroundStyle(.secondary)
-                Button("Retry") { Task { await retry() } }.ledgerGlassButton()
-            }
+            LedgerProblem(message: "Could not load \(heading.lowercased()).") { await retry() }
         }
     }
     private var showsHeaderPoster: Bool { shows(DetailSection.headerPoster) }
@@ -170,8 +195,7 @@ struct TitleScreen: View {
                         SavedDataNote(savedAt: savedAt, retry: { await load() })
                     }
                     if let failure {
-                        Text(failure).foregroundStyle(.secondary)
-                        Button("Reload details") { Task { await load() } }
+                        LedgerProblem(message: failure, retryLabel: "Try again") { await load() }
                     }
                     if let description = record?.string("synopsis") {
                         block("Summary") { summary(description) }
@@ -296,14 +320,14 @@ struct TitleScreen: View {
                 Button { showingPoster = true } label: {
                     Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
                         .frame(width: 144, height: 208)
-                        .clipShape(.rect(cornerRadius: 10))
+                        .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                         .overlay {
-                            RoundedRectangle(cornerRadius: 10).strokeBorder(Palette.hairline)
+                            RoundedRectangle(cornerRadius: LedgerLayout.panelRadius).strokeBorder(Palette.hairline)
                                 .allowsHitTesting(false)
                         }
-                        .contentShape(.rect(cornerRadius: 10))
+                        .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LedgerTileButtonStyle())
                 .padding(.bottom, 4)
                 .accessibilityLabel("Poster")
                 .accessibilityHint("Shows the poster full screen")
@@ -349,17 +373,11 @@ struct TitleScreen: View {
                         .multilineTextAlignment(.center)
                 }
             }
-            if showsHeaderScore || showsHeaderRank || showsHeaderPopularity {
+            let statistics = headerStatistics
+            if !statistics.isEmpty {
                 HStack(alignment: .top, spacing: 6) {
-                    let score = current.score.flatMap {
-                        $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil
-                    }
-                    let rank: Int? = record?.read("rank")
-                    let popularity: Int? = record?.read("popularity")
-                    if showsHeaderScore { statistic("Average score", score) }
-                    if showsHeaderRank { statistic("MAL rank", rank.flatMap { $0 > 0 ? "#\($0)" : nil }) }
-                    if showsHeaderPopularity {
-                        statistic("Popularity", popularity.flatMap { $0 > 0 ? "#\($0)" : nil })
+                    ForEach(statistics) { item in
+                        self.statistic(item.label, item.value)
                     }
                 }
                 .frame(maxWidth: 480)
@@ -371,10 +389,31 @@ struct TitleScreen: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func statistic(_ label: String, _ value: String?) -> some View {
+    /// The header's numbers, each only when it has a value: a column of em
+    /// dashes under three labels says less than the numbers it does have.
+    private var headerStatistics: [HeaderStatistic] {
+        let score = current.score.flatMap {
+            $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil
+        }
+        let rank: Int? = record?.read("rank")
+        let popularity: Int? = record?.read("popularity")
+        var statistics: [HeaderStatistic] = []
+        if showsHeaderScore, let score {
+            statistics.append(HeaderStatistic(label: "Average score", value: score))
+        }
+        if showsHeaderRank, let rank, rank > 0 {
+            statistics.append(HeaderStatistic(label: "MAL rank", value: "#\(rank)"))
+        }
+        if showsHeaderPopularity, let popularity, popularity > 0 {
+            statistics.append(HeaderStatistic(label: "Popularity", value: "#\(popularity)"))
+        }
+        return statistics
+    }
+
+    private func statistic(_ label: String, _ value: String) -> some View {
         VStack(spacing: 4) {
             Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            Text(value ?? "—").font(.title3.bold().monospacedDigit())
+            Text(value).font(.title3.bold().monospacedDigit())
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
@@ -417,12 +456,12 @@ struct TitleScreen: View {
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, minHeight: 46)
-            .background(Palette.surface, in: .rect(cornerRadius: 9))
+            .background(Palette.surface, in: .rect(cornerRadius: LedgerLayout.panelRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 9).strokeBorder(Palette.hairline)
+                RoundedRectangle(cornerRadius: LedgerLayout.panelRadius).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
-            .contentShape(.rect(cornerRadius: 9))
+            .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
         }
         .buttonStyle(.plain)
         .opacity(changingList ? 0.55 : 1)
@@ -615,7 +654,10 @@ struct TitleScreen: View {
 
     private func shelfCover(_ title: Title, note: String?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
-            CoverTile(title: title, showsScore: false, loadMissingImage: note != nil,
+            // A relation arrives in the page's own payload, which is the only
+            // place some of them carry a poster: a row without one asks for the
+            // title's own copy rather than sitting blank.
+            CoverTile(title: title, showsScore: false, loadMissingImage: true,
                       reservesCaptionSpace: false, posterWidth: LedgerLayout.detailPosterWidth)
             if let note {
                 Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -660,7 +702,7 @@ struct TitleScreen: View {
                         Image(systemName: "play.fill").font(.title2)
                             .padding(16).ledgerGlassBadge()
                     }
-                    .clipShape(.rect(cornerRadius: 12))
+                    .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
             }.accessibilityLabel("Play trailer")
         }
     }
@@ -707,9 +749,9 @@ struct TitleScreen: View {
                     }
                 }
             }
-            .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 12))
+            .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: LedgerLayout.panelRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 12)
+                RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
                     .strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
@@ -747,11 +789,8 @@ struct TitleScreen: View {
             } else if failed {
                 // The reviews are retried here rather than through View All, so a
                 // failed page says so and can recover where it is.
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Could not load reviews.").foregroundStyle(.secondary)
-                    Button("Retry") { Task { await loadReviews() } }.ledgerGlassButton()
-                }
-                .padding(.top, 4)
+                LedgerProblem(message: "Could not load reviews.") { await loadReviews() }
+                    .padding(.top, 4)
             }
         }
         .padding(.top, 12)
@@ -798,7 +837,6 @@ struct TitleScreen: View {
         let belowSummary = showsSectionsBelowSummary
         async let detail = store.api.catalog(path + "/full", [], refresh: false)
         async let reviewData = loadReviewsIfWanted(belowSummary)
-        async let stackData = loadStacksIfWanted(belowSummary)
         async let castData = loadSection(belowSummary && showsCharacters, charactersPath)
         async let recsData = loadSection(belowSummary && showsRecommendations, recommendationsPath)
         do {
@@ -826,6 +864,10 @@ struct TitleScreen: View {
                 }
             }
         }
+        // The stacks are the one section only the catalog source serves, and
+        // they used to be asked for beside the page's own payload: two requests
+        // at once, the stacks one losing its turn. They follow it instead.
+        async let stackData = loadStacksIfWanted(belowSummary)
         // The reviews are awaited before the characters so a slow cast request
         // cannot hold them off the page, and each section is published as it lands.
         let review = await reviewData
@@ -850,12 +892,16 @@ struct TitleScreen: View {
             recommendationsUnavailable = true
         }
         let stacksPage = await stackData
+        if Task.isCancelled { return }
         if let page = stacksPage.page {
             stacks = page.items
             stacksMore = page.more
         } else if stacksPage.failed {
             stacksUnavailable = true
         }
+        // Only a page that asked has an answer to show: with the sections under
+        // the summary hidden, the page does not claim there are no stacks.
+        if belowSummary { stacksChecked = true }
     }
 
     /// The reviews, asked for only while the sections below the summary show,
@@ -870,13 +916,14 @@ struct TitleScreen: View {
     }
 
     /// The interest stacks, asked for only while those sections show, with a
-    /// failure kept apart so the shelf can offer a retry.
+    /// failure kept apart so the shelf can offer a retry. A retry is asked for
+    /// again from the network rather than from a saved answer.
     private func loadStacksIfWanted(
-        _ wanted: Bool
+        _ wanted: Bool, refresh: Bool = false
     ) async -> (page: Page<InterestStack>?, failed: Bool) {
         guard wanted else { return (nil, false) }
         do {
-            return (try await store.api.interestStacks(for: title, page: 1), false)
+            return (try await store.api.interestStacks(for: title, page: 1, refresh: refresh), false)
         } catch {
             return (nil, !Task.isCancelled)
         }
@@ -949,8 +996,12 @@ struct TitleScreen: View {
         }
     }
 
-    private func loadStacks() async {
-        let result = await loadStacksIfWanted(true)
+    private func loadStacks(refresh: Bool = false) async {
+        guard !loadingStacks else { return }
+        loadingStacks = true
+        defer { loadingStacks = false }
+        let result = await loadStacksIfWanted(true, refresh: refresh)
+        if Task.isCancelled { return }
         if let page = result.page {
             stacks = page.items
             stacksMore = page.more
@@ -958,6 +1009,7 @@ struct TitleScreen: View {
         } else if result.failed {
             stacksUnavailable = true
         }
+        stacksChecked = true
     }
 
     private func loadFriendBatch() async {
@@ -1145,7 +1197,7 @@ private struct StackCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .ledgerPanel(radius: 12)
-        .contentShape(.rect(cornerRadius: 12))
+        .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
         .accessibilityElement(children: .combine)
     }
 }
@@ -1186,8 +1238,7 @@ struct TitleCollectionScreen: View {
                 ForEach(route.titles) { title in
                     VStack(alignment: .leading, spacing: 3) {
                         CoverTile(
-                            title: title, showsScore: route.showsScore,
-                            loadMissingImage: route.notes[title.id] != nil,
+                            title: title, showsScore: route.showsScore, loadMissingImage: true,
                             reservesCaptionSpace: false, posterWidth: LedgerLayout.detailPosterWidth)
                         if let note = route.notes[title.id] {
                             Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(2)
@@ -1237,10 +1288,7 @@ struct StackScreen: View {
                 } else if loading {
                     ProgressView().frame(maxWidth: .infinity).padding(.top, 12)
                 } else if let failure {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(failure).foregroundStyle(.secondary)
-                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
-                    }
+                    LedgerProblem(message: failure) { await load() }
                 }
             }
             .padding(LedgerLayout.inset)
@@ -1402,7 +1450,7 @@ private struct StackEntryRow: View {
                             .font(.caption2.monospacedDigit())
                             .padding(.horizontal, 5)
                             .padding(.vertical, 2)
-                            .background(Color.black.opacity(0.6), in: .rect(cornerRadius: 4))
+                            .background(Color.black.opacity(0.6), in: .rect(cornerRadius: LedgerLayout.rowRadius))
                             .padding(4)
                     }
                 }
@@ -1467,11 +1515,8 @@ struct TitleStacksScreen: View {
                 }
                 if let nextPage {
                     if failed {
-                        VStack(spacing: 8) {
-                            Text("Could not load more stacks.").foregroundStyle(.secondary)
-                            Button("Retry") { Task { await load(nextPage) } }.ledgerGlassButton()
-                        }
-                        .frame(maxWidth: .infinity)
+                        LedgerProblem(message: "Could not load more stacks.") { await load(nextPage) }
+                            .frame(maxWidth: .infinity)
                     } else {
                         NextPageIndicator(label: "Loading more stacks", page: nextPage) {
                             await load(nextPage)
@@ -1498,7 +1543,7 @@ struct TitleStacksScreen: View {
         loadingPage = page
         defer { loadingPage = nil }
         do {
-            let result = try await store.api.interestStacks(for: title, page: page)
+            let result = try await store.api.interestStacks(for: title, page: page, refresh: false)
             guard !Task.isCancelled else { return }
             stacks = unique(stacks + result.items)
             nextPage = result.more ? page + 1 : nil
@@ -1550,11 +1595,8 @@ struct TitleReviewsScreen: View {
                 }
 
                 if failed {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Could not load reviews.").foregroundStyle(.secondary)
-                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
-                    }
-                    .padding(.top, 14)
+                    LedgerProblem(message: "Could not load reviews.") { await load() }
+                        .padding(.top, 14)
                 } else if let nextPage {
                     NextPageIndicator(label: "Loading reviews", page: nextPage) { await load() }
                 } else if reviews.isEmpty {
@@ -1942,8 +1984,7 @@ struct ListEditor: View {
     private var preparation: some View {
         VStack(spacing: 12) {
             if let error, !loading {
-                Text(error).foregroundStyle(.secondary)
-                Button("Retry") { Task { await prepare() } }.ledgerGlassButton()
+                LedgerProblem(message: error) { await prepare() }
             } else {
                 ProgressView("Loading list entry")
             }

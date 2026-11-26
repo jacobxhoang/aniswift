@@ -339,14 +339,42 @@ struct SavedDataNote: View {
                     .disabled(isBusy)
             }
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: 10))
-        .overlay {
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(Palette.hairline)
-                .allowsHitTesting(false)
+        .ledgerNoticePanel()
+    }
+}
+
+/// A failure a screen can recover from: what could not be loaded, and the one
+/// control that asks again. It wears the same notice panel as `SavedDataNote`,
+/// so the two conditions a screen reports — a copy kept while the provider is
+/// down, and a request that failed — read as one family instead of a grey
+/// sentence floating above a pill.
+struct LedgerProblem: View {
+    let message: String
+    var retryLabel = "Retry"
+    var isBusy = false
+    var retry: (() async -> Void)? = nil
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text(message)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            if let retry {
+                Button(retryLabel) { Task { await retry() } }
+                    .font(.footnote.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .disabled(isBusy)
+            }
         }
+        .ledgerNoticePanel()
     }
 }
 
@@ -397,6 +425,20 @@ extension View {
                     .allowsHitTesting(false)
             }
     }
+
+    /// The panel behind a notice: the copy a screen keeps while the provider is
+    /// down, or a section that could not be loaded. One surface, so the two
+    /// conditions every screen reports read as one family.
+    func ledgerNoticePanel() -> some View {
+        padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: LedgerLayout.panelRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
+                    .strokeBorder(Palette.hairline)
+                    .allowsHitTesting(false)
+            }
+    }
 }
 
 private struct LedgerPrimaryButtonStyle: ButtonStyle {
@@ -436,12 +478,16 @@ struct Art: View {
     @Environment(\.displayScale) private var displayScale
     let url: URL?
     var symbol = "film"
+    /// Called once the picture cannot be loaded, so the row that owns it can ask
+    /// for the title's current copy: a poster a bundled payload carried can be
+    /// a URL that no longer answers while the title itself is fine.
+    var onFailure: (() -> Void)? = nil
 
     var body: some View {
         GeometryReader { proxy in
             KFImage.url(url)
                 .placeholder { placeholder }
-                .onFailureView { placeholder }
+                .onFailureView { failurePlaceholder }
                 .cancelOnDisappear(true)
                 .setProcessor(processor(proxy.size))
                 .fade(duration: reduceMotion ? 0 : 0.18)
@@ -451,6 +497,12 @@ struct Art: View {
                 .clipped()
         }
         .accessibilityHidden(true)
+    }
+
+    /// The state a picture that could not be loaded leaves behind. It says so to
+    /// the row on the one frame it appears, and the row resolves the title once.
+    private var failurePlaceholder: some View {
+        placeholder.task { onFailure?() }
     }
 
     /// Decode to the size the image is drawn at: a full poster is several times
@@ -505,10 +557,15 @@ struct PreferredTitle<Content: View>: View {
     /// Whether that batch asked for this title too, so a name it did not return
     /// means there is no English title rather than one worth another request.
     var nameSettled = false
+    /// A poster that failed to load is repaired once, by asking the API for the
+    /// title's current copy: a bundled relation can carry a URL that no longer
+    /// answers while the title it names is fine.
+    var repairsMissingPoster = false
     var onEnglishName: ((Title, String) -> Void)? = nil
     @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
     @State private var attemptedID: String?
+    @State private var repairedPoster = false
 
     private var current: Title {
         let saved = store.entries[title.kind]?[title.id]?.title
@@ -527,17 +584,26 @@ struct PreferredTitle<Content: View>: View {
         let name =
             knownName
             ?? (waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
+        let request = PreferredLookup(id: title.id, poster: repairsMissingPoster)
         content(item, name)
             .onChange(of: item.englishName, initial: true) { _, english in
                 if let english { onEnglishName?(item, english) }
             }
-            .task(id: title) {
-                guard attemptedID != title.id else { return }
+            .task(id: request) {
                 // A settled name still leaves the poster to fetch, so either one
-                // can justify the lookup.
-                let needsName = item.needsTitleLookup && !nameSettled && !store.api.isNameResolved(title)
-                let needsImage = loadMissingImage && item.image == nil
-                guard needsName || needsImage else { return }
+                // can justify the lookup, and a poster that failed to download
+                // is worth one ask of its own. A title that answered with no
+                // poster at all is not asked twice.
+                let needsName =
+                    item.needsTitleLookup && !nameSettled && !store.api.isNameResolved(title)
+                    && attemptedID != title.id
+                let needsPoster =
+                    loadMissingImage
+                    && (item.image == nil
+                        ? attemptedID != title.id
+                        : repairsMissingPoster && !repairedPoster)
+                guard needsName || needsPoster else { return }
+                if needsPoster, item.image != nil { repairedPoster = true }
                 let result = await store.api.resolveTitle(title)
                 if !Task.isCancelled {
                     resolved = result
@@ -547,16 +613,27 @@ struct PreferredTitle<Content: View>: View {
     }
 }
 
+/// What a row is still waiting on: its name, and whether its poster failed to
+/// load. The row re-asks only when one of those changes, and never because its
+/// own repair moved, which would cancel the repair it just started.
+private struct PreferredLookup: Hashable {
+    let id: String
+    let poster: Bool
+}
+
 struct PosterArt: View {
     let url: URL?
     let symbol: String
     var width: CGFloat?
+    var onFailure: (() -> Void)? = nil
 
     var body: some View {
         if let width {
-            Art(url: url, symbol: symbol).frame(width: width, height: width / LedgerLayout.posterRatio)
+            Art(url: url, symbol: symbol, onFailure: onFailure)
+                .frame(width: width, height: width / LedgerLayout.posterRatio)
         } else {
-            Art(url: url, symbol: symbol).aspectRatio(LedgerLayout.posterRatio, contentMode: .fit)
+            Art(url: url, symbol: symbol, onFailure: onFailure)
+                .aspectRatio(LedgerLayout.posterRatio, contentMode: .fit)
         }
     }
 }
@@ -568,9 +645,14 @@ struct CoverTile: View {
     var loadMissingImage = false
     var reservesCaptionSpace = true
     var posterWidth: CGFloat?
+    /// Whether a poster that failed to download is asked for again, so a stale
+    /// URL from a bundled payload does not leave the tile blank for good.
+    @State private var posterFailed = false
 
     var body: some View {
-        PreferredTitle(title: title, loadMissingImage: loadMissingImage) { item, name in
+        PreferredTitle(
+            title: title, loadMissingImage: loadMissingImage, repairsMissingPoster: posterFailed
+        ) { item, name in
             tile(item, name: name)
         }
     }
@@ -578,22 +660,25 @@ struct CoverTile: View {
     private func tile(_ title: Title, name: String) -> some View {
         NavigationLink(value: title) {
             VStack(alignment: .leading, spacing: 6) {
-                PosterArt(url: title.image, symbol: title.kind == .anime ? "film" : "book", width: posterWidth)
-                    .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
-                            .strokeBorder(Palette.hairline).allowsHitTesting(false)
+                PosterArt(
+                    url: title.image, symbol: title.kind == .anime ? "film" : "book", width: posterWidth,
+                    onFailure: { posterFailed = true }
+                )
+                .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
+                .overlay {
+                    RoundedRectangle(cornerRadius: LedgerLayout.posterRadius)
+                        .strokeBorder(Palette.hairline).allowsHitTesting(false)
+                }
+                .overlay(alignment: .topTrailing) {
+                    if showsScore, let score = title.score, score > 0 {
+                        Text(score.formatted(.number.precision(.fractionLength(2))))
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .padding(.horizontal, 7).padding(.vertical, 5)
+                            .ledgerGlassBadge().padding(6)
+                            .accessibilityLabel(
+                                "Score \(score.formatted(.number.precision(.fractionLength(2)))) out of 10")
                     }
-                    .overlay(alignment: .topTrailing) {
-                        if showsScore, let score = title.score, score > 0 {
-                            Text(score.formatted(.number.precision(.fractionLength(2))))
-                                .font(.caption.monospacedDigit().weight(.semibold))
-                                .padding(.horizontal, 7).padding(.vertical, 5)
-                                .ledgerGlassBadge().padding(6)
-                                .accessibilityLabel(
-                                    "Score \(score.formatted(.number.precision(.fractionLength(2)))) out of 10")
-                        }
-                    }
+                }
                 Text(name)
                     .font(reservesCaptionSpace ? .subheadline.weight(.medium) : .subheadline)
                     .lineLimit(2, reservesSpace: reservesCaptionSpace)
@@ -779,8 +864,10 @@ struct AccountScreen: View {
                     } else if loadingProfile && !hasSavedProfile {
                         ProgressView("Loading public profile").padding(.horizontal, LedgerLayout.inset)
                     } else if profileUnavailable && !loadingProfile {
-                        Button("Retry loading profile") { Task { await loadProfile(refresh: true) } }
-                            .padding(.horizontal, LedgerLayout.inset)
+                        LedgerProblem(message: "Your public profile could not be loaded.", retryLabel: "Try again") {
+                            await loadProfile(refresh: true)
+                        }
+                        .padding(.horizontal, LedgerLayout.inset)
                     }
                     if preferences.shows(ProfileSection.friends) { friendsShelf }
                     ProfileStatistics(
@@ -964,9 +1051,8 @@ struct FriendProfileScreen: View {
                 } else if loading && !hasSavedProfile {
                     ProgressView("Loading profile").padding(.horizontal, LedgerLayout.inset)
                 } else if unavailable && !loading {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Some public profile details are unavailable.").foregroundStyle(.secondary)
-                        Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
+                    LedgerProblem(message: "Some public profile details are unavailable.") {
+                        await load(refresh: true)
                     }
                     .padding(.horizontal, LedgerLayout.inset)
                 }
@@ -1023,7 +1109,7 @@ struct FriendProfileScreen: View {
                                 HStack(spacing: 12) {
                                     Art(url: title.image, symbol: title.kind == .anime ? "film" : "book")
                                         .frame(width: 40, height: 56)
-                                        .clipShape(.rect(cornerRadius: 5))
+                                        .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                                     VStack(alignment: .leading, spacing: 4) {
                                         Text(name).font(.subheadline.weight(.semibold))
                                         Text(update.activityDescription)
@@ -1050,10 +1136,9 @@ struct FriendProfileScreen: View {
             }
 
             if updatesUnavailable {
-                Text("Recent updates are unavailable.").foregroundStyle(.secondary)
-                Button("Retry recent updates") { Task { await loadUpdates(refresh: true) } }
-                    .ledgerGlassButton()
-                    .disabled(loadingUpdates)
+                LedgerProblem(message: "Recent updates are unavailable.", isBusy: loadingUpdates) {
+                    await loadUpdates(refresh: true)
+                }
             }
         }
         .padding(.horizontal, LedgerLayout.inset)
@@ -1125,14 +1210,12 @@ private struct FriendMediaListScreen: View {
             }
 
             if let errorMessage {
-                VStack(alignment: .leading, spacing: 12) {
-                    Text(errorMessage).foregroundStyle(.secondary)
-                    if !isPrivate {
-                        Button("Retry") { Task { await load() } }.ledgerGlassButton()
-                    }
-                }
-                .padding(.vertical, 12)
-                .listRowBackground(Color.clear)
+                // A private list cannot be asked again, so its notice names the
+                // failure without offering a control that would fail too.
+                let retry: (() async -> Void)? = isPrivate ? nil : { await load() }
+                LedgerProblem(message: errorMessage, retry: retry)
+                    .padding(.vertical, 12)
+                    .listRowBackground(Color.clear)
             } else if nextPage != nil {
                 VStack(spacing: 6) {
                     ProgressView()
@@ -1296,7 +1379,7 @@ private struct ProfileStatsHeader: View {
 
     private var avatar: some View {
         Art(url: image, symbol: "person.fill").frame(width: 88, height: 88)
-            .clipShape(.rect(cornerRadius: 12))
+            .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
     }
 
     private func profileMetrics(_ anime: Int?, _ manga: Int?, _ days: Double?, _ chapters: Int?) -> some View {
@@ -1384,7 +1467,7 @@ private struct ProfileStatisticsSection: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: 26, style: .continuous)
+        let shape = RoundedRectangle(cornerRadius: LedgerLayout.sheetRadius, style: .continuous)
         if #available(iOS 26.0, *) {
             disclosure.glassEffect(.regular, in: shape)
         } else {
@@ -1510,7 +1593,7 @@ private struct ProfileStatisticsSection: View {
                             .frame(width: 30, height: 30)
                             .background(
                                 status.color.opacity(0.16),
-                                in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                in: RoundedRectangle(cornerRadius: LedgerLayout.rowRadius, style: .continuous)
                             )
                             .accessibilityHidden(true)
                         Text(status.label)
@@ -1614,7 +1697,6 @@ struct AboutScreen: View {
     }
 }
 
-
 /// A tab bar on iPhone and the sidebar iPadOS 18 puts beside it, so the five
 /// destinations keep their place on a large screen and can be reordered the way
 /// the system offers.
@@ -1627,7 +1709,6 @@ private struct LedgerSidebarTabs: ViewModifier {
         }
     }
 }
-
 
 /// The searches kept on this device, so a search field offers them instead of
 /// opening blank, and the last one is a single tap away.

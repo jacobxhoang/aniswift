@@ -126,7 +126,7 @@ protocol APIClient: AnyObject {
     func savedDetail(_ title: Title) -> (fields: Fields, savedAt: Date)?
     func clearCatalogCache()
 
-    func interestStacks(for title: Title, page: Int) async throws -> Page<InterestStack>
+    func interestStacks(for title: Title, page: Int, refresh: Bool) async throws -> Page<InterestStack>
     func stackDetail(_ id: Int) async throws -> StackDetail
     func titleReviews(_ title: Title, page: Int) async throws -> Page<TitleReview>
 }
@@ -798,11 +798,22 @@ final class API: APIClient {
 }
 
 extension API {
-    /// Stacks that contain this title. Tenrai answers 25 per page.
-    func interestStacks(for title: Title, page: Int) async throws -> Page<InterestStack> {
-        let response = try await catalog(
-            "\(title.kind.rawValue)/\(title.malID)/stacks", [URLQueryItem(name: "page", value: String(page))],
-            refresh: false)
+    /// Stacks that contain this title. Tenrai answers 25 per page, and it is the
+    /// only source that serves this path, so a first answer that failed is
+    /// asked again rather than reported as a failure the reader has to clear.
+    func interestStacks(
+        for title: Title, page: Int, refresh: Bool = false
+    ) async throws -> Page<InterestStack> {
+        let path = "\(title.kind.rawValue)/\(title.malID)/stacks"
+        let query = [URLQueryItem(name: "page", value: String(page))]
+        let response: Fields
+        do {
+            response = try await catalog(path, query, refresh: refresh)
+        } catch {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(350))
+            response = try await catalog(path, query, refresh: true)
+        }
         let rows: [Fields] = response.read("data") ?? []
         let pagination: Fields? = response.read("pagination")
         let more: Bool = pagination?.read("has_next_page", "hasNextPage") ?? false
@@ -936,7 +947,7 @@ struct AniListEntry: Identifiable {
     let status: String
     let progress: Int
     let total: Int?
-    let score: Int
+    let score: Double
 
     init?(_ fields: Fields, kind: Kind) {
         guard let media: Fields = fields.read("media"), let id: Int = media.read("id") else { return nil }
@@ -981,8 +992,13 @@ struct AniListEntry: Identifiable {
         return progress > 0 ? "\(progress)" : nil
     }
 
-    /// AniList scores out of 100, so it reads on the app's 10-point scale.
-    var scoreLabel: String? { score > 0 ? "★ \(score / 10)/10" : nil }
+    /// A 100-point AniList score read on the app's 10-point scale, decimals
+    /// kept: 85 is the 8.5 a reader scored, not an 8.
+    var scoreLabel: String? {
+        guard score > 0 else { return nil }
+        let value = (score / 10).formatted(.number.precision(.fractionLength(0...1)))
+        return "★ \(value)/10"
+    }
 }
 
 /// The AniList session, in the Keychain under the app's service: it is read
@@ -1149,9 +1165,13 @@ final class AniListClient: ObservableObject {
             if let change {
                 guard let mediaID = try await mediaID(for: title, session: session) else { return }
                 let body: [String: Any] = [
+                    // scoreRaw is the 100-point score every account reads the
+                    // same way: the plain `score` argument is taken in the
+                    // user's own scoring format, so a MAL 8 sent as 80 became
+                    // a 10/10 on every account not already on 100 points.
                     "query": """
-                    mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
-                      SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, score: $score) {
+                    mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $scoreRaw: Int) {
+                      SaveMediaListEntry(mediaId: $mediaId, status: $status, progress: $progress, scoreRaw: $scoreRaw) {
                         id
                       }
                     }
@@ -1160,7 +1180,7 @@ final class AniListClient: ObservableObject {
                         "mediaId": mediaID,
                         "status": Self.status(change.status, kind: title.kind),
                         "progress": change.progress,
-                        "score": Double(change.rating * 10),
+                        "scoreRaw": change.rating * 10,
                     ],
                 ]
                 _ = try await query(body, token: session.token)
@@ -1270,6 +1290,8 @@ final class AniListClient: ObservableObject {
     }
 
     private func list(_ kind: Kind, session: AniListSession) async throws -> [AniListEntry] {
+        // The score is asked for on the 100-point scale, whatever format the
+        // account itself scores in, so every row reads the same way.
         let body: [String: Any] = [
             "query": """
             query ($id: Int, $type: MediaType) {
@@ -1278,7 +1300,7 @@ final class AniListClient: ObservableObject {
                   entries {
                     status
                     progress
-                    score
+                    score(format: POINT_100)
                     media {
                       id
                       idMal

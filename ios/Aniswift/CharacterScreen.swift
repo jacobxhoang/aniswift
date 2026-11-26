@@ -170,11 +170,8 @@ struct CharacterScreen: View {
                         appearanceShelf(kind)
                     }
                 } else if failed {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Character details are unavailable.").foregroundStyle(.secondary)
-                        Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
-                    }
-                    .padding(.horizontal, LedgerLayout.inset)
+                    LedgerProblem(message: "Character details are unavailable.") { await load(refresh: true) }
+                        .padding(.horizontal, LedgerLayout.inset)
                 } else {
                     ProgressView("Loading character").padding(.horizontal, LedgerLayout.inset)
                 }
@@ -210,9 +207,9 @@ struct CharacterScreen: View {
     private var portrait: some View {
         Art(url: profile?.image ?? character.image, symbol: "person.fill")
             .frame(width: 134, height: 196)
-            .clipShape(.rect(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.hairline)
+                RoundedRectangle(cornerRadius: LedgerLayout.posterRadius).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
     }
@@ -341,11 +338,8 @@ struct PersonScreen: View {
                     if !roles.isEmpty { roleList }
                     ForEach(Kind.allCases) { kind in creditList(kind) }
                 } else if failed {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Person details are unavailable.").foregroundStyle(.secondary)
-                        Button("Retry") { Task { await load(refresh: true) } }.ledgerGlassButton()
-                    }
-                    .padding(.horizontal, LedgerLayout.inset)
+                    LedgerProblem(message: "Person details are unavailable.") { await load(refresh: true) }
+                        .padding(.horizontal, LedgerLayout.inset)
                 } else {
                     ProgressView("Loading person").padding(.horizontal, LedgerLayout.inset)
                 }
@@ -381,9 +375,9 @@ struct PersonScreen: View {
     private var portrait: some View {
         Art(url: profile?.image ?? person.image, symbol: "person.fill")
             .frame(width: 134, height: 196)
-            .clipShape(.rect(cornerRadius: 8))
+            .clipShape(.rect(cornerRadius: LedgerLayout.posterRadius))
             .overlay {
-                RoundedRectangle(cornerRadius: 8).strokeBorder(Palette.hairline)
+                RoundedRectangle(cornerRadius: LedgerLayout.posterRadius).strokeBorder(Palette.hairline)
                     .allowsHitTesting(false)
             }
     }

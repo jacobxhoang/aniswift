@@ -111,24 +111,27 @@ struct ListsScreen: View {
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
             } else if store.lists[kind] == nil, let failure = store.listFailures[kind] {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(failure).foregroundStyle(.secondary)
-                    Button("Retry") { Task { await store.loadLists(force: true) } }
-                        .ledgerGlassButton()
-                }
-                .padding(.vertical, 12)
-                .listRowBackground(Color.clear)
-                .listRowSeparator(.hidden)
+                LedgerProblem(message: failure) { await store.loadLists(force: true) }
+                    .padding(.vertical, 12)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             } else if store.lists[kind]?.isEmpty == true, searchTerm.isEmpty, store.nextList[kind] == nil,
                 !store.refreshingLists.contains(kind)
             {
                 // An empty state belongs in the page, not in a row: inside a List
-                // it centres against the row's insets instead of the screen.
-                VStack(spacing: 6) {
+                // it centres against the row's insets instead of the screen. The
+                // step out of it is the catalog, where a title is added.
+                VStack(spacing: 10) {
                     Label("No \(kind.label.lowercased()) yet", systemImage: kind == .anime ? "tv" : "books.vertical")
                         .font(.headline)
                     Text("Titles you add from Discover or a title page appear here.")
                         .foregroundStyle(.secondary)
+                    NavigationLink(value: CatalogBrowserRoute()) {
+                        Label("Browse catalog", systemImage: "square.grid.2x2")
+                    }
+                    .font(.subheadline.weight(.semibold))
+                    .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
                 }
                 .frame(maxWidth: .infinity)
                 .multilineTextAlignment(.center)
@@ -155,11 +158,9 @@ struct ListsScreen: View {
                 }
                 if let page = store.nextList[kind] {
                     if let listPageError {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(listPageError).foregroundStyle(.secondary)
-                            Button("Retry") { Task { await loadListPage(page) } }
-                        }
-                        .listRowBackground(Color.clear)
+                        LedgerProblem(message: listPageError) { await loadListPage(page) }
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     } else if !store.refreshingLists.contains(kind) {
                         NextPageIndicator(label: "Loading entries", page: page) { await loadListPage(page) }
                             .listRowBackground(Color.clear)
@@ -251,7 +252,7 @@ struct ListsScreen: View {
             HStack(alignment: .top, spacing: 8) {
                 Art(url: item.title.image, symbol: kind == .anime ? "film" : "book")
                     .frame(width: 80, height: 116)
-                    .clipShape(.rect(cornerRadius: 7))
+                    .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(displayName(item.title))
                         .font(.body)
@@ -545,18 +546,22 @@ struct DiscoverScreen: View {
                     }
                     if loading {
                         ProgressView("Loading Discover").frame(maxWidth: .infinity)
-                    } else {
-                        if shelves.values.allSatisfy(\.isEmpty) {
-                            VStack(spacing: 12) {
-                                Label("Catalog unavailable", systemImage: "safari").foregroundStyle(.secondary)
-                                Button("Retry") { Task { await loadShelves(refresh: true) } }.ledgerGlassButton()
-                            }
-                            .frame(maxWidth: .infinity)
-                        } else if !failedShelves.isEmpty {
-                            Button("Retry unavailable sections") { Task { await loadShelves() } }
-                                .ledgerGlassButton()
-                                .frame(maxWidth: .infinity)
+                    } else if shelves.values.allSatisfy(\.isEmpty) {
+                        ContentUnavailableView {
+                            Label("Catalog unavailable", systemImage: "safari")
+                        } description: {
+                            Text("Discover could not reach the catalog. Check your connection and try again.")
+                        } actions: {
+                            Button("Retry") { Task { await loadShelves(refresh: true) } }
                         }
+                    } else if !failedShelves.isEmpty {
+                        let count = failedShelves.count
+                        LedgerProblem(
+                            message: count == 1 ? "One shelf did not load." : "\(count) shelves did not load."
+                        ) {
+                            await loadShelves()
+                        }
+                        .padding(.horizontal, LedgerLayout.inset)
                     }
                 }
             }
@@ -795,12 +800,12 @@ private struct SearchResultCard: View {
                         }
                     }
                 }
-                .clipShape(.rect(cornerRadius: 12))
+                .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
                         .strokeBorder(Palette.border).allowsHitTesting(false)
                 }
-                .contentShape(.rect(cornerRadius: 12))
+                .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
             }
             .buttonStyle(.plain)
         }
@@ -877,7 +882,7 @@ private struct ProducerTitleRow: View {
             NavigationLink(value: item) {
                 HStack(alignment: .top, spacing: 8) {
                     PosterArt(url: item.image, symbol: item.kind == .anime ? "film" : "book", width: 78)
-                        .clipShape(.rect(cornerRadius: 7))
+                        .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                     VStack(alignment: .leading, spacing: 4) {
                         Text(name).font(.body)
                         if let total = item.total {
@@ -929,8 +934,7 @@ struct PosterResults: View {
                     ForEach(titles) { SearchResultCard(title: $0) }
                 }
                 if failed {
-                    Text("Could not load \(name.lowercased()).").foregroundStyle(.secondary)
-                    Button("Retry") { Task { await load() } }
+                    LedgerProblem(message: "Could not load \(name.lowercased()).") { await load() }
                 } else if more {
                     NextPageIndicator(label: "Loading more titles", page: page) {
                         if !loading { await load() }
@@ -938,10 +942,17 @@ struct PosterResults: View {
                 } else if loading {
                     ProgressView().accessibilityLabel("Loading \(name)")
                 } else if titles.isEmpty {
-                    ContentUnavailableView(
-                        "No titles found",
-                        systemImage: "magnifyingglass",
-                        description: Text("Try another search or section."))
+                    ContentUnavailableView {
+                        Label("No titles found", systemImage: "magnifyingglass")
+                    } description: {
+                        Text(query.isEmpty
+                            ? "Nothing here yet. Pull down to refresh."
+                            : "Try another search or section.")
+                    } actions: {
+                        if let search = Self.searchURL(query, kind: kind) {
+                            Link("Search MyAnimeList", destination: search)
+                        }
+                    }
                 }
             }
             .scrollTargetLayout(isEnabled: !query.isEmpty && !showsProducerRows)
@@ -1023,6 +1034,16 @@ struct PosterResults: View {
             if !Task.isCancelled && current == generation { failed = true }
         }
     }
+
+    /// A MyAnimeList search for the query, so an empty result still leads
+    /// somewhere useful instead of a dead end.
+    private static func searchURL(_ query: String, kind: Kind) -> URL? {
+        let term = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !term.isEmpty else { return nil }
+        var components = URLComponents(string: "https://myanimelist.net/\(kind.rawValue).php")
+        components?.queryItems = [URLQueryItem(name: "q", value: term)]
+        return components?.url
+    }
 }
 
 private enum BrowseMode: String, CaseIterable, Identifiable {
@@ -1074,10 +1095,8 @@ struct CatalogBrowser: View {
                     ForEach(titles) { SearchResultCard(title: $0) }
                 }
                 if let message {
-                    Text(message).foregroundStyle(.secondary)
-                    Button("Retry") {
-                        if page == 1 { reload += 1 }
-                        else { Task { await load(reset: false) } }
+                    LedgerProblem(message: message) {
+                        if page == 1 { reload += 1 } else { await load(reset: false) }
                     }
                 } else if next {
                     NextPageIndicator(label: "Loading more titles", page: page) {
@@ -1086,10 +1105,19 @@ struct CatalogBrowser: View {
                 } else if loading {
                     ProgressView().frame(maxWidth: .infinity)
                 } else if titles.isEmpty {
-                    ContentUnavailableView(
-                        "No matching titles",
-                        systemImage: "magnifyingglass",
-                        description: Text("Adjust the filters or search for another title."))
+                    ContentUnavailableView {
+                        Label("No matching titles", systemImage: "magnifyingglass")
+                    } description: {
+                        Text("Adjust the filters or search for another title.")
+                    } actions: {
+                        // The step out of an empty result: the query first,
+                        // then the filters back to the top rated shelf.
+                        if !search.isEmpty {
+                            Button("Clear Search") { search = "" }
+                        } else {
+                            Button("Show Top Rated") { mode = .popular }
+                        }
+                    }
                 }
             }.padding()
         }
@@ -1207,10 +1235,8 @@ struct FriendsScreen: View {
                         }
                         .padding(rowInsets)
                     } else if let message = store.friendMessage {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text(message).foregroundStyle(.secondary)
-                            Button("Retry") { Task { await store.loadFriends(reset: true) } }
-                        }.padding(rowInsets)
+                        LedgerProblem(message: message) { await store.loadFriends(reset: true) }
+                            .padding(rowInsets)
                     }
                     ForEach(store.activity) { item in
                         PreferredTitle(title: store.named(item.title), showsLoadingTitle: false) { title, name in
@@ -1268,7 +1294,7 @@ struct FriendsScreen: View {
             NavigationLink(value: item.friend) {
                 Art(url: item.friend.avatar, symbol: "person.fill")
                     .frame(width: 46, height: 46)
-                    .clipShape(.rect(cornerRadius: 7))
+                    .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -1299,7 +1325,7 @@ struct FriendsScreen: View {
 
             NavigationLink(value: title) {
                 Art(url: title.image).frame(width: 48, height: 68)
-                    .clipShape(.rect(cornerRadius: 5))
+                    .clipShape(.rect(cornerRadius: LedgerLayout.rowRadius))
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
