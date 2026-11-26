@@ -860,18 +860,21 @@ private struct PosterScreen: View {
                 .accessibilityLabel("Poster")
         }
         .overlay(alignment: .topLeading) {
-            // The poster's close button sits where a pushed screen puts its back
-            // button, wearing the same Liquid Glass as the app's other controls.
-            // The poster itself still closes on a tap.
+            // The close button is the size of the system's back button and sits
+            // where a pushed screen puts it. Its glyph stays white like that
+            // button's, rather than taking the accent the bar's other buttons
+            // wear; the poster itself still closes on a tap.
             Button {
                 dismiss()
             } label: {
                 Image(systemName: "xmark")
-                    .font(.body.weight(.semibold))
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
                     .frame(width: 44, height: 44)
+                    .contentShape(.circle)
             }
-            .ledgerGlassButton()
-            .buttonBorderShape(.circle)
+            .buttonStyle(.plain)
+            .ledgerGlassCircle()
             .accessibilityLabel("Close poster")
             .padding(.leading, 12)
             .padding(.top, 6)

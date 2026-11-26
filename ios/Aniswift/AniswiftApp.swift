@@ -356,6 +356,22 @@ extension View {
         }
     }
 
+    /// A round glass control the size of a navigation bar button, for one that
+    /// floats over a picture rather than sitting in a bar. It is drawn like the
+    /// system's back button, so a glyph on it stays white instead of taking the
+    /// accent the bar's other buttons wear.
+    @ViewBuilder
+    func ledgerGlassCircle() -> some View {
+        if #available(iOS 26.0, *) {
+            glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            background(.ultraThinMaterial, in: .circle)
+                .overlay {
+                    Circle().strokeBorder(.white.opacity(0.16)).allowsHitTesting(false)
+                }
+        }
+    }
+
     func ledgerPanel(radius: CGFloat = 16) -> some View {
         background(.thinMaterial, in: .rect(cornerRadius: radius))
             .overlay {

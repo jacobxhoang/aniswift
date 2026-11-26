@@ -19,6 +19,10 @@ private final class StubAPI: APIClient {
     var titleNameAnswer: [Int: String] = [:]
     /// Every batch a screen asked for, so the batching itself can be checked.
     private(set) var titleNameRequests: [(kind: Kind, ids: [Int])] = []
+    /// The names a batch already taught the stub, which is what a resolved
+    /// title reads before it asks: a name in `titleNameAnswer` is not known
+    /// until the batch that answers it has run.
+    private var knownTitleNames: [String: String] = [:]
 
     /// The changes the store sent, in order.
     private(set) var savedChanges: [ListChange?] = []
@@ -75,16 +79,18 @@ private final class StubAPI: APIClient {
 
     func titleNames(_ ids: [Int], kind: Kind) async -> [Int: String] {
         titleNameRequests.append((kind, ids))
-        return titleNameAnswer.filter { ids.contains($0.key) }
+        let answer = titleNameAnswer.filter { ids.contains($0.key) }
+        for (id, name) in answer { knownTitleNames["\(kind.rawValue)-\(id)"] = name }
+        return answer
     }
 
     func resolveTitle(_ title: Title) async -> Title? { nil }
 
     func cachedTitle(_ title: Title) -> Title? {
-        titleNameAnswer[title.malID].map { title.fillingEnglishName(from: $0) }
+        knownTitleNames[title.id].map { title.fillingEnglishName(from: $0) }
     }
 
-    func isNameResolved(_ title: Title) -> Bool { titleNameAnswer[title.malID] != nil }
+    func isNameResolved(_ title: Title) -> Bool { knownTitleNames[title.id] != nil }
 
     func cachedDetail(_ title: Title) -> Fields? { nil }
 
@@ -288,7 +294,6 @@ struct FriendListBatchTests {
         #expect(batch.failure == nil)
     }
 }
-
 
 @Suite("English titles")
 @MainActor
