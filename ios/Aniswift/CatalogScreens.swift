@@ -1246,9 +1246,13 @@ struct CatalogFacet: Hashable, Identifiable {
     func page(_ page: Int, query: String, sort: CatalogFacetSort, api: any APIClient,
               refresh: Bool = false) async throws -> Page<Title> {
         let id: Int
-        if let malID, malID > 0 {
+        if category.usesGenreIndex, let malID, malID > 0 {
             id = malID
         } else {
+            // A studio is looked up by its name every time: the id a page carries
+            // can be the title's own, and the producer filter answers an id that
+            // is not a company with an empty list rather than an error, which read
+            // as "No titles found" on a studio that has dozens.
             id = try await resolveID(api: api)
         }
         var filters = [
