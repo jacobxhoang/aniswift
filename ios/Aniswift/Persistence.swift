@@ -288,7 +288,7 @@ struct WidgetSnapshot: Codable {
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
 
-    static let group = "group.org.aniswift.ios.shared"
+    static let group = "group.87b8794ebcab6708.1"
     private static let name = "Aniswift-widget-v1.json"
 
     static var file: URL? {

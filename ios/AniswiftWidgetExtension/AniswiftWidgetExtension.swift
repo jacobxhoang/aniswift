@@ -32,7 +32,7 @@ struct WidgetSnapshot: Codable {
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
 
-    static let group = "group.org.aniswift.ios.shared"
+    static let group = "group.87b8794ebcab6708.1"
     private static let name = "Aniswift-widget-v1.json"
 
     static var file: URL? {
@@ -84,6 +84,9 @@ struct AniswiftWidgetEntry: TimelineEntry {
     /// does not load a remote picture reliably, so the provider does it and the
     /// row draws the bytes it was handed.
     var posters: [String: Data] = [:]
+    /// The next episode of each anime row, as AniList published it, when the
+    /// provider could read it.
+    var airing: [String: WidgetAiring] = [:]
 }
 
 struct AniswiftWidgetProvider: TimelineProvider {
@@ -106,8 +109,11 @@ struct AniswiftWidgetProvider: TimelineProvider {
 
     private func current() async -> AniswiftWidgetEntry {
         let rows = WidgetSnapshot.read()?.rows(for: kind) ?? []
+        async let posterData = posters(for: rows)
+        async let airingData = schedule(for: rows)
         return AniswiftWidgetEntry(
-            date: Date(), kind: kind, rows: rows, posters: await posters(for: rows))
+            date: Date(), kind: kind, rows: rows, posters: await posterData,
+            airing: await airingData)
     }
 
     /// Three posters at most, fetched together with a short timeout so a slow
@@ -132,6 +138,89 @@ struct AniswiftWidgetProvider: TimelineProvider {
             return found
         }
     }
+
+    /// The next episode of each anime row, asked of AniList while the timeline is
+    /// built. AniList answers without a session, and a title that is not on the
+    /// air, or one it does not list, is left out rather than guessed at.
+    private func schedule(for rows: [WidgetRow]) async -> [String: WidgetAiring] {
+        let anime = rows.filter { $0.kind == "anime" }
+        guard !anime.isEmpty else { return [:] }
+        var ids: [Int: String] = [:]
+        for row in anime { ids[row.malID] = row.id }
+
+        let body: [String: Any] = [
+            "query": """
+                query ($ids: [Int]) {
+                  Page(perPage: 50) {
+                    media(idMal_in: $ids, type: ANIME) {
+                      idMal
+                      nextAiringEpisode { episode airingAt }
+                    }
+                  }
+                }
+                """,
+            "variables": ["ids": anime.map(\.malID)],
+        ]
+        var request = URLRequest(url: Self.graphql, timeoutInterval: 8)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: body)
+
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+            let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+            let answer = try? JSONDecoder().decode(ScheduleAnswer.self, from: data)
+        else { return [:] }
+
+        var learned: [String: WidgetAiring] = [:]
+        for media in answer.data.Page.media {
+            guard let malID = media.idMal, let id = ids[malID],
+                let next = media.nextAiringEpisode, let episode = next.episode, episode > 0,
+                let airingAt = next.airingAt
+            else { continue }
+            learned[id] = WidgetAiring(
+                episode: episode, date: Date(timeIntervalSince1970: TimeInterval(airingAt)))
+        }
+        return learned
+    }
+
+    private static let graphql = URL(string: "https://graphql.anilist.co")!
+}
+
+/// The next episode of an anime that is still on the air, as a row draws it:
+/// which episode it is and the sentence under the title.
+struct WidgetAiring {
+    let episode: Int
+    let date: Date
+
+    /// "Episode 7 airs in 3 days", the sentence a list row and a title page
+    /// carry, so the widget says it the same way.
+    func line(relativeTo now: Date = .now) -> String {
+        let away = Self.relative.localizedString(for: date, relativeTo: now)
+        return "Episode \(episode) airs \(away)"
+    }
+
+    private static let relative: RelativeDateTimeFormatter = {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .full
+        formatter.dateTimeStyle = .named
+        return formatter
+    }()
+}
+
+/// AniList's GraphQL answer, read for the one field a row needs.
+private struct ScheduleAnswer: Decodable {
+    struct Payload: Decodable { let Page: Page }
+    struct Page: Decodable { let media: [Media] }
+    struct Media: Decodable {
+        let idMal: Int?
+        let nextAiringEpisode: NextAiring?
+    }
+    struct NextAiring: Decodable {
+        let episode: Int?
+        let airingAt: Int?
+    }
+    let data: Payload
 }
 
 // MARK: - The widget
@@ -154,10 +243,7 @@ struct AniswiftWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             if visible.isEmpty {
-                Text("Open Aniswift to read your list.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                WidgetEmptyNote(text: "list")
                 Spacer(minLength: 0)
             } else {
                 ForEach(visible) { row in
@@ -171,6 +257,116 @@ struct AniswiftWidgetView: View {
     }
 }
 
+private struct AniswiftAiringRowView: View {
+    let row: WidgetRow
+    let poster: Data?
+    let airing: WidgetAiring?
+    @Environment(\.widgetFamily) private var family
+
+    /// A large widget draws three rows, so each takes a smaller picture than the
+    /// single row a small or a medium widget can give its own.
+    private var posterSize: CGSize {
+        switch family {
+        case .systemMedium: return CGSize(width: 72, height: 96)
+        case .systemLarge: return CGSize(width: 40, height: 54)
+        default: return CGSize(width: 44, height: 58)
+        }
+    }
+
+    private var titleFont: Font {
+        family == .systemMedium ? .subheadline.weight(.semibold) : .caption.weight(.semibold)
+    }
+
+    private var fraction: Double {
+        guard let total = row.total, total > 0 else { return 0 }
+        return min(Double(row.progress) / Double(total), 1)
+    }
+
+    /// How many episodes have aired: the one before the next to air.
+    private var aired: Int? {
+        guard let airing else { return nil }
+        return max(airing.episode - 1, 0)
+    }
+
+    private var caughtUp: Bool {
+        guard let aired else { return false }
+        return row.progress >= aired
+    }
+
+    /// The line under the countdown: "On the latest episode" once every aired
+    /// episode is watched, and the count until then.
+    private var progressLabel: String {
+        if caughtUp { return "On the latest episode" }
+        if let total = row.total { return "\(row.progress)/\(total)" }
+        return "\(row.progress)/?"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AniswiftWidgetPoster(data: poster, kind: row.kind, size: posterSize)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(row.name)
+                    .font(titleFont)
+                    .lineLimit(2)
+                if let airing {
+                    Text(airing.line())
+                        .font(.caption2)
+                        .foregroundStyle(caughtUp ? Color.green : Color.orange)
+                        .lineLimit(2)
+                        .accessibilityLabel(
+                            caughtUp ? "\(airing.line()). You are caught up."
+                                : "\(airing.line()). You are behind.")
+                }
+                HStack(spacing: 6) {
+                    Text(progressLabel)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                    if family != .systemSmall { WidgetProgressBar(fraction: fraction) }
+                    Spacer(minLength: 2)
+                    AddOneButton(row: row)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// The card a **Next Episode** widget draws: one row in the small and medium
+/// families, where it has the height to itself, and three in the large one.
+struct AniswiftAiringView: View {
+    let entry: AniswiftWidgetEntry
+    @Environment(\.widgetFamily) private var family
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    /// An accessibility text size keeps the card to one row, which is all the
+    /// height holds then.
+    private var visible: [WidgetRow] {
+        guard !typeSize.isAccessibilitySize else { return Array(entry.rows.prefix(1)) }
+        return Array(entry.rows.prefix(family == .systemLarge ? 3 : 1))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if visible.isEmpty {
+                WidgetEmptyNote(text: "list")
+                Spacer(minLength: 0)
+            } else {
+                ForEach(visible) { row in
+                    AniswiftAiringRowView(
+                        row: row, poster: entry.posters[row.id], airing: entry.airing[row.id]
+                    )
+                    .frame(maxHeight: .infinity)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .containerBackground(.fill.tertiary, for: .widget)
+    }
+}
+
+/// The row a **Last Updated** widget draws: the poster, the name, the progress
+/// bar and the **+1** its button adds to.
 private struct AniswiftWidgetRowView: View {
     let row: WidgetRow
     let poster: Data?
@@ -187,38 +383,32 @@ private struct AniswiftWidgetRowView: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            AniswiftWidgetPoster(data: poster, kind: row.kind)
+            AniswiftWidgetPoster(data: poster, kind: row.kind, size: CGSize(width: 30, height: 42))
             VStack(alignment: .leading, spacing: 4) {
                 Text(row.name)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
-                progressBar
+                WidgetProgressBar(fraction: fraction)
                 HStack(spacing: 6) {
                     Text(progressLabel)
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                     Spacer(minLength: 4)
-                    Button(intent: IncrementProgressIntent(id: row.id)) {
-                        Text("+1")
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .frame(minWidth: 44, minHeight: 24)
-                            .background(Capsule().strokeBorder(Color.secondary.opacity(0.35)))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(
-                        "Add one \(row.kind == "anime" ? "episode" : "chapter") to \(row.name)")
+                    AddOneButton(row: row)
                 }
             }
         }
         .frame(height: 44)
     }
+}
 
-    /// The bar fills by the share of the total, and a title with no total keeps
-    /// an empty track rather than claiming a length it does not have.
-    private var progressBar: some View {
+/// The bar that fills by the share of the total. A title whose provider
+/// publishes no length keeps an empty track rather than claiming one.
+private struct WidgetProgressBar: View {
+    let fraction: Double
+
+    var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
@@ -232,9 +422,50 @@ private struct AniswiftWidgetRowView: View {
     }
 }
 
+/// The control a row's button adds one episode or chapter with.
+private struct AddOneButton: View {
+    let row: WidgetRow
+
+    var body: some View {
+        Button(intent: IncrementProgressIntent(id: row.id)) {
+            Text("+1")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 10)
+                .frame(minWidth: 44, minHeight: 24)
+                .background(Capsule().strokeBorder(Color.secondary.opacity(0.35)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "Add one \(row.kind == "anime" ? "episode" : "chapter") to \(row.name)")
+    }
+}
+
+/// What a widget with nothing to draw says. A build whose signature carries no
+/// App Group can never read the snapshot — the container is missing, not empty —
+/// so it says that instead of asking for the app to be opened again.
+private struct WidgetEmptyNote: View {
+    /// What the widget would draw: "list" or "statistics".
+    let text: String
+
+    private var message: String {
+        WidgetSnapshot.file == nil
+            ? "This build has no App Group, so the widget cannot read your \(text)."
+            : "Open Aniswift to read your \(text)."
+    }
+
+    var body: some View {
+        Text(message)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 private struct AniswiftWidgetPoster: View {
     let data: Data?
     let kind: String
+    let size: CGSize
 
     var body: some View {
         Group {
@@ -251,8 +482,8 @@ private struct AniswiftWidgetPoster: View {
                 }
             }
         }
-        .frame(width: 30, height: 42)
-        .clipShape(.rect(cornerRadius: 4))
+        .frame(width: size.width, height: size.height)
+        .clipShape(.rect(cornerRadius: 6))
         .accessibilityHidden(true)
     }
 }
@@ -280,6 +511,22 @@ struct AniswiftMangaWidget: Widget {
         .configurationDisplayName("Last Updated Manga")
         .description("Your most recently updated manga, with a button to add a chapter.")
         .supportedFamilies([.systemSmall, .systemMedium])
+    }
+}
+
+/// The widget that puts when each anime is next on the Home Screen, in the three
+/// sizes: one row small, that row with a bigger picture medium, and three large.
+/// It draws the countdown AniList publishes, and no artwork behind the rows.
+struct AniswiftAiringWidget: Widget {
+    var body: some WidgetConfiguration {
+        StaticConfiguration(
+            kind: "AniswiftAiringWidget", provider: AniswiftWidgetProvider(kind: "anime")
+        ) { entry in
+            AniswiftAiringView(entry: entry)
+        }
+        .configurationDisplayName("Next Episode")
+        .description("The anime you are watching, with when each next episode airs.")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -329,25 +576,30 @@ struct AniswiftStatsView: View {
         if let count = stats.animeCount {
             items.append(
                 AniswiftStatistic(
-                    id: "anime", symbol: "tv", value: count.formatted(), label: "anime watched"))
+                    id: "anime", symbol: "tv",
+                    value: count.formatted(.number.locale(Locale(identifier: "en_US"))),
+                    label: "anime watched"))
         }
         if let days = stats.daysWatched {
             items.append(
                 AniswiftStatistic(
                     id: "days", symbol: "calendar",
-                    value: days.formatted(.number.precision(.fractionLength(0...1))),
+                    value: days.formatted(
+                        .number.precision(.fractionLength(0...1)).locale(Locale(identifier: "en_US"))),
                     label: "days watched"))
         }
         if let count = stats.mangaCount {
             items.append(
                 AniswiftStatistic(
-                    id: "manga", symbol: "books.vertical", value: count.formatted(),
+                    id: "manga", symbol: "books.vertical",
+                    value: count.formatted(.number.locale(Locale(identifier: "en_US"))),
                     label: "manga read"))
         }
         if let count = stats.chaptersRead {
             items.append(
                 AniswiftStatistic(
-                    id: "chapters", symbol: "book", value: count.formatted(),
+                    id: "chapters", symbol: "book",
+                    value: count.formatted(.number.locale(Locale(identifier: "en_US"))),
                     label: "chapters read"))
         }
         return items
@@ -356,10 +608,7 @@ struct AniswiftStatsView: View {
     var body: some View {
         Group {
             if statistics.isEmpty {
-                Text("Open Aniswift to read your statistics.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                WidgetEmptyNote(text: "statistics")
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             } else if family == .systemSmall {
                 smallLayout
@@ -390,9 +639,8 @@ struct AniswiftStatsView: View {
                 .padding(.vertical, 8)
                 if index == 0 { Divider() }
             }
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
     }
 
     /// Four totals in two columns, a rule between the rows and none between the
@@ -442,6 +690,7 @@ struct AniswiftWidgetBundle: WidgetBundle {
     var body: some Widget {
         AniswiftAnimeWidget()
         AniswiftMangaWidget()
+        AniswiftAiringWidget()
         AniswiftStatsWidget()
     }
 }

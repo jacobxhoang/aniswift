@@ -23,8 +23,9 @@ its own.
 - **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
   lists, and a share link to the MyAnimeList profile.
 - **Home Screen widgets** — **Last Updated Anime** and **Last Updated Manga**, small or medium, with each title's
-  poster, a progress bar, the count, and a **+1** that updates MyAnimeList without opening the app; and
-  **Profile Statistics**, which draws the account's totals.
+  poster, a progress bar, the count and a **+1** that updates MyAnimeList without opening the app; **Next Episode**,
+  in every size, with the countdown to each airing anime's next episode; and **Profile Statistics**, which draws the
+  account's totals.
 - **Settings** — appearance (System, Light or Dark), accent color, preferred title language, an adult-content switch, in-app link handling, a post-completion
   score prompt, preferred launch screen, which list groups open first, a Face ID or passcode lock with its timer, iOS 26
   tab-bar behavior, cache and search-history clearing, per-kind control over what a title page
@@ -40,6 +41,9 @@ its own.
   one is set: the app has no field for it, so a build signs in with the ID it was built with.
 - No AniList app is needed for the read-only AniList section: the build ships a client ID, and you can put your
   own in `Info.plist` (`AniswiftAniListClientID`) instead.
+- The Home Screen widgets share an App Group (`group.87b8794ebcab6708.1`) between the app and its extension, so a
+  build signed with a profile that carries that group — or with a team that owns an equivalent one — gets them; a
+  build without it installs but its widgets cannot read your list.
 
 ## Data sources
 

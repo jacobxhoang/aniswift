@@ -77,3 +77,17 @@
 - Rejected: keeping the dark-only build and offering a "dim" variant of it
 - Overturns: the 2026-11-26 decision that the appearance stays dark only. `PRODUCT.md` and `DESIGN.md` are updated
   in the same change, and System is the default so the device decides until the reader chooses
+
+
+
+
+## 2026-11-26 · The App Group is the one a sideload certificate carries
+- Decided by: the designer, whose own certificate lists the group
+- Why: a widget reads the app's snapshot through an App Group that the signing profile has to authorise, and a group
+  belongs to the team that registered it — the app's own `group.org.aniswift.ios.shared` could never appear in a
+  certificate bought for sideloading, so the widgets installed with a container that never opened
+- Rejected: keeping the app's own group and requiring a build signed with a team the designer controls, which meant
+  the widgets only ever worked from Xcode
+- Costs: the group is now `group.87b8794ebcab6708.1` in both `.entitlements` files and the two
+  `WidgetSnapshot.group` copies, so a build signed with another team has to change those four places to a group its
+  own team can register; the certificate that carries this one expires on 2027-03-13

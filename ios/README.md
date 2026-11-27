@@ -135,15 +135,24 @@ without a passcode cannot unlock it, and the screen says so instead of offering 
 
 ### Widgets
 
-Add **Aniswift — Last Updated Anime**, **Last Updated Manga** or **Profile Statistics** from the Home Screen's
-widget gallery. The app writes the three most recently updated entries of each kind into the App Group container after
-every list read or edit, so a widget draws the poster, a progress bar, the count and a **+1** pill without opening
-the app; the widget's own name in the gallery and on the Home Screen is its heading, so nothing is repeated inside
-the card. The poster arrives when the widget refreshes, and a row whose picture does not come shows the kind's glyph
-instead. A small widget shows one row and a medium one shows three. The **+1** button adds one episode or chapter
-straight to MyAnimeList, with the token the app keeps for it in the App Group container — the one copy outside the
-Keychain, protected until the device is first unlocked and removed when you sign out — and the widget's row moves with
-it. A request that fails leaves the row where it was.
+Add **Aniswift — Last Updated Anime**, **Last Updated Manga**, **Next Episode** or **Profile Statistics** from the
+Home Screen's widget gallery. The app writes the three most recently updated entries of each kind into the App Group
+container after every list read or edit, so a widget draws the poster, a progress bar, the count and a **+1** pill
+without opening the app; the widget's own name in the gallery and on the Home Screen is its heading, so nothing is
+repeated inside the card. The poster arrives when the widget refreshes, and a row whose picture does not come
+shows the kind's glyph instead. **Last Updated** shows one row small and three medium.
+
+**Next Episode** is its own widget, in all three sizes: one row small, that same row with a bigger picture medium,
+and three rows large, each filling its share of the height. Every row carries the title, the countdown AniList
+publishes — "Episode 7 airs in 3 days", in green once you are caught up and in amber while an episode that already
+aired is unwatched — and, under it, **On the latest episode** once you have seen every one, or the count ("6/12")
+until then. A title AniList carries no next episode for shows its count alone, so a row never claims an episode it
+cannot place. The countdown is asked of AniList by the widget itself, which needs no sign-in for it. No artwork
+sits behind the rows: the card keeps the same plain background as the others.
+
+The **+1** button adds one episode or chapter straight to MyAnimeList, with the token the app keeps for it in the
+App Group container — the one copy outside the Keychain, protected until the device is first unlocked and removed
+when you sign out — and the row moves with it. A request that fails leaves the row where it was.
 
 **Profile Statistics** draws the totals MyAnimeList publishes for the account — anime, manga, days watched and
 chapters read — each with its glyph: a small widget carries two of them with a rule between, and a medium one all
@@ -151,6 +160,29 @@ four in a grid. The app writes them into the same App Group container whenever a
 whenever your Profile or a friend's profile reads its statistics, so the widget follows the app without opening it.
 Until one has been written it says **Open Aniswift to read your statistics.**, and a total the provider does not
 publish is left out rather than drawn as a zero.
+
+#### Widgets on a sideloaded build
+
+A widget is a second bundle inside the app — `PlugIns/AniswiftWidgetExtension.appex`, with its own bundle
+identifier `org.aniswift.ios.aniswiftwidgetextension` — and the only place it can read your list from is the App
+Group container both bundles declare, `group.87b8794ebcab6708.1`. That is the group a certificate sold for
+sideloading carries, and the app uses it so a build signed with such a certificate has working widgets. Two things
+have to line up, and they are where the widgets get lost:
+
+- **The signing profile has to carry that group.** A group belongs to the team that registered it, so a profile
+  without it cannot authorise the entitlement: the tool drops it, the container comes back `nil`, and every widget
+  says **This build has no App Group, so the widget cannot read your list.** however often the app is opened — that
+  sentence is how a signing problem is told apart from an empty list. Nothing in the app can make up for it: the
+  extension can read neither the app's files nor its Keychain item.
+- **The extension has to be signed too.** A tool that signs only the outer app leaves the `.appex` without a valid
+  signature, and iOS then installs the app without its widget, so no Aniswift widget appears in the gallery at all.
+
+So sign with a certificate whose profile lists `group.87b8794ebcab6708.1` — no change to the app is needed for
+that — and check that the tool signs the `.appex` as well. With a team of your own the group has to be one that
+team owns instead: register an App Group for both `org.aniswift.ios` and `org.aniswift.ios.aniswiftwidgetextension`,
+put its name in the two `.entitlements` files and the two `WidgetSnapshot.group` constants, and run from Xcode, which
+makes a profile for each bundle. Either way, open the app once and read your Profile or a list — that is what writes
+the snapshot — and then add the widget.
 
 ### Details Page
 
