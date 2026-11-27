@@ -573,7 +573,6 @@ struct PreferredTitle<Content: View>: View {
     /// title's current copy: a bundled relation can carry a URL that no longer
     /// answers while the title it names is fine.
     var repairsMissingPoster = false
-    var onEnglishName: ((Title, String) -> Void)? = nil
     @ViewBuilder var content: (Title, String) -> Content
     @State private var resolved: Title?
     @State private var attemptedID: String?
@@ -598,9 +597,6 @@ struct PreferredTitle<Content: View>: View {
             ?? (waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
         let request = PreferredLookup(id: title.id, poster: repairsMissingPoster)
         content(item, name)
-            .onChange(of: item.englishName, initial: true) { _, english in
-                if let english { onEnglishName?(item, english) }
-            }
             .task(id: request) {
                 // A settled name still leaves the poster to fetch, so either one
                 // can justify the lookup, and a poster that failed to download

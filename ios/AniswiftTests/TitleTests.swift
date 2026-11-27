@@ -83,7 +83,6 @@ struct TitleTests {
                 schedule: AiringSchedule(episode: 9, date: Date().addingTimeInterval(3600))))
         #expect(airing.episode == 9)
         #expect(airing.aired == 8)
-        #expect(airing.slot == nil)
     }
 
     @Test("A title with no slot still counts down from its schedule")

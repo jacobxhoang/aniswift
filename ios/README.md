@@ -63,8 +63,12 @@ with lines like `Part 2: https://myanimelist.net/stacks/6746`; those links open 
 app rather than in a browser, so the parts can be read one after another. A title page you opened before can
 be drawn from its saved copy without a connection, marked **Showing saved data** with a Retry. Tapping the
 header poster shows it full screen, where a double tap or pinch zooms and the glass X closes it. A synopsis with more than
-one paragraph starts with its first paragraph and a **Show more** control. Anime details can also include
-trailers and theme songs.
+one paragraph of prose starts with its first paragraph and a **Show more** control; MyAnimeList's credit line —
+"(Source: Crunchyroll)", "[Written by MAL Rewrite]" — is drawn under the summary as a caption instead, so a note
+alone never hides behind the control or summons one. A trailer plays inside the app: tapping its card opens a
+full-screen player with the glass X where a back button would sit and a **YouTube** link for a video that
+refuses to play in an embed, so nothing is handed off to a browser. Anime details can also include
+theme songs.
 
 Use **Status**, **Progress** or **My Score** for a quick edit. The pencil opens the full editor for repeat
 counts, start and finish dates, and notes. These fields sync to MyAnimeList. Custom lists and visibility

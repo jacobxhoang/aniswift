@@ -1,6 +1,7 @@
 import Combine
 import Kingfisher
 import SwiftUI
+import WebKit
 
 /// One number in a title's header: a label over its value. A statistic the
 /// provider has no value for is never drawn, so the row never shows a column of
@@ -38,6 +39,7 @@ struct TitleScreen: View {
     @State private var stacksChecked = false
     @State private var loadingStacks = false
     @State private var showingPoster = false
+    @State private var showingTrailer = false
     @State private var summaryExpanded = false
     @State private var failure: String?
     @State private var savedAt: Date?
@@ -101,7 +103,9 @@ struct TitleScreen: View {
         if showsCharacters { characterSection }
         if showsRecommendations { recommendationSection }
         if !stacks.isEmpty || stacksUnavailable || stacksChecked { stackSection }
-        if let trailer = trailerURL, showsTrailer { trailerCard(trailer) }
+        // A trailer the app can play, or one it can only open: with neither,
+        // the page draws no Trailer heading at all.
+        if showsTrailer, trailerVideoID != nil || trailerURL != nil { trailerCard }
         if title.kind == .anime { themeRows }
         if !friendRows.isEmpty { friends }
         if let reviews, !reviews.items.isEmpty || reviews.more {
@@ -307,6 +311,12 @@ struct TitleScreen: View {
                 url: current.image ?? title.image,
                 symbol: title.kind == .anime ? "film" : "book")
         }
+        // The trailer plays here rather than in a browser: YouTube offers no
+        // stream an AVPlayer can open, so the sheet is its embed page in a web
+        // view, which still plays in the app.
+        .fullScreenCover(isPresented: $showingTrailer) {
+            TrailerScreen(videoID: trailerVideoID ?? "", pageURL: trailerURL)
+        }
     }
 
     private func editorDetents(_ mode: ListEditor.Mode) -> Set<PresentationDetent> {
@@ -346,6 +356,22 @@ struct TitleScreen: View {
 
     private var trailerURL: URL? {
         publicURL(trailer?.string("url", "embed_url", "embedUrl"))
+    }
+
+    /// The YouTube video a trailer plays: MyAnimeList names it outright, and
+    /// the URL it gives carries it too, so a payload missing the id still plays.
+    private var trailerVideoID: String? {
+        if let id = trailer?.string("youtube_id", "youtubeId") { return id }
+        guard let raw = trailer?.string("url", "embed_url", "embedUrl"),
+            let url = URL(string: raw)
+        else { return nil }
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        if let id = query.first(where: { $0.name == "v" })?.value, !id.isEmpty { return id }
+        let parts = url.pathComponents.filter { $0 != "/" }
+        if let embed = parts.firstIndex(of: "embed"), parts.count > embed + 1 {
+            return parts[embed + 1]
+        }
+        return nil
     }
 
     private var header: some View {
@@ -544,16 +570,22 @@ struct TitleScreen: View {
         return record.map { TitleFacts($0, kind: title.kind) } ?? TitleFacts()
     }
 
-    /// A synopsis longer than one paragraph starts collapsed. MAL puts its
-    /// editor's note on a line of its own, so a long summary is the common case
-    /// and should not push the rest of the page below the fold.
+    /// A synopsis longer than one paragraph starts collapsed. MyAnimeList puts
+    /// its credit note — "(Source: Crunchyroll)", "[Written by MAL Rewrite]" —
+    /// on a line of its own at the end, and that note is not a paragraph worth
+    /// a Show more: it closes the block as a caption, and the button appears
+    /// only when there is prose behind it.
     private func summary(_ text: String) -> some View {
         let paragraphs = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
-        let rest = Array(paragraphs.dropFirst())
+        let prose = paragraphs.filter { !Self.isCreditNote($0) }
+        let credits = paragraphs.filter(Self.isCreditNote)
+        let rest = Array(prose.dropFirst())
         return VStack(alignment: .leading, spacing: 10) {
-            Text(paragraphs.first ?? text).lineSpacing(4).textSelection(.enabled)
+            if let first = prose.first {
+                Text(first).lineSpacing(4).textSelection(.enabled)
+            }
             if summaryExpanded {
                 ForEach(Array(rest.enumerated()), id: \.offset) { _, paragraph in
                     Text(paragraph).lineSpacing(4).textSelection(.enabled)
@@ -566,7 +598,24 @@ struct TitleScreen: View {
                 .accessibilityHint(
                     summaryExpanded ? "Collapses the summary" : "Shows the rest of the summary")
             }
+            if !credits.isEmpty {
+                Text(credits.joined(separator: " "))
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
         }
+    }
+
+    /// Whether a synopsis line is MyAnimeList's credit note rather than prose:
+    /// "(Source: Crunchyroll)", "Source: Anime News Network", "[Written by MAL
+    /// Rewrite]". The note is attributed under the summary, never folded behind
+    /// Show more.
+    private static func isCreditNote(_ line: String) -> Bool {
+        let bare = line.lowercased()
+            .trimmingCharacters(in: CharacterSet(charactersIn: "()[]"))
+            .trimmingCharacters(in: .whitespaces)
+        return bare.hasPrefix("source:") || bare.hasPrefix("written by")
     }
 
     private var metadata: some View {
@@ -768,18 +817,36 @@ struct TitleScreen: View {
         LedgerViewAll(section: section)
     }
 
-    private func trailerCard(_ url: URL) -> some View {
+    @ViewBuilder
+    private var trailerCard: some View {
         block("Trailer") {
-            Link(destination: url) {
-                Art(url: trailerImage ?? current.image)
-                    .aspectRatio(16 / 9, contentMode: .fit)
-                   .overlay {
-                        Image(systemName: "play.fill").font(.title2)
-                            .padding(16).ledgerGlassBadge()
-                    }
-                    .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
-            }.accessibilityLabel("Play trailer")
+            if let videoID = trailerVideoID {
+                Button {
+                    showingTrailer = true
+                } label: {
+                    trailerPoster
+                }
+                .buttonStyle(LedgerTileButtonStyle())
+                .accessibilityLabel("Play trailer")
+                .accessibilityHint("Plays the trailer in the app")
+            } else if let url = trailerURL {
+                // A trailer that is not YouTube has no video the app can play,
+                // so it opens where it lives.
+                Link(destination: url) { trailerPoster }
+                    .accessibilityLabel("Play trailer")
+                    .accessibilityHint("Opens the trailer in a browser")
+            }
         }
+    }
+
+    private var trailerPoster: some View {
+        Art(url: trailerImage ?? current.image)
+            .aspectRatio(16 / 9, contentMode: .fit)
+            .overlay {
+                Image(systemName: "play.fill").font(.title2)
+                    .padding(16).ledgerGlassBadge()
+            }
+            .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
     }
 
     private var themeKeys: [String] {
@@ -1205,6 +1272,110 @@ private struct PosterScreen: View {
             Button("Try again") { attempt += 1 }.ledgerGlassButton()
         }
     }
+}
+
+/// A trailer played inside the app, full screen: the video letterboxed on the
+/// app's black, the glass X where a back button would sit, and the way out to
+/// YouTube for a video that refuses to play in an embed. YouTube publishes no
+/// stream an AVPlayer can open, so the player is its embed page in a web view,
+/// which still plays here rather than in a browser.
+private struct TrailerScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    let videoID: String
+    let pageURL: URL?
+
+    /// What YouTube asks of an app's web view since its 2025 change: a
+    /// referrer whose host is the app's own bundle id. A web view sends no
+    /// Referer by default, and without one the player refuses to start with
+    /// "Error 153 — Video player configuration error".
+    private static let referrer = "https://\((Bundle.main.bundleIdentifier ?? "org.aniswift.ios").lowercased())"
+
+    private var embedURL: URL? {
+        guard !videoID.isEmpty else { return nil }
+        var components = URLComponents(string: "https://www.youtube.com/embed/\(videoID)")
+        components?.queryItems = [
+            URLQueryItem(name: "playsinline", value: "1"),
+            URLQueryItem(name: "autoplay", value: "1"),
+            URLQueryItem(name: "rel", value: "0"),
+            URLQueryItem(name: "modestbranding", value: "1"),
+            URLQueryItem(name: "origin", value: Self.referrer),
+        ]
+        return components?.url
+    }
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if let embedURL {
+                TrailerWebView(url: embedURL, referrer: Self.referrer)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+            } else {
+                ContentUnavailableView {
+                    Label("No trailer", systemImage: "film")
+                } description: {
+                    Text("This title has no trailer the app can play.")
+                }
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 44, height: 44)
+                    .contentShape(.circle)
+            }
+            .buttonStyle(.plain)
+            .ledgerGlassCircle()
+            .accessibilityLabel("Close trailer")
+            .padding(.leading, 12)
+            .padding(.top, 6)
+        }
+        .overlay(alignment: .topTrailing) {
+            if let pageURL {
+                Link(destination: pageURL) {
+                    Label("YouTube", systemImage: "arrow.up.right")
+                        .font(.footnote.weight(.semibold))
+                        .frame(minHeight: 44)
+                }
+                .ledgerGlassButton()
+                .accessibilityLabel("Watch the trailer on YouTube")
+                .padding(.trailing, 12)
+                .padding(.top, 6)
+            }
+        }
+        .statusBarHidden(true)
+    }
+}
+
+/// The embed page in a web view with no scrolling of its own, so the video
+/// plays in place and fills the letterbox the screen gives it. The request
+/// carries the app's referrer, which YouTube requires of an app's web view.
+private struct TrailerWebView: UIViewRepresentable {
+    let url: URL
+    let referrer: String
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        // A trailer a reader asked for should start on its own, so playback
+        // needs no second tap inside the page.
+        configuration.mediaTypesRequiringUserActionForPlayback = []
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        web.isOpaque = false
+        web.backgroundColor = .black
+        web.scrollView.isScrollEnabled = false
+        web.scrollView.backgroundColor = .black
+        var request = URLRequest(url: url)
+        request.setValue(referrer, forHTTPHeaderField: "Referer")
+        request.setValue(referrer, forHTTPHeaderField: "origin")
+        web.load(request)
+        return web
+    }
+
+    func updateUIView(_ web: WKWebView, context: Context) {}
 }
 
 /// The shape of a title page before its payload lands: poster, title, action

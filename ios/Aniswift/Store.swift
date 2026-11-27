@@ -295,10 +295,6 @@ final class Store: ObservableObject {
     var lists: [Kind: [ListEntry]] { savedLists.mapValues(\.items) }
     var nextList: [Kind: Int] { savedLists.compactMapValues { $0.more ? $0.page + 1 : nil } }
 
-    var recent: [ListEntry] {
-        (lists[.anime, default: []] + lists[.manga, default: []]).sorted { $0.updated > $1.updated }
-    }
-
     func restore() async {
         guard api.hasSession else { checking = false; return }
         if let cache = ListCache.read() {

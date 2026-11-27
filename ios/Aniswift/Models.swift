@@ -616,10 +616,6 @@ struct AiringSlot: Hashable, Codable {
 /// premiere date — exact for a run without breaks, and silent about the
 /// episode once a run outlasts the length it was announced with.
 struct AiringProgress: Equatable {
-    /// The weekly slot the payload named, when it named one: a schedule from
-    /// AniList names the next episode even for a title MyAnimeList gives no
-    /// slot for.
-    let slot: AiringSlot?
     let date: Date
     /// The episode that airs at `date`, when it is known.
     let episode: Int?
@@ -655,13 +651,11 @@ struct AiringProgress: Equatable {
         // run no longer shifts every count after it. How many have aired is the
         // one before it.
         if isAiring, let schedule {
-            return AiringProgress(
-                slot: slot, date: schedule.date, episode: schedule.episode,
-                aired: max(schedule.episode - 1, 0))
+            return AiringProgress(date: schedule.date, episode: schedule.episode, aired: max(schedule.episode - 1, 0))
         }
         guard isAiring, let slot, let date = slot.next(after: now) else { return nil }
         guard let premiere else {
-            return AiringProgress(slot: slot, date: date, episode: nil, aired: nil)
+            return AiringProgress(date: date, episode: nil, aired: nil)
         }
         // One episode a week, from the first: the slot's place in the run is
         // how many have aired, and the one after it is next. The episode is
@@ -670,7 +664,7 @@ struct AiringProgress: Equatable {
         // wrong number; how many aired is still known, and colours the row.
         let aired = max(Int((date.timeIntervalSince(premiere) / (7 * 24 * 60 * 60)).rounded()), 0)
         let episode = total.flatMap { aired + 1 <= $0 ? aired + 1 : nil }
-        return AiringProgress(slot: slot, date: date, episode: episode, aired: aired)
+        return AiringProgress(date: date, episode: episode, aired: aired)
     }
 }
 
