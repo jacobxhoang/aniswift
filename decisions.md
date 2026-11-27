@@ -81,12 +81,14 @@
 
 
 
-## 2026-11-26 · The App Group stays the app's own
+## 2026-11-26 · The App Group is read back from the signature
 - Decided by: the designer, who does not want a certificate's group written into the app
-- Why: a widget reads the app's snapshot through an App Group the signature has to grant, and a group belongs to the
-  team that registered it — but naming a particular certificate's group in the project tied the app to that
-  certificate, and a sideloader keeps the group a build already carries
-- Rejected: writing one certificate's group into the two `.entitlements` files, which made every other way of signing
-  need an edit; and a constant in the two `WidgetSnapshot` copies, which could not follow a signature at all
-- Rests on: `AppGroup.known`, which names the app's own `group.org.aniswift.ios.shared` and takes the first group
-  that opens, so a build signed with a certificate carrying another group adds that name there for that build
+- Why: a widget reads the app's snapshot through an App Group the signature has to grant, and which groups arrive
+  depends on the certificate — a sideload certificate carries its own five, a team carries the app's — so naming one
+  in the project would tie the app to that certificate and leave every other build without a container
+- Rejected: writing one certificate's group into the two `.entitlements` files, which needed an edit per certificate;
+  a list of known groups, which only worked for the certificates someone typed in; and a widget with no group at
+  all, which cannot read anything
+- Rests on: `AppGroup`, which reads its own entitlements through Security's task API
+  (`SecTaskCopyValueForEntitlement`, looked up at runtime so a system without it falls back to the app's own group)
+  and takes the first group that opens

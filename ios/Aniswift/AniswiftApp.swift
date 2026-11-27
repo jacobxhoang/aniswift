@@ -2110,6 +2110,13 @@ struct AboutScreen: View {
         return identifiers.isEmpty ? "None installed" : identifiers.joined(separator: ", ")
     }
 
+    /// The App Groups the signature carries, which is the list the container is
+    /// chosen from: empty reads as nothing the signature could give.
+    private var signatureGroupList: String {
+        let groups = AppGroup.signature
+        return groups.isEmpty ? "None read" : groups.joined(separator: ", ")
+    }
+
     /// A container opens only for a group the signature grants, so a widget that
     /// draws nothing says "None granted" here.
     private var grantedGroup: String {
@@ -2154,12 +2161,13 @@ struct AboutScreen: View {
             Section {
                 statusRow("App identifier", value: Bundle.main.bundleIdentifier ?? "Unknown")
                 statusRow("Widget extension", value: extensionIdentifiers)
+                statusRow("Signature groups", value: signatureGroupList)
                 statusRow("App Group", value: grantedGroup)
                 statusRow("Widget data", value: widgetData)
             } header: {
                 Text("Home Screen widgets")
             } footer: {
-                Text("A signature decides all four. Nothing here can be set by the app.")
+                Text("A signature decides all five. The app reads them back when it opens.")
             }
         }
         .listStyle(.plain)

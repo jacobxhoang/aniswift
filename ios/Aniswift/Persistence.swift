@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Why a screen is showing saved public data: the Jikan Edge proxy served a
@@ -280,20 +281,52 @@ struct WidgetStats: Codable {
 }
 
 /// The App Group both bundles read the snapshot from. A group is an entitlement,
-/// fixed when the bundle is signed and not chosen by the app, and iOS has no
-/// public call that lists the groups a signature grants — so the container is
-/// looked up in this short list, and the first group that opens is the one the
-/// certificate gave this build. A certificate carrying another group needs that
-/// name added here and to the extension's copy, and nothing else.
+/// fixed when the bundle is signed rather than chosen by the app, so it is read
+/// back from the signature: a build signed with a certificate that carries a
+/// group of its own uses that one, and none of that certificate is written into
+/// the project. The list below is only the fallback for a signature that cannot
+/// be read.
 enum AppGroup {
-    /// The groups a build may be signed with: the app's own, and any a
-    /// certificate that signs a build carries, which is added here for that
-    /// build. The first of them that opens is the one used.
+    /// The app's own group, and any a certificate that signs a build carries,
+    /// added here for a signature that cannot be read back.
     static let known = ["group.org.aniswift.ios.shared"]
 
-    /// The group this signature actually grants, when it grants any of them.
-    static let identifier: String? = known.first {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil
+    /// The group in use: the first of the signature's groups that opens, and the
+    /// known list only when the signature gave none.
+    static let identifier: String? = {
+        let granted = signatureGroups()
+        let candidates = granted.isEmpty ? known : granted + known
+        return candidates.first {
+            FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil
+        }
+    }()
+
+    /// The groups the signature carries, whether or not any of them opens: what
+    /// About reads back when a widget still draws nothing.
+    static var signature: [String] { signatureGroups() }
+
+    /// The App Groups the code signature carries, read through Security's own
+    /// task API. The symbols are looked up at runtime rather than linked, so a
+    /// system without them falls back to `known` instead of failing to launch.
+    private static func signatureGroups() -> [String] {
+        guard let handle = dlopen("/System/Library/Frameworks/Security.framework/Security", RTLD_LAZY)
+        else { return [] }
+        defer { dlclose(handle) }
+        guard let create = dlsym(handle, "SecTaskCreateFromSelf"),
+            let copy = dlsym(handle, "SecTaskCopyValueForEntitlement")
+        else { return [] }
+
+        // The two CF values are handed to Swift, which releases them: CFRelease
+        // is unavailable here because Core Foundation is memory managed.
+        typealias CreateTask = @convention(c) (UnsafeRawPointer?) -> AnyObject?
+        typealias CopyEntitlement =
+            @convention(c) (AnyObject?, CFString, UnsafeMutableRawPointer?) -> AnyObject?
+
+        guard let task = unsafeBitCast(create, to: CreateTask.self)(nil) else { return [] }
+        let lookUp = unsafeBitCast(copy, to: CopyEntitlement.self)
+        guard let value = lookUp(task, "com.apple.security.application-groups" as CFString, nil)
+        else { return [] }
+        return (value as? [Any])?.compactMap { $0 as? String } ?? []
     }
 }
 
