@@ -22,7 +22,7 @@ its own.
 - **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
   lists, and a share link to the MyAnimeList profile.
 - **Settings** — accent color, preferred title language, in-app link handling, a post-completion score prompt,
-  preferred launch screen, iOS 26 tab-bar behavior, cache clearing, per-kind control over what a title page
+  preferred launch screen, iOS 26 tab-bar behavior, cache and search-history clearing, per-kind control over what a title page
   shows (including one switch that hides everything below its summary), profile appearance switches, an AniList
   sign-in with its lists read-only, plus About Aniswift and sign out.
 
@@ -50,14 +50,14 @@ its own.
 
 - [iOS setup, features and release guide](ios/README.md)
 - [Architecture and API analysis](ARCHITECTURE.md)
-- [iOS releases](https://github.com/jacobxhoang/aniledger/releases)
+- [iOS releases](https://github.com/jacobxhoang/aniswift/releases)
 
 ## Releases
 
 | Channel | What it is | Download |
 | --- | --- | --- |
-| Nightly | The tip of `main`, rebuilt into one rolling prerelease on every push | [Aniswift-Nightly-Unsigned.ipa](https://github.com/jacobxhoang/aniledger/releases/download/nightly/Aniswift-Nightly-Unsigned.ipa) |
-| Stable | A tagged build, published on `ios-v*` | [Releases](https://github.com/jacobxhoang/aniledger/releases) |
+| Nightly | The tip of `main`, rebuilt into one rolling prerelease on every push | [Aniswift-Nightly-Unsigned.ipa](https://github.com/jacobxhoang/aniswift/releases/download/nightly/Aniswift-Nightly-Unsigned.ipa) |
+| Stable | A tagged build, published on `ios-v*` | [Releases](https://github.com/jacobxhoang/aniswift/releases) |
 
 Both are unsigned device builds: sign one with your own profile, or import it into a sideloading tool, before
 installing it on an iPhone or iPad.

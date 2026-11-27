@@ -357,6 +357,7 @@ struct BehaviorSettingsScreen: View {
             }
             Section {
                 CacheRow()
+                SearchHistoryRow()
             }
         }
         .listStyle(.insetGrouped)
@@ -588,6 +589,44 @@ private struct CacheRow: View {
                 Haptics.success()
             }
         }
+    }
+}
+
+/// The searches the app keeps for its search fields, dropped on request. Only
+/// those go: the cache, the session, the lists and every setting stay.
+private struct SearchHistoryRow: View {
+    @State private var count = SearchRecents.values().count
+    @State private var confirming = false
+
+    private var detail: String {
+        count == 0 ? "No searches kept" : "\(count) \(count == 1 ? "search" : "searches") kept"
+    }
+
+    var body: some View {
+        Button(role: .destructive) {
+            confirming = true
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Clear Search History").foregroundStyle(.red)
+                Text(detail)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .settingsRow()
+        .confirmationDialog("Clear the searches kept on this device?", isPresented: $confirming) {
+            Button("Clear Search History", role: .destructive) {
+                SearchRecents.clear()
+                count = 0
+                Haptics.success()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("The searches offered under a search field are dropped. Nothing else is touched.")
+        }
+        .onAppear { count = SearchRecents.values().count }
     }
 }
 

@@ -99,6 +99,7 @@ checkmark, or updates without animation when Reduce Motion is on.
 | Preferred Screen | Anime | The tab used when preferred launch is enabled. |
 | Tab Bar Behavior (iOS 26) | Always Visible | Keeps the tab bar visible or lets it minimize while scrolling down. Earlier iOS versions always show the tab bar. |
 | Clear Cache | — | Clears Kingfisher's memory and disk image cache, the shared URL cache, the in-memory catalog response cache and the saved title pages. Sign-in, lists, feed/profile snapshots, custom lists and settings are kept. The row reports the measured image and URL cache size, or notes when only catalog responses are cached. |
+| Clear Search History | — | Drops the six searches Aniswift keeps for its search fields, after a confirmation. Sign-in, cache, lists, snapshots, custom lists and settings are kept. The row counts what it keeps, or says none are kept. |
 
 Preferences are read live: changing the accent, language, a detail toggle or a profile toggle updates open
 screens immediately.
@@ -202,7 +203,8 @@ credits, and source and support links. When signed in,
 Aniswift can restore already downloaded list pages while it syncs with MyAnimeList. Kingfisher caches posters
 and avatars. Signing out clears the active session and its downloaded list snapshot; it does not reset settings,
 which stay on the device. Clearing the cache from Settings removes images, URL responses and in-memory catalog
-data without touching sign-in, lists, saved feed/profile snapshots or custom lists. Public profile sections
+data without touching sign-in, lists, saved feed/profile snapshots or custom lists; clearing the search
+history drops only the searches the search fields offer. Public profile sections
 depend on what the provider can retrieve.
 
 Snapshots are encoded on the screen's actor and written through one serial background queue, so a list edit or a
@@ -244,7 +246,7 @@ commit or the pull request — and uploads `Aniswift-Unsigned.ipa` as a workflow
 device build and requires signing before iOS can install it.
 
 A release is a tag. Push one (`git tag ios-v1.0.0 && git push origin ios-v1.0.0`) and the run publishes a
-[GitHub release](https://github.com/jacobxhoang/aniledger/releases) of that name with the IPA attached; a branch
+[GitHub release](https://github.com/jacobxhoang/aniswift/releases) of that name with the IPA attached; a branch
 push publishes nothing. A newer push of the same branch cancels the run it supersedes.
 
 ### Nightly builds
@@ -253,7 +255,7 @@ Every push to `main` also republishes one rolling prerelease, the way SideStore 
 `nightly` tag moves to the pushed commit and the asset keeps its name, so this link never changes:
 
 ```text
-https://github.com/jacobxhoang/aniledger/releases/download/nightly/Aniswift-Nightly-Unsigned.ipa
+https://github.com/jacobxhoang/aniswift/releases/download/nightly/Aniswift-Nightly-Unsigned.ipa
 ```
 
 That file is the tip of `main`, rebuilt on every push with the commit count as its build number — About
@@ -314,6 +316,8 @@ The workflow uses the App ID and team from the provisioning profile and exports 
 - Open a link with **Open Links In-App** on and off; confirm the sheet and the system browser respectively.
 - With posters cached, open **Clear Cache**, confirm the size, clear, and reopen a title to confirm it reloads.
   Confirm sign-in, lists and settings survive.
+- Run a search or two, open **Clear Search History**, and confirm the search fields no longer offer them while
+  the cache, lists and settings survive.
 - From the Feed, open a friend's profile and select a favorite. Confirm the title takes over the page and Back
   returns to the same profile. Repeat for a recent list update and for a title opened directly from the Feed.
 - Open a character with a Japanese voice actor and tap one. Confirm the voice actor page shows their roles and

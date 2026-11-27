@@ -1751,7 +1751,7 @@ struct AboutScreen: View {
         List {
             Section("App") {
                 LabeledContent("Version", value: version).listRowBackground(Color.clear)
-                Link(destination: URL(string: "https://github.com/jacobxhoang/aniledger")!) {
+                Link(destination: URL(string: "https://github.com/jacobxhoang/aniswift")!) {
                     row("Aniswift on GitHub", detail: "Source code and iOS releases", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)
