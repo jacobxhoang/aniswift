@@ -913,26 +913,37 @@ struct AniListSession: Codable {
     var name: String = ""
 }
 
-/// AniList returns its token in the redirect's **fragment**, where MyAnimeList
-/// puts a code in the query, so the two callbacks are read apart.
+/// AniList hands its token back to a redirect URL the app does not register, so
+/// the token is read from wherever it appears rather than from one callback: the
+/// redirect's fragment or query, where MyAnimeList puts its code, or the text of
+/// the auth-pin page.
 enum AniListCallback {
-    static let scheme = MALCallback.scheme
+    /// The token wherever AniList wrote it: the fragment of the redirect the app
+    /// can name, the address of the page the client's redirect URL points at,
+    /// or the auth-pin page's own text.
+    static func token(in url: URL) -> String? {
+        token(in: url.absoluteString) ?? jwt(in: url.absoluteString)
+    }
 
-    static func session(from url: URL) -> AniListSession? {
-        guard url.scheme == scheme, url.host == "oauth", let fragment = url.fragment else { return nil }
-        var values: [String: String] = [:]
-        for pair in fragment.split(separator: "&") {
-            let parts = pair.split(separator: "=", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            values[String(parts[0])] = String(parts[1]).removingPercentEncoding ?? String(parts[1])
+    static func token(in text: String) -> String? {
+        guard let marker = text.range(of: "access_token=") else { return nil }
+        let value = text[marker.upperBound...].prefix { character in
+            character != "&" && character != "#" && character != "\n" && character != "\""
+                && character != " "
         }
-        guard values["token_type"]?.lowercased() == "bearer", let token = values["access_token"] else {
-            return nil
+        return value.isEmpty ? nil : String(value).removingPercentEncoding
+    }
+
+    /// The token on its own, as the auth-pin page writes it: an AniList token is
+    /// a JWT, which starts `eyJ` and runs long, so the page's text is searched
+    /// for one rather than for a name it does not print.
+    static func jwt(in text: String) -> String? {
+        let separators = CharacterSet(charactersIn: " \n\t\"'`<>,()[]")
+        for chunk in text.components(separatedBy: separators) {
+            let value = chunk.trimmingCharacters(in: .whitespacesAndNewlines)
+            if value.hasPrefix("eyJ"), value.count > 40 { return value }
         }
-        // AniList tokens last a year by default, so a missing lifetime is read
-        // as one rather than as an expired session.
-        let lifetime = Double(values["expires_in"] ?? "") ?? 31_536_000
-        return AniListSession(token: token, expiresAt: Date().addingTimeInterval(lifetime))
+        return nil
     }
 }
 
@@ -1059,8 +1070,6 @@ final class AniListClient: ObservableObject {
     @Published private(set) var loading = false
     @Published private(set) var connecting = false
     @Published private(set) var message: String?
-    /// The sign-in sheet, the same browser the MyAnimeList sign-in presents.
-    private let browser = LoginBrowser()
     /// The AniList media and list entry ids by `Title.id`, learned from a sync
     /// or a lookup, so a change does not need a second request for them.
     private var mediaIDs: [String: Int] = [:]
@@ -1086,21 +1095,19 @@ final class AniListClient: ObservableObject {
 
     var isSignedIn: Bool { (session?.expiresAt ?? .distantPast) > .now }
 
-    func signIn() async {
-        guard let id = Self.bundledClientID else {
-            message = "This build has no AniList client ID."
-            return
-        }
+    /// Takes the token the sign-in sheet read, and asks AniList which account it
+    /// belongs to. The sheet presents AniList's own page, so the redirect URL of
+    /// the client ID the build ships does not have to be one this app can name:
+    /// the token is read from wherever AniList hands it back.
+    func adopt(_ token: String) async {
         guard !connecting else { return }
         connecting = true
         message = nil
         defer { connecting = false }
         do {
-            let redirect = try await authenticate(clientID: id)
-            guard var session = AniListCallback.session(from: redirect) else {
-                message = "AniList did not return a token."
-                return
-            }
+            // AniList tokens last a year unless the answer says otherwise, and
+            // a token read off a page carries no lifetime at all.
+            var session = AniListSession(token: token, expiresAt: Date().addingTimeInterval(31_536_000))
             let viewer = try await viewer(token: session.token)
             guard let account: Int = viewer.read("id"), let name = viewer.string("name") else {
                 message = "AniList did not answer with the account."
@@ -1246,20 +1253,6 @@ final class AniListClient: ObservableObject {
         }
     }
 
-    private func authenticate(clientID: String) async throws -> URL {
-        var parts = URLComponents(url: Self.authorize, resolvingAgainstBaseURL: false)!
-        parts.queryItems = [
-            URLQueryItem(name: "client_id", value: clientID),
-            URLQueryItem(name: "response_type", value: "token"),
-        ]
-        guard let start = parts.url else {
-            throw APIError(status: 0, message: "Could not build the AniList sign-in.")
-        }
-        // The sheet is presented the way the MyAnimeList sign-in presents its
-        // own, so one browser serves both redirect URLs.
-        return try await browser.authenticate(start, scheme: AniListCallback.scheme)
-    }
-
     private func viewer(token: String) async throws -> Fields {
         let result = try await query(["query": "query { Viewer { id name } }"], token: token)
         guard let data: Fields = result.read("data"), let viewer: Fields = data.read("Viewer") else {
@@ -1374,7 +1367,7 @@ final class AniListClient: ObservableObject {
 /// names only a weekly slot, which counts seven days between episodes and so
 /// drifts by an episode for every break a run takes; AniList tracks the run
 /// itself, so the countdown and the caught-up colour no longer drift with it.
-struct AiringSchedule: Equatable {
+struct AiringSchedule: Equatable, Codable {
     /// The episode that airs at `date`.
     let episode: Int
     let date: Date
@@ -1401,6 +1394,15 @@ final class AiringScheduleCache: ObservableObject {
     private static let lifetime: TimeInterval = 10 * 60
     private static let batchSize = 50
 
+    /// The schedules the last launch learned are drawn at once, so an airing row
+    /// shows “Episode 9 airs in 2 hours” on its first paint. An entry older
+    /// than `lifetime` is asked for again while the saved one stays on screen.
+    init() {
+        guard let saved = AiringScheduleSnapshot.read() else { return }
+        schedules = saved.schedules
+        askedAt = saved.askedAt
+    }
+
     func schedule(for malID: Int) -> AiringSchedule? { schedules[malID] }
 
     /// Asks AniList for the schedules it does not know yet, in batches of fifty,
@@ -1424,5 +1426,17 @@ final class AiringScheduleCache: ObservableObject {
             for id in batch { askedAt[id] = stamp }
             for (id, schedule) in learned { schedules[id] = schedule }
         }
+        persist()
+    }
+
+    /// Writes what a list can still draw, and drops a run whose episode passed
+    /// more than a day ago, so the file does not grow with every title opened
+    /// and a finished run's row loses nothing it was still showing.
+    private func persist() {
+        let horizon = Date().addingTimeInterval(-24 * 60 * 60)
+        let live = schedules.filter { $0.value.date > horizon }
+        AiringScheduleSnapshot(
+            schedules: live, askedAt: askedAt.filter { live[$0.key] != nil }
+        ).write()
     }
 }

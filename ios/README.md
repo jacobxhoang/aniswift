@@ -31,7 +31,8 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 | Profile | Your card names the account and puts its anime and manga totals on one line, with days watched and chapters read under them. Below it, one **Statistics** panel holds both kinds — pick Anime or Manga, and open or shut it to see the totals, the share each status takes and the counts. Then friends and public favorites, custom lists, sharing your MyAnimeList profile, **Settings → Profile** for what appears, and Settings from the toolbar gear. |
 
 Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite
-or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to
+or a recent update to open its title. Their own friends appear under the statistics as round portraits, and each one
+opens that person's profile in turn. Back returns to the friend's profile, then to the Feed. Pull down to
 refresh the profile. Every list, a friend's list, catalog results, the catalog browser, reviews and interest
 stacks refresh the same way. Lists, Discover and the Feed draw skeleton placeholders while their first page of
 content loads, then replace them with the real rows and shelves. An empty list offers the catalog; a section,
@@ -172,11 +173,12 @@ Profile settings, under **Settings → Profile**, choose what the Profile tab dr
 **Settings → AniList** signs this device in to AniList and shows its lists, read-only, beside MyAnimeList.
 Changes you make on MyAnimeList are carried over to AniList; nothing is read back from AniList.
 
-1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer) with the redirect URL
-   `org.aniswift.ios://oauth`. The build already ships a client ID (ending in **8162**), so you can skip this and
-   connect straight away. To use your own app, put its ID in `Info.plist` (`AniswiftAniListClientID`) and rebuild:
-   the app has no field for it.
-2. Tap **Connect AniList** and finish the sign-in sheet. The section then lists the account's anime and manga
+1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer). Its redirect URL can be
+   anything AniList accepts — a custom scheme or a page of its own — because the sign-in sheet reads the token from
+   wherever AniList hands it back: the redirect, the address of the page it lands on, or the text of the auth-pin page.
+   The build already ships a client ID (ending in **8162**), so you can skip this and connect straight away. To use your
+   own app, put its ID in `Info.plist` (`AniswiftAniListClientID`) and rebuild: the app has no field for it.
+2. Tap **Connect AniList** and finish the sign-in in the sheet. The section then lists the account's anime and manga
    entries grouped by status, with posters, progress and scores, and **Sign Out of AniList** ends the session
    without touching the MyAnimeList one.
 
@@ -205,7 +207,10 @@ and avatars. Signing out clears the active session and its downloaded list snaps
 which stay on the device. Clearing the cache from Settings removes images, URL responses and in-memory catalog
 data without touching sign-in, lists, saved feed/profile snapshots or custom lists; clearing the search
 history drops only the searches the search fields offer. Public profile sections
-depend on what the provider can retrieve.
+depend on what the provider can retrieve. The next episodes AniList publishes are kept in
+`Aniswift-airing-schedules-v1.json`, so a list draws **Episode 9 airs in 2 hours** on its first paint after a
+launch; an entry older than ten minutes is asked for again while the saved one stays on screen, and Clear Cache
+leaves the file alone because it holds no user data.
 
 Snapshots are encoded on the screen's actor and written through one serial background queue, so a list edit or a
 feed page never waits on the disk. `Aniswift/PrivacyInfo.xcprivacy` carries the app's privacy manifest: no

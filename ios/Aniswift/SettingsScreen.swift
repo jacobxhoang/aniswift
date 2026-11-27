@@ -2,6 +2,7 @@ import Kingfisher
 import SafariServices
 import SwiftUI
 import UIKit
+import WebKit
 
 /// The accent applied to controls, links and highlights. Stored by raw value in
 /// `SettingKey.accent` and read by the app root for `.tint`.
@@ -152,6 +153,9 @@ struct SettingsScreen: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var store: Store
     @State private var confirmSignOut = false
+    /// The AniList sign-in sheet, which reads the token from wherever AniList
+    /// hands it back rather than from one redirect URL the app can name.
+    @State private var connectingAniList = false
     /// The AniList section keeps one client: it holds the session and the
     /// entries the read-only lists screen draws, and the store sends it the
     /// changes made on MyAnimeList.
@@ -203,7 +207,7 @@ struct SettingsScreen: View {
                     .settingsRow()
                 } else {
                     Button {
-                        Task { await aniList.signIn() }
+                        connectingAniList = true
                     } label: {
                         // A settings action reads as a settings row, like every
                         // other action here, and names its busy state in the
@@ -213,7 +217,13 @@ struct SettingsScreen: View {
                             title: aniList.connecting ? "Connecting to AniList…" : "Connect AniList")
                     }
                     .settingsRow()
-                    .disabled(aniList.connecting)
+                    .disabled(aniList.connecting || AniListClient.bundledClientID == nil)
+                    if AniListClient.bundledClientID == nil {
+                        Text("This build has no AniList client ID.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .settingsRow()
+                    }
                     if let message = aniList.message {
                         Text(message).font(.footnote).foregroundStyle(.secondary)
                             .settingsRow()
@@ -254,6 +264,13 @@ struct SettingsScreen: View {
                 if store.account == nil { dismiss() }
             }
             Button("Cancel", role: .cancel) {}
+        }
+        .sheet(isPresented: $connectingAniList) {
+            if let clientID = AniListClient.bundledClientID {
+                AniListSignInScreen(clientID: clientID) { token in
+                    Task { await aniList.adopt(token) }
+                }
+            }
         }
     }
 
@@ -627,6 +644,119 @@ private struct SearchHistoryRow: View {
             Text("The searches offered under a search field are dropped. Nothing else is touched.")
         }
         .onAppear { count = SearchRecents.values().count }
+    }
+}
+
+/// AniList's sign-in in the app's own sheet. AniList sends the token to the
+/// redirect URL of the client the build ships, which may be a custom scheme or a
+/// page of its own, so the sheet reads the token from wherever the page lands:
+/// the navigation it is about to make, the address it settled on, or the text of
+/// the auth-pin page. The client ID now has to be right; its redirect does not
+/// have to be one this app can name.
+private struct AniListSignInScreen: View {
+    @Environment(\.dismiss) private var dismiss
+    let clientID: String
+    let onToken: (String) -> Void
+
+    private var startURL: URL? {
+        var parts = URLComponents(string: "https://anilist.co/api/v2/oauth/authorize")
+        parts?.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "response_type", value: "token"),
+        ]
+        return parts?.url
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let startURL {
+                    AniListWebView(url: startURL) { token in
+                        onToken(token)
+                        dismiss()
+                    }
+                } else {
+                    ContentUnavailableView {
+                        Label("No AniList client ID", systemImage: "person.crop.circle.badge.exclamationmark")
+                    } description: {
+                        Text("This build has no AniList client ID.")
+                    }
+                }
+            }
+            .navigationTitle("AniList")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+/// AniList's page in a web view that hands the app the token instead of loading
+/// the redirect. A redirect to a scheme the app owns cannot be loaded, so it is
+/// read and cancelled; a page the client's redirect URL points at is read once
+/// it settles; and the auth-pin page prints the token in its own text.
+private struct AniListWebView: UIViewRepresentable {
+    let url: URL
+    let onToken: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onToken: onToken) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        let web = WKWebView(frame: .zero, configuration: configuration)
+        web.navigationDelegate = context.coordinator
+        web.load(URLRequest(url: url))
+        return web
+    }
+
+    func updateUIView(_ web: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private let onToken: (String) -> Void
+        private var finished = false
+
+        init(onToken: @escaping (String) -> Void) {
+            self.onToken = onToken
+        }
+
+        func webView(
+            _ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
+            decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+        ) {
+            if let url = navigationAction.request.url, let token = AniListCallback.token(in: url) {
+                deliver(token)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            guard !finished else { return }
+            if let url = webView.url, let token = AniListCallback.token(in: url) {
+                deliver(token)
+                return
+            }
+            // The auth-pin page prints the token rather than putting it in the
+            // address, so the page is asked for the text it shows.
+            webView.evaluateJavaScript("location.href + '\\n' + document.body.innerText") {
+                value, _ in
+                guard let text = value as? String,
+                    let token = AniListCallback.token(in: text) ?? AniListCallback.jwt(in: text)
+                else { return }
+                self.deliver(token)
+            }
+        }
+
+        private func deliver(_ token: String) {
+            guard !finished else { return }
+            finished = true
+            onToken(token)
+        }
     }
 }
 

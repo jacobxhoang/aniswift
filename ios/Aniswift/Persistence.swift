@@ -204,6 +204,31 @@ struct ProfileMediaStats: Codable {
     }
 }
 
+/// The schedules AniList has published, kept across launches so the airing rows of
+/// a list draw “Episode 9 airs in 2 hours” on their first paint instead of a
+/// blank line until the request answers. `askedAt` travels with them, so an entry
+/// older than the cache's lifetime is asked for again while it is still shown.
+struct AiringScheduleSnapshot: Codable {
+    let schedules: [Int: AiringSchedule]
+    let askedAt: [Int: Date]
+
+    private static let file = URL.cachesDirectory.appending(path: "Aniswift-airing-schedules-v1.json")
+
+    static func read() -> Self? {
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    func write() {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        SnapshotWriter.write(data, to: Self.file)
+    }
+
+    static func remove() {
+        SnapshotWriter.remove(file)
+    }
+}
+
 struct CachedProfileValue<Value: Codable>: Codable {
     let value: Value
     let savedAt: Date

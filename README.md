@@ -18,7 +18,7 @@ its own.
   double tap or pinch and closes from the glass X. Characters open their own
   profile, their voice actors and a manga’s authors open a page of their roles and staff credits.
 - **Friends feed** — public updates from MyAnimeList friends, older pages, and native friend profiles with
-  statistics, favorites and recent activity.
+  statistics, favorites, recent activity and the friend's own friends.
 - **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
   lists, and a share link to the MyAnimeList profile.
 - **Settings** — accent color, preferred title language, in-app link handling, a post-completion score prompt,

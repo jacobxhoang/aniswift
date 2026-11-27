@@ -951,6 +951,17 @@ final class Store: ObservableObject {
     func friendEntry(_ friend: Friend, _ title: Title) async throws -> FriendUpdate? {
         try await publicUpdates(friend).first { $0.title.id == title.id }
     }
+
+    /// A friend's own friends, read from their public profile. Jikan Edge answers
+    /// this for any public account, so a friend's page lists them the way the
+    /// signed-in account's page does.
+    func friends(of friend: Friend) async throws -> [Friend] {
+        let response = try await api.catalog("users/\(friend.name)/friends", [], refresh: false)
+        guard let entries: [Fields] = response.read("data") else {
+            throw APIError(status: 0, message: "Could not load friends.")
+        }
+        return unique(entries.compactMap(Friend.init).filter { $0.id != friend.id })
+    }
 }
 
 /// What a batch of a friend's list pages answered: the rows, the page to ask

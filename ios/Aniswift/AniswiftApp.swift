@@ -1084,6 +1084,9 @@ struct FriendProfileScreen: View {
     @State private var updatesUnavailable = false
     @State private var updatesAreSaved = false
     @State private var loadingUpdates = false
+    @State private var friendFriends: [Friend]?
+    @State private var loadingFriends = false
+    @State private var friendsUnavailable = false
 
     var body: some View {
         ScrollView {
@@ -1119,6 +1122,7 @@ struct FriendProfileScreen: View {
                     .padding(.horizontal, LedgerLayout.inset)
                 }
                 ProfileStatistics(stats: profile.stats?.value)
+                friendsSection
                 recentUpdates
                 ForEach(Kind.allCases) { kind in
                     if let titles = profile.favorites?.value[kind], !titles.isEmpty {
@@ -1135,10 +1139,69 @@ struct FriendProfileScreen: View {
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
         .task { await loadUpdates() }
+        .task { await loadFriendsList() }
         .refreshable {
             async let profile: Void = load(refresh: true)
             async let activity: Void = loadUpdates(refresh: true)
-            _ = await (profile, activity)
+            async let people: Void = loadFriendsList(refresh: true)
+            _ = await (profile, activity, people)
+        }
+    }
+
+    /// The friend's own friends, each opening their profile. Only a public
+    /// friends list is read, so this needs nothing of the other account.
+    @ViewBuilder
+    private var friendsSection: some View {
+        if let friendFriends, !friendFriends.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                LedgerSectionTitle("Friends")
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(alignment: .top, spacing: 16) {
+                        ForEach(friendFriends) { person in
+                            NavigationLink(value: person) {
+                                VStack(spacing: 8) {
+                                    Art(url: person.avatar, symbol: "person.fill")
+                                        .frame(width: 64, height: 64)
+                                        .clipShape(.circle)
+                                        .overlay {
+                                            Circle().strokeBorder(Palette.hairline)
+                                                .allowsHitTesting(false)
+                                        }
+                                    Text(person.name)
+                                        .font(.caption)
+                                        .lineLimit(1)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(width: 76)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, LedgerLayout.inset)
+                }
+            }
+            .padding(.horizontal, LedgerLayout.inset)
+        } else if friendsUnavailable, !loadingFriends {
+            LedgerProblem(message: "This friend's friends are unavailable.") {
+                await loadFriendsList(refresh: true)
+            }
+            .padding(.horizontal, LedgerLayout.inset)
+        }
+    }
+
+    private func loadFriendsList(refresh: Bool = false) async {
+        guard !loadingFriends, refresh || friendFriends == nil else { return }
+        loadingFriends = true
+        defer { loadingFriends = false }
+        do {
+            let people = try await store.friends(of: friend)
+            guard !Task.isCancelled else { return }
+            friendFriends = people
+            friendsUnavailable = false
+        } catch {
+            guard !Task.isCancelled else { return }
+            friendsUnavailable = friendFriends == nil
         }
     }
 
