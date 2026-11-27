@@ -26,18 +26,43 @@ struct WidgetStats: Codable {
     let chaptersRead: Int?
 }
 
+/// The App Group both bundles read the snapshot from: the extension's own copy of
+/// the app's list, and the two have to name the same groups. A group is an
+/// entitlement, fixed when the bundle is signed and not chosen by the app, so the
+/// container is looked up in the list and the first group that opens is the one
+/// the certificate gave this build.
+enum AppGroup {
+    static let known = [
+        "group.87b8794ebcab6708.1",
+        "group.87b8794ebcab6708.2",
+        "group.87b8794ebcab6708.3",
+        "group.87b8794ebcab6708.4",
+        "group.87b8794ebcab6708.5",
+        "group.org.aniswift.ios.shared",
+    ]
+
+    /// The group this signature actually grants, when it grants any of them.
+    static let identifier: String? = known.first {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: $0) != nil
+    }
+}
+
 struct WidgetSnapshot: Codable {
     var anime: [WidgetRow] = []
     var manga: [WidgetRow] = []
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
 
-    static let group = "group.87b8794ebcab6708.1"
     private static let name = "Aniswift-widget-v1.json"
 
+    /// The container both bundles read, when the signature grants a group.
+    static var container: URL? {
+        guard let group = AppGroup.identifier else { return nil }
+        return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
+    }
+
     static var file: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
-            .appending(path: name)
+        container?.appending(path: name)
     }
 
     static func read() -> Self? {
@@ -64,8 +89,7 @@ struct WidgetCredentials: Codable {
     private static let name = "Aniswift-widget-token.json"
 
     private static var file: URL? {
-        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: WidgetSnapshot.group)?
-            .appending(path: name)
+        WidgetSnapshot.container?.appending(path: name)
     }
 
     static func read() -> Self? {

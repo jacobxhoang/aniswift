@@ -81,13 +81,15 @@
 
 
 
-## 2026-11-26 · The App Group is the one a sideload certificate carries
+## 2026-11-26 · The App Group comes from the signature, not a constant
 - Decided by: the designer, whose own certificate lists the group
 - Why: a widget reads the app's snapshot through an App Group that the signing profile has to authorise, and a group
   belongs to the team that registered it — the app's own `group.org.aniswift.ios.shared` could never appear in a
   certificate bought for sideloading, so the widgets installed with a container that never opened
 - Rejected: keeping the app's own group and requiring a build signed with a team the designer controls, which meant
-  the widgets only ever worked from Xcode
-- Costs: the group is now `group.87b8794ebcab6708.1` in both `.entitlements` files and the two
-  `WidgetSnapshot.group` copies, so a build signed with another team has to change those four places to a group its
-  own team can register; the certificate that carries this one expires on 2027-03-13
+  the widgets only ever worked from Xcode; and hard-coding one group of a particular certificate, which would need a
+  code change on every renewal
+- Rests on: `AppGroup.known`, the five groups a sideload certificate carries and the app's own, of which the first
+  that opens is the one the signature granted — iOS has no public call that lists a signature's groups, so the list
+  is written down in both `Persistence.swift` and the extension, and the certificate that carries
+  `group.87b8794ebcab6708.1` expires on 2027-03-13

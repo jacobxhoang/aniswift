@@ -2096,6 +2096,34 @@ struct AboutScreen: View {
         return short ?? build ?? "Unavailable"
     }
 
+    /// The extension bundle identifiers this build carries. A sideloader that
+    /// rewrites the app's identifier has to rewrite these with it, or iOS never
+    /// registers the extension and the widget never appears in the gallery.
+    private var extensionIdentifiers: String {
+        guard let folder = Bundle.main.builtInPlugInsURL,
+            let names = try? FileManager.default.contentsOfDirectory(atPath: folder.path),
+            !names.isEmpty
+        else { return "None installed" }
+        let identifiers = names.sorted().compactMap { name in
+            Bundle(url: folder.appending(path: name))?.bundleIdentifier
+        }
+        return identifiers.isEmpty ? "None installed" : identifiers.joined(separator: ", ")
+    }
+
+    /// A container opens only for a group the signature grants, so a widget that
+    /// draws nothing says "None granted" here.
+    private var grantedGroup: String {
+        AppGroup.identifier ?? "None granted"
+    }
+
+    /// Whether a snapshot reached that container: the app writes one after every
+    /// list read or profile read, and a widget in another process can read
+    /// nothing until it has.
+    private var widgetData: String {
+        guard WidgetSnapshot.file != nil else { return "No container" }
+        return WidgetSnapshot.read() == nil ? "Not written yet" : "Written"
+    }
+
     var body: some View {
         List {
             Section("App") {
@@ -2118,6 +2146,20 @@ struct AboutScreen: View {
                     row("Kingfisher", detail: "Image loading and caching · MIT License", symbol: "arrow.up.right")
                 }
                 .listRowBackground(Color.clear)
+            }
+            // Every one of these four comes from the signature rather than from
+            // the app, which is what a build whose widgets draw nothing has to
+            // be read against: a group the signature does not grant and an
+            // extension it does not sign leave the widget blank or absent.
+            Section {
+                statusRow("App identifier", value: Bundle.main.bundleIdentifier ?? "Unknown")
+                statusRow("Widget extension", value: extensionIdentifiers)
+                statusRow("App Group", value: grantedGroup)
+                statusRow("Widget data", value: widgetData)
+            } header: {
+                Text("Home Screen widgets")
+            } footer: {
+                Text("A signature decides all four. Nothing here can be set by the app.")
             }
         }
         .listStyle(.plain)
@@ -2142,6 +2184,23 @@ struct AboutScreen: View {
         .padding(.vertical, 5)
         .frame(minHeight: 44)
         .contentShape(Rectangle())
+    }
+
+    /// A diagnostic row: what the build is, in a value a reader can read back
+    /// and send on, which is why these are the only rows in the app with a
+    /// value under the title.
+    private func statusRow(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.subheadline)
+            Text(value)
+                .font(.footnote.monospaced())
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.vertical, 4)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowBackground(Color.clear)
     }
 
     private struct Credit: Identifiable {
