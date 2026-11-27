@@ -68,7 +68,7 @@ struct CastCard: View {
                 detail: detail, inDirectory: inDirectory, compactCaption: showsRoleOnly,
                 posterWidth: showsRoleOnly ? LedgerLayout.detailPosterWidth : nil)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LedgerTileButtonStyle())
     }
 }
 
@@ -146,7 +146,7 @@ struct CharactersScreen: View {
 }
 
 struct CharacterScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @Environment(\.dynamicTypeSize) private var typeSize
     let character: CharacterReference
 
@@ -253,7 +253,8 @@ struct CharacterScreen: View {
             LedgerShelf(inset: LedgerLayout.inset) {
                 ForEach(voices) { voice in
                     if let person = voice.person {
-                        NavigationLink(value: person) { voiceCard(voice) }.buttonStyle(.plain)
+                        NavigationLink(value: person) { voiceCard(voice) }
+                            .buttonStyle(LedgerTileButtonStyle())
                     } else {
                         voiceCard(voice)
                     }
@@ -298,7 +299,7 @@ struct CharacterScreen: View {
 /// MyAnimeList knows about them. Opened from a character's voice actors, and from
 /// the authors a manga's header lists.
 struct PersonScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @Environment(\.dynamicTypeSize) private var typeSize
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let person: PersonReference

@@ -14,9 +14,13 @@ private struct HeaderStatistic: Identifiable {
 }
 
 struct TitleScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @Environment(\.dynamicTypeSize) private var typeSize
     @ScaledMetric(relativeTo: .body) private var quickSheetExtra: CGFloat = 32
+    /// The header poster follows Dynamic Type with the name under it, and stops
+    /// growing at the accessibility sizes. A fixed 144 points left a small
+    /// poster under a name twice its size, so the page's opening reversed.
+    @ScaledMetric(relativeTo: .title2) private var scaledHeaderPoster: CGFloat = 144
     let title: Title
     @State private var payload: Fields?
     /// The shelves the header and information groups draw, decoded once when
@@ -57,8 +61,9 @@ struct TitleScreen: View {
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
     /// The schedules AniList has published, so the airing band names the episode
-    /// that is really next instead of counting weekly slots.
-    @ObservedObject private var schedules = AiringScheduleCache.shared
+    /// that is really next instead of counting weekly slots. Observation tracks
+    /// the reads, so the singleton is held rather than wrapped.
+    private let schedules = AiringScheduleCache.shared
 
     /// Every Details Page toggle, read once per kind: the thirty-four `@AppStorage`
     /// wrappers this page used each read `UserDefaults` on access, on every pass
@@ -72,6 +77,9 @@ struct TitleScreen: View {
     }
 
     private var displayName: String { current.displayName(for: titleLanguage) }
+
+    private var headerPosterWidth: CGFloat { min(scaledHeaderPoster, 144 * 1.4) }
+    private var headerPosterHeight: CGFloat { headerPosterWidth * 208 / 144 }
 
     private func shows(_ section: String) -> Bool {
         title.kind == .anime ? animePreferences.shows(section) : mangaPreferences.shows(section)
@@ -234,7 +242,10 @@ struct TitleScreen: View {
                 // page's own edge, so the poster, the name and the numbers
                 // read as one opening rather than three fixes.
                 .padding(.horizontal, LedgerLayout.inset)
-                .padding(.top, 14)
+                // The page starts under the opening rather than continuing it,
+                // so the status, progress and score controls read as the first
+                // thing a reader can act on here.
+                .padding(.top, 22)
                 .padding(.bottom, LedgerLayout.inset)
                 .frame(maxWidth: 800)
                 .frame(maxWidth: .infinity)
@@ -250,6 +261,9 @@ struct TitleScreen: View {
                         Image(systemName: saved == nil ? "plus" : "pencil")
                     }
                     .accessibilityLabel(saved == nil ? "Add to My List" : "Edit list entry")
+                    // Command-E opens the editor from a hardware keyboard: the
+                    // one action the page is opened for.
+                    .keyboardShortcut("e", modifiers: .command)
                     .disabled(changingList)
                 }
                 Menu {
@@ -266,8 +280,12 @@ struct TitleScreen: View {
                             Label("Remove from My List", systemImage: "trash")
                         }
                     }
-                } label: { Image(systemName: "ellipsis") }
-                .accessibilityLabel("More actions")
+                } label: {
+                    // The bar shows the glyph alone, and the title is what
+                    // VoiceOver and Voice Control read for it.
+                    Label("More actions", systemImage: "ellipsis")
+                }
+                .labelStyle(.iconOnly)
                 .disabled(changingList)
             }
         }
@@ -383,7 +401,7 @@ struct TitleScreen: View {
             if showsHeaderPoster {
                 Button { showingPoster = true } label: {
                     Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
-                        .frame(width: 144, height: 208)
+                        .frame(width: headerPosterWidth, height: headerPosterHeight)
                         .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                         .overlay {
                             RoundedRectangle(cornerRadius: LedgerLayout.panelRadius).strokeBorder(Palette.hairline)
@@ -403,13 +421,26 @@ struct TitleScreen: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityAddTraits(.isHeader)
+            // The numbers answer the name before the credits do: the poster and
+            // the name are the opening, and the figures, the studios and the
+            // original title under them are one quiet band of small type.
+            let statistics = headerStatistics
+            if !statistics.isEmpty {
+                HStack(alignment: .top, spacing: 6) {
+                    ForEach(statistics) { item in
+                        self.statistic(item.label, item.value)
+                    }
+                }
+                .frame(maxWidth: 480)
+                .padding(.top, 2)
+            }
             if showsHeaderCreators {
                 let studios = shelves.studios
                 if title.kind == .anime, !studios.isEmpty {
                     FlowLayout {
                         ForEach(studios) { studio in
                             NavigationLink(value: studio) {
-                                Text(studio.name.uppercased()).font(.subheadline)
+                                Text(studio.name.uppercased()).font(.footnote.weight(.medium))
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.tint)
@@ -422,7 +453,7 @@ struct TitleScreen: View {
                     FlowLayout {
                         ForEach(shelves.authors) { author in
                             NavigationLink(value: author) {
-                                Text(author.rawName.uppercased()).font(.subheadline)
+                                Text(author.rawName.uppercased()).font(.footnote.weight(.medium))
                             }
                             .buttonStyle(.plain)
                             .foregroundStyle(.tint)
@@ -432,22 +463,13 @@ struct TitleScreen: View {
                         }
                     }
                 } else if title.kind == .manga, !shelves.authorNames.isEmpty {
-                    Text(shelves.authorNames.uppercased()).font(.subheadline).foregroundStyle(.secondary)
+                    Text(shelves.authorNames.uppercased()).font(.footnote.weight(.medium))
+                        .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 } else if current.original != current.name {
-                    Text(current.original).font(.subheadline).foregroundStyle(.secondary)
+                    Text(current.original).font(.footnote.weight(.medium)).foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
                 }
-            }
-            let statistics = headerStatistics
-            if !statistics.isEmpty {
-                HStack(alignment: .top, spacing: 6) {
-                    ForEach(statistics) { item in
-                        self.statistic(item.label, item.value)
-                    }
-                }
-                .frame(maxWidth: 480)
-                .padding(.top, 2)
             }
         }
         .padding(.top, 8)
@@ -503,10 +525,13 @@ struct TitleScreen: View {
         return statistics
     }
 
+    /// One figure under the name: a label over its value, at reading size. It
+    /// was set at `.title3` and competed with the name over it, so the opening
+    /// had three headings instead of one.
     private func statistic(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 4) {
+        VStack(spacing: 3) {
             Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
-            Text(value).font(.title3.bold().monospacedDigit())
+            Text(value).font(.subheadline.weight(.semibold).monospacedDigit())
         }
         .multilineTextAlignment(.center)
         .frame(maxWidth: .infinity)
@@ -923,7 +948,7 @@ struct TitleScreen: View {
                             TitleReviewPreview(review: review, keepsShelfHeight: true)
                                 .frame(width: 220, alignment: .leading)
                                 .padding(12)
-                                .ledgerPanel(radius: 12)
+                                .ledgerPanel()
                         }
                         .buttonStyle(.plain)
                     }
@@ -1231,7 +1256,13 @@ private struct PosterScreen: View {
                     }
                 }
                 .accessibilityLabel("Poster")
-                .accessibilityHint("Double tap to zoom")
+                // VoiceOver's double tap activates rather than taps, so the zoom
+                // it cannot reach through the gesture is a named action.
+                .accessibilityAction(named: Text(zoom > 1 ? "Zoom out" : "Zoom in")) {
+                    withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) {
+                        zoom = zoom > 1 ? 1 : 2
+                    }
+                }
                 .id(attempt)
         }
         .overlay(alignment: .topLeading) {
@@ -1442,7 +1473,7 @@ private struct StackCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .ledgerPanel(radius: 12)
+        .ledgerPanel()
         .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
         .accessibilityElement(children: .combine)
     }
@@ -1502,7 +1533,7 @@ struct TitleCollectionScreen: View {
 
 /// One stack with its full description, author, badges and every entry it lists.
 struct StackScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let stack: InterestStack
     @State private var detail: StackDetail?
     @State private var failure: String?
@@ -1747,7 +1778,7 @@ private struct StackEntryRow: View {
 /// Every stack that lists this title, with the first page handed over from the
 /// title page so opening it does not repeat the request.
 struct TitleStacksScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let title: Title
     @State private var stacks: [InterestStack]
     @State private var nextPage: Int?
@@ -1813,7 +1844,7 @@ struct TitleStacksScreen: View {
 }
 
 struct TitleReviewsScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let title: Title
     @State private var reviews: [TitleReview]
@@ -2100,7 +2131,7 @@ struct ListEditor: View {
         var id: Self { self }
     }
 
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @Environment(\.dismiss) private var dismiss
     let title: Title
     let mode: Mode
@@ -2474,7 +2505,7 @@ struct ListEditor: View {
             Text(value.wrappedValue == 0 ? zeroLabel : value.wrappedValue.formatted())
                 .font(.largeTitle.weight(.semibold).monospacedDigit())
                 .frame(maxWidth: .infinity, minHeight: 60)
-                .ledgerPanel(radius: 14)
+                .ledgerPanel()
                 .accessibilityLabel(label)
                 .accessibilityValue(zeroLabel == "—" && value.wrappedValue == 0 ? "Unscored" : value.wrappedValue.formatted())
 

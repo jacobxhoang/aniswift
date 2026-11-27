@@ -1,43 +1,44 @@
 import SwiftUI
 
 @MainActor
-final class Store: ObservableObject {
+@Observable
+final class Store {
     /// The catalog and MyAnimeList client. It is injected so list sync, feed
     /// paging and the cache paths can run against a stub in tests.
     let api: any APIClient
-    @Published var account: Account?
-    @Published var checking = true
-    @Published var message: String?
-    @Published private(set) var organization = ListOrganization()
-    @Published private var savedLists: [Kind: SavedList] = [:]
+    var account: Account?
+    var checking = true
+    var message: String?
+    private(set) var organization = ListOrganization()
+    private var savedLists: [Kind: SavedList] = [:]
     /// Every list row by title id, so a poster tile reads its saved row in one
     /// step: Discover draws ten shelves of fourteen tiles, and each tile used to
     /// walk up to a thousand rows on every pass.
     private(set) var entries: [Kind: [String: ListEntry]] = [:]
-    @Published private(set) var refreshingLists: Set<Kind> = []
+    private(set) var refreshingLists: Set<Kind> = []
     /// Why a kind's list could not be synced, so the list screen can offer a
     /// retry instead of drawing an empty list.
-    @Published private(set) var listFailures: [Kind: String] = [:]
+    private(set) var listFailures: [Kind: String] = [:]
     /// Kinds whose first page has been requested but has not finished loading.
-    @Published private(set) var pendingListLoads: Set<Kind> = []
-    @Published var friends: [Friend] = []
-    @Published var activity: [FriendUpdate] = []
-    @Published var friendMessage: String?
-    @Published var loadingFriends = false
-    @Published private(set) var friendFeedPage = 0
-    @Published private var checkedFriends = 0
-    @Published private var historyCursors: [FriendHistoryCursor] = []
-    @Published private(set) var profileStatuses: [String: PublicDataStatus] = [:]
-    @Published private(set) var feedStatus = PublicDataStatus()
+    private(set) var pendingListLoads: Set<Kind> = []
+    var friends: [Friend] = []
+    var activity: [FriendUpdate] = []
+    var friendMessage: String?
+    var loadingFriends = false
+    private(set) var friendFeedPage = 0
+    private var checkedFriends = 0
+    private var historyCursors: [FriendHistoryCursor] = []
+    private(set) var profileStatuses: [String: PublicDataStatus] = [:]
+    private(set) var feedStatus = PublicDataStatus()
 
     /// Set when a page of the feed could not be read, so the feed stops asking
     /// for a page that will not arrive until the reader refreshes it.
-    @Published private(set) var feedPageStalled = false
+    private(set) var feedPageStalled = false
     var hasMoreFriendActivity: Bool {
         (checkedFriends < friends.count || !historyCursors.isEmpty) && !feedPageStalled
     }
 
-    @Published private var profiles = ProfileCache.read()
+    private var profiles = ProfileCache.read()
     private var profileRequests: [String: Task<ProfileFetchOutcome, Never>] = [:]
     private var publicBackoff: [String: PublicBackoff] = [:]
     private var publicRetryTasks: [String: Task<Void, Never>] = [:]

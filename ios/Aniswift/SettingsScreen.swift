@@ -151,7 +151,7 @@ struct SettingsScreen: View {
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var confirmSignOut = false
     /// The AniList sign-in sheet, which reads the token from wherever AniList
     /// hands it back rather than from one redirect URL the app can name.
@@ -159,7 +159,7 @@ struct SettingsScreen: View {
     /// The AniList section keeps one client: it holds the session and the
     /// entries the read-only lists screen draws, and the store sends it the
     /// changes made on MyAnimeList.
-    @StateObject private var aniList = AniListClient.shared
+    private let aniList = AniListClient.shared
 
     var body: some View {
         List {
@@ -218,19 +218,18 @@ struct SettingsScreen: View {
                     }
                     .settingsRow()
                     .disabled(aniList.connecting || AniListClient.bundledClientID == nil)
-                    if AniListClient.bundledClientID == nil {
-                        Text("This build has no AniList client ID.")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                            .settingsRow()
-                    }
-                    if let message = aniList.message {
-                        Text(message).font(.footnote).foregroundStyle(.secondary)
-                            .settingsRow()
-                    }
                 }
             } header: {
                 Text("AniList")
+            } footer: {
+                // A row names what it opens or sets and nothing more, so what a
+                // connection needs and what it failed with read as the section's
+                // footer instead of as a line under the row they belong to.
+                if AniListClient.bundledClientID == nil {
+                    Text("This build has no AniList client ID.")
+                } else if let message = aniList.message {
+                    Text(message)
+                }
             }
             // About sits under AniList: it explains the app rather than what the
             // app is connected to, so the version and the services come after.
@@ -543,7 +542,7 @@ private struct PreferenceToggle: View {
 }
 
 private struct CacheRow: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var bytes: UInt = 0
     @State private var confirming = false
     @State private var clearing = false
@@ -834,7 +833,7 @@ enum InAppBrowser {
 /// A signed-in account's AniList lists, read-only: the entries grouped by kind
 /// and status the way AniList holds them, with a Sync to bring them over again.
 struct AniListListsScreen: View {
-    @ObservedObject var client: AniListClient
+    let client: AniListClient
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     /// A row's thumbnail follows Dynamic Type with its labels.
     @ScaledMetric(relativeTo: .subheadline) private var thumbnailWidth: CGFloat = 52

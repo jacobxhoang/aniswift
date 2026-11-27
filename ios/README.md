@@ -25,7 +25,7 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, and use swipe actions to update progress or remove a title. The list reads every page on its own once it opens, so it arrives whole instead of growing as you scroll. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. |
+| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, and use swipe actions to update progress or remove a title, each with a six-second Undo. The list reads every page on its own once it opens, so it arrives whole instead of growing as you scroll. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. Signed out, the tab says what will appear there and offers the catalog. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | Your card names the account and puts its anime and manga totals on one line, with days watched and chapters read under them. Below it, one **Statistics** panel holds both kinds — pick Anime or Manga, and open or shut it to see the totals, the share each status takes and the counts. Then friends and public favorites, custom lists, sharing your MyAnimeList profile, **Settings → Profile** for what appears, and Settings from the toolbar gear. |
@@ -35,9 +35,11 @@ or a recent update to open its title. Their own friends appear under the statist
 opens that person's profile in turn. Back returns to the friend's profile, then to the Feed. Pull down to
 refresh the profile. Every list, a friend's list, catalog results, the catalog browser, reviews and interest
 stacks refresh the same way. Lists, Discover and the Feed draw skeleton placeholders while their first page of
-content loads, then replace them with the real rows and shelves. An empty list offers the catalog; a section,
+content loads, then replace them with the real rows and shelves. Signed out, a list tab and the Feed explain
+themselves in one panel with the way in and the catalog; an empty list offers the catalog; a section,
 page or profile that could not be loaded says so in a notice panel with a Retry — the same panel a title page
-uses for its **Showing saved data** note, so a failure reads the same everywhere.
+uses for its **Showing saved data** note, so a failure reads the same everywhere. A change that never reaches
+MyAnimeList arrives as that same panel at the bottom edge, with a Dismiss, rather than in a dialog over the screen.
 
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
@@ -180,7 +182,8 @@ Changes you make on MyAnimeList are carried over to AniList; nothing is read bac
    own app, put its ID in `Info.plist` (`AniswiftAniListClientID`) and rebuild: the app has no field for it.
 2. Tap **Connect AniList** and finish the sign-in in the sheet. The section then lists the account's anime and manga
    entries grouped by status, with posters, progress and scores, and **Sign Out of AniList** ends the session
-   without touching the MyAnimeList one.
+   without touching the MyAnimeList one. A build without a client ID, or a sign-in that failed, says so under the
+   section as its footer rather than beside the row.
 
 The lists are read through AniList's GraphQL API when the screen opens and on pull-to-refresh; the session is
 kept in the Keychain and lasts a year. Scores cross on AniList's 100-point scale in both directions — a
@@ -211,6 +214,13 @@ depend on what the provider can retrieve. The next episodes AniList publishes ar
 `Aniswift-airing-schedules-v1.json`, so a list draws **Episode 9 airs in 2 hours** on its first paint after a
 launch; an entry older than ten minutes is asked for again while the saved one stays on screen, and Clear Cache
 leaves the file alone because it holds no user data.
+
+Every edge that carries a boundary — a poster's rim, a panel, a capsule, a divider — clears the platform's 3:1
+non-text contrast on the black canvas and on a panel above it, and the edge of a chosen control sits a step above
+that. A title page's header poster follows Dynamic Type with the name under it, and a poster or a thumbnail stops
+growing at 1.4× so a page keeps its shape at the accessibility sizes. A list, Discover and the Feed carry a
+**Refresh** control in the bar, which reads the page again without scrolling back to the top. On a hardware
+keyboard, **Command-R** refreshes, **Command-E** opens a title's editor and **Command-Shift-F** a list's Sort and Filter.
 
 Snapshots are encoded on the screen's actor and written through one serial background queue, so a list edit or a
 feed page never waits on the disk. `Aniswift/PrivacyInfo.xcprivacy` carries the app's privacy manifest: no

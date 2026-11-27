@@ -6,7 +6,7 @@ import UIKit
 @main
 @MainActor
 struct AniswiftApp: App {
-    @StateObject private var store = Store()
+    @State private var store = Store()
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
     @AppStorage(SettingKey.lastTab) private var lastTab = "anime"
@@ -54,24 +54,36 @@ struct AniswiftApp: App {
                         return InAppBrowser.present(url) ? .handled : .systemAction
                     }
                 )
-                .environmentObject(store)
+                .environment(store)
                 .task { await store.restore() }
-                .alert(
-                    "Something went wrong",
-                    isPresented: Binding(
-                        get: { store.message != nil }, set: { if !$0 { store.message = nil } }
-                    )
-                ) {
-                    Button("OK", role: .cancel) {}
-                } message: {
-                    Text(store.message ?? "")
+                // A failure is the notice every screen draws, at the bottom edge
+                // where the reader keeps the page: the alert this replaces
+                // stopped the screen for a sentence worth reading once. It
+                // arrives and goes without motion, so nothing has to ask Reduce
+                // Motion at the root, which has no environment to read.
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    if let message = store.message {
+                        LedgerFailureBar(message: message) { store.message = nil }
+                            .padding(.horizontal, LedgerLayout.inset)
+                            .padding(.bottom, 8)
+                    }
+                }
+                // A bar that arrives while the reader is elsewhere in the screen
+                // says itself out loud, the way the alert used to.
+                .onChange(of: store.message) { _, message in
+                    guard let message else { return }
+                    UIAccessibility.post(notification: .announcement, argument: message)
                 }
         }
     }
 
     @ViewBuilder
     private var rootTabs: some View {
-        if #available(iOS 26.0, *) {
+        // The `Tab` API is iOS 18 and names a tab's label, symbol and value in
+        // one declaration; only the minimize behaviour inside it is iOS 26, so
+        // that one is a modifier of its own instead of a second branch around
+        // the whole tab root. iOS 17 keeps `tabItem`.
+        if #available(iOS 18.0, *) {
             TabView(selection: $tab) {
                 Tab("Anime", systemImage: "tv", value: "anime") {
                     stack { ListsScreen(kind: .anime) }
@@ -89,7 +101,7 @@ struct AniswiftApp: App {
                     stack { AccountScreen() }
                 }
             }
-            .tabBarMinimizeBehavior(tabBarBehavior == "onScrollDown" ? .onScrollDown : .never)
+            .modifier(LedgerTabBarMinimization(behavior: tabBarBehavior))
             .modifier(LedgerSidebarTabs())
         } else {
             TabView(selection: $tab) {
@@ -213,15 +225,21 @@ enum Palette {
     static let background: Color = .black
     static let surface = Color(white: 0.12)
     static let sheet = Color(white: 0.08)
-    /// The hairline around posters, panels and capsules: one step up from the
-    /// 8–14% white used before, which measured about 1.3:1 against the canvas,
-    /// so an edge that separates two surfaces could not be seen at all.
-    static let hairline = Color.white.opacity(0.22)
-    /// The edge of an active or selected control, one step above `hairline`.
-    static let border = Color.white.opacity(0.32)
+    /// The hairline around posters, panels and capsules. The 8–14% white used
+    /// before measured about 1.3:1 against the canvas, and the 22% that followed
+    /// only about 2.05:1 against a surface, both short of the 3:1 non-text floor
+    /// an edge that carries a boundary has to clear.
+    static let hairline = Color.white.opacity(0.34)
+    /// The edge of an active or selected control, one step above `hairline`:
+    /// about 4.5:1 against a surface, so a chosen chip or a focused control
+    /// keeps its boundary on every surface it sits on.
+    static let border = Color.white.opacity(0.46)
     /// The fill behind a chip or a status pill. A fill carries no boundary, so
     /// it stays softer than a hairline.
     static let fill = Color.white.opacity(0.12)
+    /// The green a list row's swipe wears when it adds an episode or a chapter.
+    /// It is the one control that used to state its colour as a value of its own.
+    static let progress = Color(red: 0.03, green: 0.57, blue: 0.08)
     /// The two states of an airing row: amber while an episode that already
     /// aired is unwatched, green once the reader has caught up with the run.
     static let airingBehind = Color(red: 0.97, green: 0.82, blue: 0.42)
@@ -348,6 +366,9 @@ struct SavedDataNote: View {
                 Button("Retry") { Task { await retry() } }
                     .font(.footnote.weight(.semibold))
                     .buttonStyle(.borderless)
+                    // A footnote is shorter than a touch target, so the control
+                    // keeps the 44 points every other button on the page has.
+                    .frame(minHeight: 44)
                     .disabled(isBusy)
             }
         }
@@ -383,8 +404,39 @@ struct LedgerProblem: View {
                 Button(retryLabel) { Task { await retry() } }
                     .font(.footnote.weight(.semibold))
                     .buttonStyle(.borderless)
+                    .frame(minHeight: 44)
                     .disabled(isBusy)
             }
+        }
+        .ledgerNoticePanel()
+    }
+}
+
+/// A failure the whole app reports, where the reader still is: the same sentence
+/// in the same notice panel every screen uses, at the bottom edge, with the one
+/// control that clears it. A dialog stopped the page for a failure the reader
+/// could keep working through.
+struct LedgerFailureBar: View {
+    let message: String
+    let dismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            HStack(alignment: .top, spacing: 7) {
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityHidden(true)
+                Text(message)
+                    .font(.footnote)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .foregroundStyle(.secondary)
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            Button("Dismiss", action: dismiss)
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.borderless)
+                .frame(minHeight: 44)
         }
         .ledgerNoticePanel()
     }
@@ -429,7 +481,9 @@ extension View {
         }
     }
 
-    func ledgerPanel(radius: CGFloat = 16) -> some View {
+    /// A panel's corner is the one radius the app uses for a card, so a panel, a
+    /// sort group and a notice line up instead of meeting at 12, 14 and 16.
+    func ledgerPanel(radius: CGFloat = LedgerLayout.panelRadius) -> some View {
         background(.thinMaterial, in: .rect(cornerRadius: radius))
             .overlay {
                 RoundedRectangle(cornerRadius: radius)
@@ -439,17 +493,13 @@ extension View {
     }
 
     /// The panel behind a notice: the copy a screen keeps while the provider is
-    /// down, or a section that could not be loaded. One surface, so the two
-    /// conditions every screen reports read as one family.
+    /// down, or a section that could not be loaded. It is the app's one panel,
+    /// so a notice and a card are the same surface instead of a flat fill set
+    /// against a material.
     func ledgerNoticePanel() -> some View {
         padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(Palette.surface.opacity(0.72), in: .rect(cornerRadius: LedgerLayout.panelRadius))
-            .overlay {
-                RoundedRectangle(cornerRadius: LedgerLayout.panelRadius)
-                    .strokeBorder(Palette.hairline)
-                    .allowsHitTesting(false)
-            }
+            .ledgerPanel()
     }
 }
 
@@ -556,7 +606,7 @@ extension View {
 }
 
 struct PreferredTitle<Content: View>: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let title: Title
     var loadMissingImage = false
@@ -647,7 +697,7 @@ struct PosterArt: View {
 }
 
 struct CoverTile: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let title: Title
     var showsScore = true
     var loadMissingImage = false
@@ -736,6 +786,34 @@ struct CoverTile: View {
     }
 }
 
+/// A page's "nothing here yet": what is missing, one line of why, and the step
+/// out of it. It is the system's own empty view, so a reader who knows iOS
+/// already knows the shape, and every page in the app states it the same way
+/// instead of a hand-built block on some screens and this one on others.
+struct LedgerEmpty<Actions: View>: View {
+    let title: String
+    let symbol: String
+    var message: String? = nil
+    @ViewBuilder var actions: Actions
+
+    var body: some View {
+        ContentUnavailableView {
+            Label(title, systemImage: symbol)
+        } description: {
+            if let message { Text(message) }
+        } actions: {
+            actions
+        }
+        .frame(maxWidth: .infinity)
+    }
+}
+
+extension LedgerEmpty where Actions == EmptyView {
+    init(title: String, symbol: String, message: String? = nil) {
+        self.init(title: title, symbol: symbol, message: message) { EmptyView() }
+    }
+}
+
 struct Rail: View {
     let name: String
     let titles: [Title]
@@ -799,7 +877,7 @@ struct TitleRow: View {
 }
 
 struct SignInButton: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var working = false
 
     var body: some View {
@@ -833,7 +911,7 @@ struct SignInButton: View {
 }
 
 struct AccountScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var loadingProfile = false
     @State private var profileUnavailable = false
     /// Every Profile toggle, read once and refreshed when Settings writes one.
@@ -1050,7 +1128,10 @@ struct AccountScreen: View {
                         .frame(width: 88)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
+                    // A portrait answers a touch the way a poster does: the
+                    // friends, favorite-character and favorite-people shelves
+                    // gave no sign that they had been pressed.
+                    .buttonStyle(LedgerTileButtonStyle())
                 }
             }
         }
@@ -1075,7 +1156,7 @@ struct AccountScreen: View {
 }
 
 struct FriendProfileScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let friend: Friend
 
     @State private var loading = true
@@ -1292,7 +1373,7 @@ struct FriendProfileScreen: View {
 }
 
 private struct FriendMediaListScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let friend: Friend
     let kind: Kind
 
@@ -1875,6 +1956,21 @@ struct AboutScreen: View {
 /// A tab bar on iPhone and the sidebar iPadOS 18 puts beside it, so the five
 /// destinations keep their place on a large screen and can be reordered the way
 /// the system offers.
+/// The iOS 26 tab bar's minimize behaviour, chosen in Behavior → Tab Bar. A
+/// modifier keeps the iOS 18 tab root on the `Tab` API without a second
+/// availability branch around its whole body.
+private struct LedgerTabBarMinimization: ViewModifier {
+    let behavior: String
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabBarMinimizeBehavior(behavior == "onScrollDown" ? .onScrollDown : .never)
+        } else {
+            content
+        }
+    }
+}
+
 private struct LedgerSidebarTabs: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {

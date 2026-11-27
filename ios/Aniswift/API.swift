@@ -1,6 +1,6 @@
 import AuthenticationServices
-import Combine
 import Foundation
+import Observation
 import Security
 import UIKit
 
@@ -1060,16 +1060,17 @@ private enum AniListKeychain {
 /// carries MyAnimeList changes over. It runs one way — an AniList change is
 /// never written back to MyAnimeList.
 @MainActor
-final class AniListClient: ObservableObject {
+@Observable
+final class AniListClient {
     static let shared = AniListClient()
     static let graphql = URL(string: "https://graphql.anilist.co")!
     static let authorize = URL(string: "https://anilist.co/api/v2/oauth/authorize")!
 
-    @Published private(set) var session: AniListSession?
-    @Published private(set) var entries: [AniListEntry] = []
-    @Published private(set) var loading = false
-    @Published private(set) var connecting = false
-    @Published private(set) var message: String?
+    private(set) var session: AniListSession?
+    private(set) var entries: [AniListEntry] = []
+    private(set) var loading = false
+    private(set) var connecting = false
+    private(set) var message: String?
     /// The AniList media and list entry ids by `Title.id`, learned from a sync
     /// or a lookup, so a change does not need a second request for them.
     private var mediaIDs: [String: Int] = [:]
@@ -1379,10 +1380,11 @@ struct AiringSchedule: Equatable, Codable {
 /// schedule query without a session, so this works whether or not the reader
 /// has connected AniList in Settings.
 @MainActor
-final class AiringScheduleCache: ObservableObject {
+@Observable
+final class AiringScheduleCache {
     static let shared = AiringScheduleCache()
 
-    @Published private(set) var schedules: [Int: AiringSchedule] = [:]
+    private(set) var schedules: [Int: AiringSchedule] = [:]
     /// When each id was asked for. An id that answered nothing — a run that has
     /// finished, or a title AniList does not list — is stamped too, so it is not
     /// asked for again on every pass.

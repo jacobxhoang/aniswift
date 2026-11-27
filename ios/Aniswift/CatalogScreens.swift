@@ -159,10 +159,24 @@ struct ListFilter: Codable, Equatable {
     private static func key(_ kind: Kind) -> String { "aniswift.list.filter.\(kind.rawValue)" }
 }
 
+/// A change a list row has just made, kept for a few seconds so the bar can take
+/// it back. A removal and a step both answer Undo; only the removal did.
+private struct ListUndo {
+    /// The row the change touched, so a second change replaces the first.
+    let id: String
+    /// What the bar reads.
+    let message: String
+    /// The row as it was, which the Undo sends back.
+    let entry: ListEntry
+    /// The change that puts the row back the way it was.
+    let restore: ListChange
+}
+
 struct ListsScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     /// The next-episode schedules AniList has published for the airing rows.
-    @ObservedObject private var schedules = AiringScheduleCache.shared
+    /// Observation tracks the reads, so the singleton is held, not wrapped.
+    private let schedules = AiringScheduleCache.shared
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let kind: Kind
     @State private var collapsed: Set<String> = []
@@ -171,7 +185,9 @@ struct ListsScreen: View {
     @State private var showingFilter = false
     @State private var paging = false
     @State private var listPageError: String?
-    @State private var removed: (entry: ListEntry, change: ListChange)?
+    /// The change the list has just made, held for a few seconds so the bar can
+    /// take it back: a removal and a step both answer Undo now.
+    @State private var undo: ListUndo?
     @State private var saving: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let rowInset: CGFloat = 10
@@ -246,7 +262,15 @@ struct ListsScreen: View {
             if store.checking {
                 ProgressView("Checking session").listRowBackground(Color.clear)
             } else if store.account == nil {
-                SignInButton().listRowBackground(Color.clear)
+                // Signed out, the tab is still a page with a subject: one panel
+                // that says what will appear here and the two ways in, the way
+                // the Profile tab explains itself, instead of a bare sign-in
+                // button floating in an otherwise empty list.
+                signedOut
+                    .listRowInsets(
+                        EdgeInsets(top: 12, leading: LedgerLayout.inset, bottom: 12, trailing: LedgerLayout.inset))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
             } else if store.lists[kind] == nil, store.pendingListLoads.contains(kind) {
                 ListSkeleton(kind: kind)
                     .listRowInsets(EdgeInsets())
@@ -263,11 +287,11 @@ struct ListsScreen: View {
                 // An empty state belongs in the page, not in a row: inside a List
                 // it centres against the row's insets instead of the screen. The
                 // step out of it is the catalog, where a title is added.
-                VStack(spacing: 10) {
-                    Label("No \(kind.label.lowercased()) yet", systemImage: kind == .anime ? "tv" : "books.vertical")
-                        .font(.headline)
-                    Text("Titles you add from Discover or a title page appear here.")
-                        .foregroundStyle(.secondary)
+                LedgerEmpty(
+                    title: "No \(kind.label.lowercased()) yet",
+                    symbol: kind == .anime ? "tv" : "books.vertical",
+                    message: "Titles you add from Discover or a title page appear here."
+                ) {
                     NavigationLink(value: CatalogBrowserRoute()) {
                         Label("Browse catalog", systemImage: "square.grid.2x2")
                     }
@@ -275,9 +299,7 @@ struct ListsScreen: View {
                     .buttonStyle(.borderless)
                     .frame(minHeight: 44)
                 }
-                .frame(maxWidth: .infinity)
-                .multilineTextAlignment(.center)
-                .padding(.vertical, 28)
+                .padding(.vertical, 20)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
             } else {
@@ -331,6 +353,30 @@ struct ListsScreen: View {
                                 }
                             }
                     }
+                    // A hardware keyboard opens the sheet as well: the sort and
+                    // the filters used to be reachable by pointer alone.
+                    .keyboardShortcut("f", modifiers: [.command, .shift])
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task {
+                            await store.loadLists(force: true)
+                            listPageError = nil
+                        }
+                    } label: {
+                        if store.refreshingLists.contains(kind) {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .accessibilityLabel("Refresh")
+                    .accessibilityHint("Reads your list from MyAnimeList again")
+                    .disabled(store.refreshingLists.contains(kind))
+                    // The pull to refresh in one press, so a reader who is not
+                    // at the top of the list, and a hardware keyboard, have a
+                    // way to ask again.
+                    .keyboardShortcut("r", modifiers: .command)
                 }
             }
         }
@@ -352,20 +398,20 @@ struct ListsScreen: View {
             await store.loadLists(force: true)
             listPageError = nil
         }
-        // A removal is a swipe and an Undo, not a question: the entry waits in
-        // the bar for a few seconds and then goes.
+        // A removal or a step is a swipe and an Undo, not a question: the row
+        // waits in the bar for a few seconds, then the change stands.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            if let removed {
+            if let undo {
                 HStack(spacing: 12) {
-                    Text("Removed \(displayName(removed.entry.title))")
+                    Text(undo.message)
                         .font(.subheadline)
                         .lineLimit(1)
                     Spacer(minLength: 8)
-                    Button("Undo") { undoRemoval() }
+                    Button("Undo") { undoChange() }
                         .font(.subheadline.weight(.semibold))
                         .foregroundStyle(.tint)
                         .frame(minHeight: 44)
-                        .accessibilityHint("Puts the title back on your list")
+                        .accessibilityHint("Puts the row back the way it was")
                 }
                 .padding(.horizontal, LedgerLayout.inset)
                 .padding(.vertical, 4)
@@ -375,7 +421,31 @@ struct ListsScreen: View {
                 .accessibilityElement(children: .combine)
             }
         }
-        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: removed != nil)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: undo?.id)
+    }
+
+    /// What the tab says before MyAnimeList is connected: what will appear
+    /// here, the way in, and the catalog for a reader who would rather look
+    /// first. The Profile tab has always explained itself; this one offered a
+    /// sign-in button and nothing else.
+    private var signedOut: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Your \(kind.label.lowercased()) list appears here once MyAnimeList is connected.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            SignInButton()
+            NavigationLink(value: CatalogBrowserRoute()) {
+                Label("Browse the catalog", systemImage: "square.grid.2x2")
+            }
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.borderless)
+            .frame(minHeight: 44)
+            .accessibilityHint("Finds a title to add once you are signed in")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .ledgerPanel()
     }
 
     private func groupHeader(_ status: String, count: Int) -> some View {
@@ -391,13 +461,13 @@ struct ListsScreen: View {
     /// A list a filter or a search has emptied: it says which one emptied it
     /// and offers the way back out of the filter.
     private var noMatches: some View {
-        VStack(spacing: 10) {
-            Label("No matches in your list", systemImage: "line.3.horizontal.decrease.circle")
-                .font(.headline)
-            Text(searchTerm.isEmpty
+        LedgerEmpty(
+            title: "No matches in your list",
+            symbol: "line.3.horizontal.decrease.circle",
+            message: searchTerm.isEmpty
                 ? "These filters hide every title in it."
-                : "Nothing here matches the search.")
-                .foregroundStyle(.secondary)
+                : "Nothing here matches the search."
+        ) {
             if isFiltering {
                 Button("Clear Filters") { filter = .defaults(for: kind) }
                     .font(.subheadline.weight(.semibold))
@@ -406,9 +476,7 @@ struct ListsScreen: View {
                     .accessibilityHint("Shows every title in your list again")
             }
         }
-        .frame(maxWidth: .infinity)
-        .multilineTextAlignment(.center)
-        .padding(.vertical, 28)
+        .padding(.vertical, 20)
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
     }
@@ -534,10 +602,10 @@ struct ListsScreen: View {
         }
         .swipeActions(edge: .leading, allowsFullSwipe: false) {
             if (item.title.total ?? 0) <= 0 || item.progress < (item.title.total ?? 0) {
-                Button {
-                    update(item, change: ListChange(status: item.status, progress: item.progress + 1, rating: item.rating))
-                } label: { Label(kind == .anime ? "Episode" : "Chapter", systemImage: "plus") }
-                .tint(Color(red: 0.03, green: 0.57, blue: 0.08))
+                Button { step(item) } label: {
+                    Label(kind == .anime ? "Episode" : "Chapter", systemImage: "plus")
+                }
+                .tint(Palette.progress)
                 .accessibilityLabel(kind == .anime ? "Add one episode" : "Add one chapter")
                 .disabled(saving.contains(item.id))
             }
@@ -569,20 +637,43 @@ struct ListsScreen: View {
 
     /// A removal keeps the entry so the Undo can put it back exactly as it was.
     private func remove(_ item: ListEntry) {
-        removed = (entry: item, change: ListChange(status: item.status, progress: item.progress, rating: item.rating))
+        hold(
+            ListUndo(
+                id: item.id, message: "Removed \(displayName(item.title))", entry: item,
+                restore: ListChange(status: item.status, progress: item.progress, rating: item.rating)))
         update(item, change: nil)
+    }
+
+    /// A step keeps the progress it started from, so a stray swipe is one tap
+    /// away from where it was instead of a number the reader has to remember.
+    private func step(_ item: ListEntry) {
+        hold(
+            ListUndo(
+                id: item.id,
+                message: "\(displayName(item.title)) · \(item.progress + 1) \(kind.unit.lowercased())",
+                entry: item,
+                restore: ListChange(status: item.status, progress: item.progress, rating: item.rating)))
+        update(
+            item,
+            change: ListChange(status: item.status, progress: item.progress + 1, rating: item.rating))
+    }
+
+    /// Keeps one change in the bar for six seconds. A second change to the same
+    /// row replaces the first, so the bar always describes what Undo takes back.
+    private func hold(_ change: ListUndo) {
+        undo = change
         Task {
             try? await Task.sleep(for: .seconds(6))
-            guard !Task.isCancelled, removed?.entry.id == item.id else { return }
-            removed = nil
+            guard !Task.isCancelled, undo?.id == change.id else { return }
+            undo = nil
         }
     }
 
-    private func undoRemoval() {
-        guard let removed else { return }
-        self.removed = nil
+    private func undoChange() {
+        guard let undo else { return }
+        self.undo = nil
         Haptics.success()
-        update(removed.entry, change: removed.change)
+        update(undo.entry, change: undo.restore)
     }
 }
 
@@ -701,7 +792,9 @@ struct ListFilterSheet: View {
                 Button { filter.descending.toggle() } label: {
                     Image(systemName: "arrow.up.arrow.down")
                         .font(.subheadline.weight(.semibold))
-                        .frame(width: 38, height: 38)
+                        // The round control takes the 44 points of every other
+                        // touch target; at 38 it was the one short one.
+                        .frame(width: 44, height: 44)
                         .ledgerGlassCircle()
                 }
                 .buttonStyle(.plain)
@@ -880,7 +973,7 @@ enum DiscoverShelf: String, CaseIterable, Identifiable {
 }
 
 struct PosterShelf<Trailing: View>: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let heading: String
     let titles: [Title]
     var isDiscoverShelf = false
@@ -940,7 +1033,7 @@ struct PosterShelf<Trailing: View>: View {
 }
 
 struct DiscoverScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var shelves: [DiscoverShelf: [Title]] = [:]
     @State private var search = ""
     @State private var loading = true
@@ -979,6 +1072,25 @@ struct DiscoverScreen: View {
         .searchable(text: $search, placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
         .searchRecents($search)
         .toolbar {
+            // The shelves are read again from here as well as by a pull, so a
+            // reader who is not at the top of the page has the same way in.
+            if searchTerm.isEmpty {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        Task { await loadShelves(refresh: true) }
+                    } label: {
+                        if loading {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                    }
+                    .accessibilityLabel("Refresh")
+                    .accessibilityHint("Reads the shelves from the catalog again")
+                    .disabled(loading)
+                    .keyboardShortcut("r", modifiers: .command)
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 NavigationLink(value: CatalogBrowserRoute()) {
                     Label("Browse catalog", systemImage: "square.grid.2x2")
@@ -1366,7 +1478,7 @@ private struct ProducerTitleRow: View {
 }
 
 struct PosterResults: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     let name: String
     let shelf: DiscoverShelf?
     let query: String
@@ -1525,7 +1637,7 @@ struct CatalogResultsRoute: Hashable {
 }
 
 struct CatalogBrowser: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
     @State private var kind: Kind = .anime
     @State private var mode: BrowseMode = .popular
     @State private var search = ""
@@ -1676,7 +1788,7 @@ struct CatalogBrowser: View {
 }
 
 struct FriendsScreen: View {
-    @EnvironmentObject private var store: Store
+    @Environment(Store.self) private var store
 
     var body: some View {
         // A ScrollView, not a List: List resolves a row that contains links as a
@@ -1687,10 +1799,20 @@ struct FriendsScreen: View {
                 if store.checking {
                     ProgressView("Checking session").padding(rowInsets)
                 } else if store.account == nil {
-                    VStack(alignment: .leading, spacing: LedgerLayout.gap) {
-                        Text("See what your MyAnimeList friends are watching and reading.").foregroundStyle(.secondary)
+                    // Signed out, the Feed explains itself in the same panel as
+                    // the lists and the Profile, with the way in: it was the one
+                    // tab that said it in bare text.
+                    VStack(alignment: .leading, spacing: 14) {
+                        Text("See what your MyAnimeList friends are watching and reading.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         SignInButton()
-                    }.padding(rowInsets)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .ledgerPanel()
+                    .padding(rowInsets)
                 } else {
                     if store.feedStatus.isShowingSavedData, !store.activity.isEmpty {
                         SavedDataNote(savedAt: store.feedStatus.savedAt, message: store.feedStatus.failure,
@@ -1739,8 +1861,17 @@ struct FriendsScreen: View {
             if store.account != nil {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Task { await store.loadFriends(reset: true) } } label: {
-                        Label("Refresh friends feed", systemImage: "arrow.clockwise")
-                    }.disabled(store.loadingFriends)
+                        if store.loadingFriends {
+                            ProgressView()
+                        } else {
+                            Label("Refresh friends feed", systemImage: "arrow.clockwise")
+                        }
+                    }
+                    .accessibilityLabel("Refresh friends feed")
+                    .disabled(store.loadingFriends)
+                    // The same press and the same shortcut as the list and
+                    // Discover, so the three tabs answer a keyboard alike.
+                    .keyboardShortcut("r", modifiers: .command)
                 }
             }
         }

@@ -49,7 +49,9 @@ its own.
 ## Documentation
 
 - [iOS setup, features and release guide](ios/README.md)
+- [Product record: users, purpose and principles](PRODUCT.md)
 - [Architecture and API analysis](ARCHITECTURE.md)
+- [Interface reference: tokens, components and interaction rules](DESIGN.md)
 - [iOS releases](https://github.com/jacobxhoang/aniswift/releases)
 
 ## Releases
@@ -72,4 +74,6 @@ ios/
   README.md           Setup, feature, settings and release guide
 .github/workflows/    Build, format, test and release workflow
 ARCHITECTURE.md       Project structure, API inventory, caching and risk analysis
+PRODUCT.md            Product record: users, purpose, constraints and principles
+DESIGN.md             Interface reference: tokens, components, interaction and copy rules
 ```
