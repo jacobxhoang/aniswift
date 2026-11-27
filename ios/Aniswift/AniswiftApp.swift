@@ -2165,7 +2165,7 @@ struct AboutScreen: View {
                 statusRow("App Group", value: grantedGroup)
                 statusRow("Widget data", value: widgetData)
             } header: {
-                Text("Home Screen widgets")
+                Text("Widget diagnostics")
             } footer: {
                 Text("A signature decides all five. The app reads them back when it opens.")
             }

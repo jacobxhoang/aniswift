@@ -140,15 +140,23 @@ Home Screen's widget gallery. The app writes the three most recently updated ent
 container after every list read or edit, so a widget draws the poster, a progress bar, the count and a **+1** pill
 without opening the app; the widget's own name in the gallery and on the Home Screen is its heading, so nothing is
 repeated inside the card. The poster arrives when the widget refreshes, and a row whose picture does not come
-shows the kind's glyph instead. **Last Updated** shows one row small and three medium.
+shows the kind's glyph instead. **Last Updated** is a medium card on its own, drawing the single most recently
+updated entry — the small size cut its title to a few letters — with the bar in the app's own ink rather than the
+system tint a widget falls back to.
 
-**Next Episode** is its own widget, in all three sizes: one row small, that same row with a bigger picture medium,
-and three rows large, each filling its share of the height. Every row carries the title, the countdown AniList
-publishes — "Episode 7 airs in 3 days", in green once you are caught up and in amber while an episode that already
-aired is unwatched — and, under it, **On the latest episode** once you have seen every one, or the count ("6/12")
-until then. A title AniList carries no next episode for shows its count alone, so a row never claims an episode it
-cannot place. The countdown is asked of AniList by the widget itself, which needs no sign-in for it. No artwork
-sits behind the rows: the card keeps the same plain background as the others.
+**Next Episode** is its own widget, in all three sizes: one card small, that card beside a picture medium, and
+three rows large, each filling its share of the height. Every size carries the same words: the name, the countdown
+AniList publishes — "Episode 7 airs in 3 days", in amber while an aired episode is unwatched and green once you
+are caught up, the same two shades a list row takes — and under it what you are behind by in amber ("8 episodes
+behind"), or **On the latest episode** once you have caught up. The small card is words alone, at a size that
+fills it, while the medium and large ones put the picture, the bar and the **+1** beside them. A title
+AniList carries no next episode for shows its count alone, so a card never claims an episode it cannot place. The
+countdown is asked of AniList by the widget itself, which needs no sign-in for it. No artwork sits behind the
+rows: the card keeps the same plain background as the others. A tap a card could not complete is written down
+rather than lost: the snapshot records it and the app says **Could not add … from the widget** the next time it
+opens, since a widget has no way to raise an alert of its own. At an accessibility text size a card turns to words
+alone — on both widgets the picture steps out rather than squeezing the title — which is the most a Home Screen card
+can do with text that large.
 
 The **+1** button adds one episode or chapter straight to MyAnimeList, with the token the app keeps for it in the
 App Group container — the one copy outside the Keychain, protected until the device is first unlocked and removed
@@ -173,11 +181,9 @@ live in `Persistence.swift` and the extension.
 
 Two things still have to line up, and they are where the widgets get lost:
 
-- **The signature has to grant that group.** A signature that grants nothing leaves the container `nil`, and every
-  widget says **This build has no App Group, so the widget cannot read your list.** however often
-  the app is opened — that sentence is how a signing problem is told apart from an empty list. A group the list does
-  not name is one more entry in `AppGroup.known` in both bundles, and the same name in the two `.entitlements` files,
-  so the signer has an entitlement to keep.
+- **The signature has to grant a group.** A signature that grants none leaves the container `nil`, and every
+  widget says **This build has no App Group, so the widget cannot read your list.** however often the app is
+  opened — that sentence is how a signing problem is told apart from an empty list.
 - **The extension has to be signed too.** A tool that signs only the outer app leaves the `.appex` without a valid
   signature, and iOS then installs the app without its widget, so no Aniswift widget appears in the gallery at all.
 

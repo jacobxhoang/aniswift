@@ -58,6 +58,7 @@ final class Store {
 
     init() {
         api = API()
+        reportWidgetFailure()
     }
 
     init(api: any APIClient) {
@@ -632,6 +633,17 @@ final class Store {
         // The widgets read the file, not the app, so they are asked to redraw
         // when it changes rather than waiting for their own timeline.
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// A widget cannot raise an alert, so a tap it could not complete is written
+    /// into the snapshot. The app says it once, at launch, and clears it — the
+    /// failure the app reports is the same bottom-edge notice as its own.
+    private func reportWidgetFailure() {
+        guard let widget = WidgetSnapshot.read(), let failure = widget.failedWrite else { return }
+        message = "Could not add \(failure.name) from the widget."
+        var cleared = widget
+        cleared.failedWrite = nil
+        cleared.write()
     }
 
     /// Every row of a list by title id, for a poster tile's lookup.

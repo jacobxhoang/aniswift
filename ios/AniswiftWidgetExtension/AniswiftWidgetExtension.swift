@@ -77,11 +77,21 @@ enum AppGroup {
     }
 }
 
+/// A step the widget could not take, written into the shared snapshot because a
+/// widget cannot raise an alert: a tap that was refused must not look like a tap
+/// that missed. The app reports it and clears it the next time it opens.
+struct WidgetFailedWrite: Codable {
+    let name: String
+    let date: Date
+}
+
 struct WidgetSnapshot: Codable {
     var anime: [WidgetRow] = []
     var manga: [WidgetRow] = []
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
+    /// The last step a widget's button could not take, until the app says so.
+    var failedWrite: WidgetFailedWrite?
 
     private static let name = "Aniswift-widget-v1.json"
 
@@ -279,16 +289,15 @@ private struct ScheduleAnswer: Decodable {
 
 // MARK: - The widget
 
+/// The card a **Last Updated** widget draws: the medium size alone, with the
+/// single most recently updated entry, which is the one a card that wide and
+/// that short holds at a size worth reading.
 struct AniswiftWidgetView: View {
     let entry: AniswiftWidgetEntry
-    @Environment(\.widgetFamily) private var family
-    @Environment(\.dynamicTypeSize) private var typeSize
 
-    /// A small widget, a large one and any accessibility text size draw one row,
-    /// which is what the family's height holds; a medium widget draws three.
+    /// An empty list says so; otherwise the newest entry is the row.
     private var visible: [WidgetRow] {
-        family == .systemMedium && !typeSize.isAccessibilitySize
-            ? Array(entry.rows.prefix(3)) : Array(entry.rows.prefix(1))
+        Array(entry.rows.prefix(1))
     }
 
     /// The widget's own name is the heading in the gallery and on the Home
@@ -311,11 +320,34 @@ struct AniswiftWidgetView: View {
     }
 }
 
+/// The two states of an airing row, carried at the values the app measures them
+/// at: amber while an episode that already aired is unwatched, green once the
+/// reader is caught up. The extension shares no module with the app, so the pair
+/// is written here as the app writes it, each with a light and a dark shade so
+/// the text clears 4.5:1 on either card.
+private enum AiringInk {
+    static let behind = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.97, green: 0.82, blue: 0.42, alpha: 1)
+                : UIColor(red: 0.62, green: 0.40, blue: 0, alpha: 1)
+        })
+    static let caughtUp = Color(
+        uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark
+                ? UIColor(red: 0.45, green: 0.85, blue: 0.55, alpha: 1)
+                : UIColor(red: 0.09, green: 0.45, blue: 0.20, alpha: 1)
+        })
+}
+
 private struct AniswiftAiringRowView: View {
     let row: WidgetRow
     let poster: Data?
     let airing: WidgetAiring?
     @Environment(\.widgetFamily) private var family
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var isSmall: Bool { family == .systemSmall }
 
     /// A large widget draws three rows, so each takes a smaller picture than the
     /// single row a small or a medium widget can give its own.
@@ -347,36 +379,96 @@ private struct AniswiftAiringRowView: View {
         return row.progress >= aired
     }
 
-    /// The line under the countdown: "On the latest episode" once every aired
-    /// episode is watched, and the count until then.
-    private var progressLabel: String {
-        if caughtUp { return "On the latest episode" }
-        if let total = row.total { return "\(row.progress)/\(total)" }
-        return "\(row.progress)/?"
+    /// The episodes that have aired and are still unwatched, when there are any:
+    /// what each card names in amber under its countdown.
+    private var behind: Int? {
+        guard let aired, row.progress < aired else { return nil }
+        return aired - row.progress
     }
 
+    /// A name is worth three lines in the small family, which has no bar beside
+    /// it, and two where the picture takes the greater share of the card.
+    private var name: some View {
+        Text(row.name)
+            .font(titleFont)
+            .lineLimit(isSmall ? 3 : 2)
+    }
+
+    /// The countdown AniList publishes, in the app's own two states — amber while
+    /// an aired episode is unwatched, green once the reader is caught up — at the
+    /// size the card holding it was given: a small card gives it a line of its
+    /// own, a row shares its height with a picture.
+    @ViewBuilder private var countdown: some View {
+        if let airing {
+            Text(airing.line())
+                .font(textFont)
+                .foregroundStyle(caughtUp ? AiringInk.caughtUp : AiringInk.behind)
+                .lineLimit(2)
+                .accessibilityLabel(
+                    caughtUp ? "\(airing.line()). You are caught up."
+                        : "\(airing.line()). You are behind.")
+        }
+    }
+
+    /// The size a line of the countdown, or of what the reader is behind by, is
+    /// written at.
+    private var textFont: Font { isSmall ? .subheadline : .caption }
+
     var body: some View {
-        HStack(spacing: 10) {
+        if isSmall || typeSize.isAccessibilitySize {
+            small
+        } else {
+            wide
+        }
+    }
+
+    /// The words-only card: the small family, and every size once the text is at
+    /// an accessibility size, because a picture beside three growing lines would
+    /// clip them instead of making room.
+    private var small: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(row.name)
+                .font(.callout.weight(.semibold))
+                .lineLimit(2)
+                .minimumScaleFactor(0.85)
+            countdown
+            state
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder private var state: some View {
+        if let behind {
+            Text("\(behind) episode\(behind == 1 ? "" : "s") behind")
+                .font(textFont)
+                .foregroundStyle(AiringInk.behind)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        } else if caughtUp {
+            Text("On the latest episode")
+                .font(textFont)
+                .foregroundStyle(AiringInk.caughtUp)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        } else if let total = row.total {
+            Text("\(row.progress)/\(total)")
+                .font(textFont)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    /// The medium and large families: one column beside the picture, carrying the
+    /// same two lines the small card does — the countdown and what the reader is
+    /// behind by — with the bar and the **+1** under them.
+    private var wide: some View {
+        HStack(spacing: 12) {
             AniswiftWidgetPoster(data: poster, kind: row.kind, size: posterSize)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(row.name)
-                    .font(titleFont)
-                    .lineLimit(2)
-                if let airing {
-                    Text(airing.line())
-                        .font(.caption2)
-                        .foregroundStyle(caughtUp ? Color.green : Color.orange)
-                        .lineLimit(2)
-                        .accessibilityLabel(
-                            caughtUp ? "\(airing.line()). You are caught up."
-                                : "\(airing.line()). You are behind.")
-                }
+            VStack(alignment: .leading, spacing: 4) {
+                name
+                countdown
+                state
                 HStack(spacing: 6) {
-                    Text(progressLabel)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    if family != .systemSmall { WidgetProgressBar(fraction: fraction) }
+                    WidgetProgressBar(fraction: fraction)
                     Spacer(minLength: 2)
                     AddOneButton(row: row)
                 }
@@ -424,6 +516,7 @@ struct AniswiftAiringView: View {
 private struct AniswiftWidgetRowView: View {
     let row: WidgetRow
     let poster: Data?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     private var fraction: Double {
         guard let total = row.total, total > 0 else { return 0 }
@@ -436,29 +529,34 @@ private struct AniswiftWidgetRowView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            AniswiftWidgetPoster(data: poster, kind: row.kind, size: CGSize(width: 30, height: 42))
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(spacing: 12) {
+            // At an accessibility text size the title needs the whole card, so
+            // the picture steps out rather than squeezing it.
+            if !typeSize.isAccessibilitySize {
+                AniswiftWidgetPoster(data: poster, kind: row.kind, size: CGSize(width: 64, height: 88))
+            }
+            VStack(alignment: .leading, spacing: 6) {
                 Text(row.name)
-                    .font(.caption.weight(.semibold))
-                    .lineLimit(1)
-                WidgetProgressBar(fraction: fraction)
-                HStack(spacing: 6) {
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(2)
+                HStack(spacing: 8) {
                     Text(progressLabel)
-                        .font(.caption2)
+                        .font(.caption.monospacedDigit())
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                    Spacer(minLength: 4)
-                    AddOneButton(row: row)
+                    WidgetProgressBar(fraction: fraction)
                 }
             }
+            Spacer(minLength: 8)
+            AddOneButton(row: row)
         }
-        .frame(height: 44)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
-/// The bar that fills by the share of the total. A title whose provider
-/// publishes no length keeps an empty track rather than claiming one.
+/// The bar that fills by the share of the total, in the app's own ink rather than
+/// the system tint a widget falls back to. A title whose provider publishes no
+/// length keeps an empty track rather than claiming one.
 private struct WidgetProgressBar: View {
     let fraction: Double
 
@@ -467,11 +565,11 @@ private struct WidgetProgressBar: View {
             ZStack(alignment: .leading) {
                 Capsule().fill(.quaternary)
                 if fraction > 0 {
-                    Capsule().fill(.tint).frame(width: proxy.size.width * fraction)
+                    Capsule().fill(.primary.opacity(0.85)).frame(width: proxy.size.width * fraction)
                 }
             }
         }
-        .frame(height: 4)
+        .frame(height: 3)
         .accessibilityHidden(true)
     }
 }
@@ -485,11 +583,14 @@ private struct AddOneButton: View {
             Text("+1")
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 10)
-                .frame(minWidth: 44, minHeight: 24)
-                .background(Capsule().strokeBorder(Color.secondary.opacity(0.35)))
-                .contentShape(Capsule())
+                .frame(minWidth: 40, minHeight: 24)
+                .background(Capsule().strokeBorder(Color.secondary.opacity(0.3)))
         }
         .buttonStyle(.plain)
+        // The drawing stays a slim capsule; the target a thumb aims at is the 44
+        // points the app holds itself to everywhere else.
+        .frame(minWidth: 44, minHeight: 44)
+        .contentShape(Rectangle())
         .accessibilityLabel(
             "Add one \(row.kind == "anime" ? "episode" : "chapter") to \(row.name)")
     }
@@ -551,7 +652,7 @@ struct AniswiftAnimeWidget: Widget {
         }
         .configurationDisplayName("Last Updated Anime")
         .description("Your most recently updated anime, with a button to add an episode.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemMedium])
     }
 }
 
@@ -564,7 +665,7 @@ struct AniswiftMangaWidget: Widget {
         }
         .configurationDisplayName("Last Updated Manga")
         .description("Your most recently updated manga, with a button to add a chapter.")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .supportedFamilies([.systemMedium])
     }
 }
 
@@ -579,7 +680,7 @@ struct AniswiftAiringWidget: Widget {
             AniswiftAiringView(entry: entry)
         }
         .configurationDisplayName("Next Episode")
-        .description("The anime you are watching, with when each next episode airs.")
+        .description("The anime you are watching, with when each next episode airs. The +1 that adds one is on the medium and large sizes.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
@@ -768,10 +869,23 @@ struct IncrementProgressIntent: AppIntent {
 
     func perform() async throws -> some IntentResult {
         guard var snapshot = WidgetSnapshot.read(),
-            let row = (snapshot.anime + snapshot.manga).first(where: { $0.id == id }),
-            let credentials = WidgetCredentials.read(), credentials.expiresAt > .now,
-            await WidgetList.addOne(row, token: credentials.accessToken)
+            let row = (snapshot.anime + snapshot.manga).first(where: { $0.id == id })
         else { return .result() }
+
+        let credentials = WidgetCredentials.read()
+        var sent = false
+        if let credentials, credentials.expiresAt > .now {
+            sent = await WidgetList.addOne(row, token: credentials.accessToken)
+        }
+        guard sent else {
+            // The card cannot say it failed, so the failure is written down for
+            // the app: a refused tap must not look like a missed one.
+            snapshot.failedWrite = WidgetFailedWrite(name: row.name, date: .now)
+            snapshot.write()
+            WidgetCenter.shared.reloadAllTimelines()
+            return .result()
+        }
+
         let updated = WidgetRow(
             id: row.id, malID: row.malID, kind: row.kind, name: row.name, image: row.image,
             progress: row.progress + 1, total: row.total)
@@ -780,6 +894,7 @@ struct IncrementProgressIntent: AppIntent {
         } else {
             snapshot.manga = snapshot.manga.map { $0.id == id ? updated : $0 }
         }
+        snapshot.failedWrite = nil
         snapshot.write()
         WidgetCenter.shared.reloadAllTimelines()
         return .result()

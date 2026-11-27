@@ -330,6 +330,14 @@ enum AppGroup {
     }
 }
 
+/// A step the widget could not take, written into the shared snapshot because a
+/// widget cannot raise an alert: a tap that was refused must not look like a tap
+/// that missed. The app reports it and clears it the next time it opens.
+struct WidgetFailedWrite: Codable {
+    let name: String
+    let date: Date
+}
+
 /// The rows the widgets draw, written after every list read or edit into the App
 /// Group container the app and its extension share. Each kind keeps its three
 /// most recently updated entries, which is all a widget draws.
@@ -338,6 +346,8 @@ struct WidgetSnapshot: Codable {
     var manga: [WidgetRow] = []
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
+    /// The last step a widget's button could not take, until the app says so.
+    var failedWrite: WidgetFailedWrite?
 
     private static let name = "Aniswift-widget-v1.json"
 

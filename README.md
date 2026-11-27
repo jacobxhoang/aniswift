@@ -22,10 +22,10 @@ its own.
   statistics, favorites, recent activity and the friend's own friends.
 - **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
   lists, and a share link to the MyAnimeList profile.
-- **Home Screen widgets** — **Last Updated Anime** and **Last Updated Manga**, small or medium, with each title's
-  poster, a progress bar, the count and a **+1** that updates MyAnimeList without opening the app; **Next Episode**,
-  in every size, with the countdown to each airing anime's next episode; and **Profile Statistics**, which draws the
-  account's totals.
+- **Home Screen widgets** — **Last Updated Anime** and **Last Updated Manga**, a medium card with the newest
+  title's poster, a progress bar, the count and a **+1** that updates MyAnimeList without opening the app;
+  **Next Episode**, in every size, with the countdown to each airing anime's next episode; and **Profile
+  Statistics**, which draws the account's totals.
 - **Settings** — appearance (System, Light or Dark), accent color, preferred title language, an adult-content switch, in-app link handling, a post-completion
   score prompt, preferred launch screen, which list groups open first, a Face ID or passcode lock with its timer, iOS 26
   tab-bar behavior, cache and search-history clearing, per-kind control over what a title page
