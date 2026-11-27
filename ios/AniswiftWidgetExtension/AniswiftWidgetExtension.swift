@@ -16,6 +16,10 @@ struct WidgetRow: Codable, Identifiable {
     let image: URL?
     let progress: Int
     let total: Int?
+
+    /// Where a tap on the row goes: the app's own scheme, so the title opens in
+    /// the app rather than MyAnimeList in a browser.
+    var link: URL { URL(string: "org.aniswift.ios://title/\(kind)/\(malID)")! }
 }
 
 /// The account's totals as the statistics widget draws them: the counts the
@@ -88,6 +92,9 @@ struct WidgetFailedWrite: Codable {
 struct WidgetSnapshot: Codable {
     var anime: [WidgetRow] = []
     var manga: [WidgetRow] = []
+    /// The anime the reader is watching now, which is all the Next Episode card
+    /// draws: a title marked completed or on hold is not on the air for them.
+    var watching: [WidgetRow] = []
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
     /// The last step a widget's button could not take, until the app says so.
@@ -154,7 +161,15 @@ struct AniswiftWidgetEntry: TimelineEntry {
 }
 
 struct AniswiftWidgetProvider: TimelineProvider {
+    /// Which rows the card draws: the most recently updated of a kind, or the
+    /// anime the reader is watching now.
+    enum Rows {
+        case recent
+        case watching
+    }
+
     let kind: String
+    var rows: Rows = .recent
 
     func placeholder(in context: Context) -> AniswiftWidgetEntry {
         AniswiftWidgetEntry(date: Date(), kind: kind, rows: [])
@@ -172,11 +187,15 @@ struct AniswiftWidgetProvider: TimelineProvider {
     }
 
     private func current() async -> AniswiftWidgetEntry {
-        let rows = WidgetSnapshot.read()?.rows(for: kind) ?? []
-        async let posterData = posters(for: rows)
-        async let airingData = schedule(for: rows)
+        let snapshot = WidgetSnapshot.read()
+        let drawn: [WidgetRow] = switch rows {
+        case .recent: snapshot?.rows(for: kind) ?? []
+        case .watching: snapshot?.watching ?? []
+        }
+        async let posterData = posters(for: drawn)
+        async let airingData = schedule(for: drawn)
         return AniswiftWidgetEntry(
-            date: Date(), kind: kind, rows: rows, posters: await posterData,
+            date: Date(), kind: kind, rows: drawn, posters: await posterData,
             airing: await airingData)
     }
 
@@ -294,10 +313,12 @@ private struct ScheduleAnswer: Decodable {
 /// that short holds at a size worth reading.
 struct AniswiftWidgetView: View {
     let entry: AniswiftWidgetEntry
+    @Environment(\.widgetFamily) private var family
 
-    /// An empty list says so; otherwise the newest entry is the row.
+    /// A medium card draws the newest entry, a large one the three the snapshot
+    /// keeps — the tall card is what a list is for.
     private var visible: [WidgetRow] {
-        Array(entry.rows.prefix(1))
+        family == .systemLarge ? Array(entry.rows.prefix(3)) : Array(entry.rows.prefix(1))
     }
 
     /// The widget's own name is the heading in the gallery and on the Home
@@ -310,7 +331,9 @@ struct AniswiftWidgetView: View {
                 Spacer(minLength: 0)
             } else {
                 ForEach(visible) { row in
-                    AniswiftWidgetRowView(row: row, poster: entry.posters[row.id])
+                    Link(destination: row.link) {
+                        AniswiftWidgetRowView(row: row, poster: entry.posters[row.id])
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -394,15 +417,15 @@ private struct AniswiftAiringRowView: View {
             .lineLimit(isSmall ? 3 : 2)
     }
 
-    /// The countdown AniList publishes, in the app's own two states — amber while
-    /// an aired episode is unwatched, green once the reader is caught up — at the
-    /// size the card holding it was given: a small card gives it a line of its
-    /// own, a row shares its height with a picture.
+    /// The countdown AniList publishes, in the app's green whatever the reader's
+    /// place in the run — what they are behind by is the line under it, in amber
+    /// — at the size the card holding it was given: a small card gives it a line
+    /// of its own, a row shares its height with a picture.
     @ViewBuilder private var countdown: some View {
         if let airing {
             Text(airing.line())
                 .font(textFont)
-                .foregroundStyle(caughtUp ? AiringInk.caughtUp : AiringInk.behind)
+                .foregroundStyle(AiringInk.caughtUp)
                 .lineLimit(2)
                 .accessibilityLabel(
                     caughtUp ? "\(airing.line()). You are caught up."
@@ -499,9 +522,11 @@ struct AniswiftAiringView: View {
                 Spacer(minLength: 0)
             } else {
                 ForEach(visible) { row in
-                    AniswiftAiringRowView(
-                        row: row, poster: entry.posters[row.id], airing: entry.airing[row.id]
-                    )
+                    Link(destination: row.link) {
+                        AniswiftAiringRowView(
+                            row: row, poster: entry.posters[row.id], airing: entry.airing[row.id]
+                        )
+                    }
                     .frame(maxHeight: .infinity)
                 }
             }
@@ -652,7 +677,7 @@ struct AniswiftAnimeWidget: Widget {
         }
         .configurationDisplayName("Last Updated Anime")
         .description("Your most recently updated anime, with a button to add an episode.")
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
@@ -665,7 +690,7 @@ struct AniswiftMangaWidget: Widget {
         }
         .configurationDisplayName("Last Updated Manga")
         .description("Your most recently updated manga, with a button to add a chapter.")
-        .supportedFamilies([.systemMedium])
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
@@ -675,7 +700,7 @@ struct AniswiftMangaWidget: Widget {
 struct AniswiftAiringWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(
-            kind: "AniswiftAiringWidget", provider: AniswiftWidgetProvider(kind: "anime")
+            kind: "AniswiftAiringWidget", provider: AniswiftWidgetProvider(kind: "anime", rows: .watching)
         ) { entry in
             AniswiftAiringView(entry: entry)
         }

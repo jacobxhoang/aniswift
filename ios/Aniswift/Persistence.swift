@@ -344,6 +344,9 @@ struct WidgetFailedWrite: Codable {
 struct WidgetSnapshot: Codable {
     var anime: [WidgetRow] = []
     var manga: [WidgetRow] = []
+    /// The anime the reader is watching now, which is all the Next Episode card
+    /// draws: a title marked completed or on hold is not on the air for them.
+    var watching: [WidgetRow] = []
     /// The account's totals, once its public profile has been read.
     var stats: WidgetStats?
     /// The last step a widget's button could not take, until the app says so.

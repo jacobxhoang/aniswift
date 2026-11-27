@@ -140,16 +140,18 @@ Home Screen's widget gallery. The app writes the three most recently updated ent
 container after every list read or edit, so a widget draws the poster, a progress bar, the count and a **+1** pill
 without opening the app; the widget's own name in the gallery and on the Home Screen is its heading, so nothing is
 repeated inside the card. The poster arrives when the widget refreshes, and a row whose picture does not come
-shows the kind's glyph instead. **Last Updated** is a medium card on its own, drawing the single most recently
-updated entry — the small size cut its title to a few letters — with the bar in the app's own ink rather than the
-system tint a widget falls back to.
+shows the kind's glyph instead. **Last Updated** is a medium card drawing the newest entry, and a large one drawing
+the three most recent — the small size cut its title to a few letters — with the bar in the app's own ink rather
+than the system tint a widget falls back to. A tap on any card opens that title in the app, in a sheet over the page
+the reader was on, since the tabs keep no stack to push onto.
 
 **Next Episode** is its own widget, in all three sizes: one card small, that card beside a picture medium, and
-three rows large, each filling its share of the height. Every size carries the same words: the name, the countdown
-AniList publishes — "Episode 7 airs in 3 days", in amber while an aired episode is unwatched and green once you
-are caught up, the same two shades a list row takes — and under it what you are behind by in amber ("8 episodes
-behind"), or **On the latest episode** once you have caught up. The small card is words alone, at a size that
-fills it, while the medium and large ones put the picture, the bar and the **+1** beside them. A title
+three rows large, each filling its share of the height. It draws only the anime you are watching — one marked
+completed or on hold is not what a next episode belongs to. Every size carries the same words: the name, the
+countdown AniList publishes — "Episode 7 airs in 3 days", in the app's green — and under it what you are behind by
+in amber ("8 episodes behind"), or **On the latest episode** once you have caught up. The small card is words
+alone, at a size that fills it, while the medium and large ones put the picture, the bar and the **+1** beside them.
+A title
 AniList carries no next episode for shows its count alone, so a card never claims an episode it cannot place. The
 countdown is asked of AniList by the widget itself, which needs no sign-in for it. No artwork sits behind the
 rows: the card keeps the same plain background as the others. A tap a card could not complete is written down

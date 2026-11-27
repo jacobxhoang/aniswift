@@ -4,10 +4,16 @@ import LocalAuthentication
 import SwiftUI
 import UIKit
 
+/// A title a widget asked the app to open: the sheet needs a value it can tell
+/// apart, so the page is shown once per request.
+private struct LinkedTitle: Identifiable {
+    let title: Title
+    var id: String { title.id }
+}
+
 @main
 @MainActor
-struct AniswiftApp: App {
-    @State private var store = Store()
+struct AniswiftApp: App {    @State private var store = Store()
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
     @AppStorage(SettingKey.appearance) private var appearance = AppearanceChoice.system.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
@@ -22,6 +28,10 @@ struct AniswiftApp: App {
     /// the first thing a reader sees is the prompt.
     @State private var locked: Bool
     @State private var tab: String
+    /// The title a widget's row asked for, shown over whatever was on screen.
+    /// The tab stacks keep no path to push onto, so the page arrives in a sheet
+    /// of its own rather than taking the reader a tab away from where they were.
+    @State private var linkedTitle: LinkedTitle?
 
     /// The tabs this build has, in the order the bar draws them: the only values
     /// a stored preference may select, since an identifier written by an older
@@ -73,6 +83,18 @@ struct AniswiftApp: App {
                     }
                 )
                 .environment(store)
+                .onOpenURL { url in openWidgetLink(url) }
+                .sheet(item: $linkedTitle) { request in
+                    NavigationStack {
+                        TitleScreen(title: request.title)
+                            .toolbar {
+                                ToolbarItem(placement: .topBarLeading) {
+                                    Button("Close") { linkedTitle = nil }
+                                }
+                            }
+                    }
+                    .environment(store)
+                }
                 .task { await store.restore() }
                 // A failure is the notice every screen draws, at the bottom edge
                 // where the reader keeps the page: the alert this replaces
@@ -106,8 +128,25 @@ struct AniswiftApp: App {
         }
     }
 
-    /// Locks on launch, and after the timer runs out in the background. Both
-    /// the switch and the timer are read from the settings, so a change there
+    /// A widget's row carries a link to the title it draws, so a tap on a card
+    /// lands where a tap on a list row would: the app reads the kind and the
+    /// MyAnimeList id, asks the catalog for the page and shows it in a sheet.
+    private func openWidgetLink(_ url: URL) {
+        guard url.scheme == "org.aniswift.ios", url.host == "title" else { return }
+        let parts = Array(url.pathComponents.dropFirst())
+        guard parts.count >= 2, let kind = Kind(rawValue: parts[0]),
+            let malID = Int(parts[1])
+        else { return }
+        Task {
+            guard let fields = try? await store.api.catalog(
+                "\(kind.rawValue)/\(malID)", [], refresh: false),
+                let title = Title(fields, kind: kind)
+            else { return }
+            linkedTitle = LinkedTitle(title: title)
+        }
+    }
+
+    /// Locks on launch, and after the timer runs out in the background. Both    /// the switch and the timer are read from the settings, so a change there
     /// reaches the next launch and the next background.
     private func updateLock(for phase: ScenePhase) {
         switch phase {

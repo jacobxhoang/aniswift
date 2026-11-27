@@ -613,17 +613,25 @@ final class Store {
             ?? TitleLanguage.english.rawValue
         var widget = WidgetSnapshot()
         for kind in Kind.allCases {
-            let rows = (savedLists[kind]?.items ?? [])
-                .sorted { $0.updated > $1.updated }
-                .prefix(3)
-                .map { entry in
-                    WidgetRow(
-                        id: entry.id, malID: entry.title.malID, kind: kind.rawValue,
-                        name: entry.title.displayName(for: language), image: entry.title.image,
-                        progress: entry.progress, total: entry.title.total)
-                }
+            let entries: [ListEntry] = savedLists[kind]?.items ?? []
+            let recent: [ListEntry] = Array(entries.sorted { $0.updated > $1.updated }.prefix(3))
+            let rows: [WidgetRow] = recent.map { entry in
+                Self.widgetRow(entry, kind: kind, language: language)
+            }
             if kind == .anime { widget.anime = rows } else { widget.manga = rows }
         }
+        // The Next Episode card draws the run the reader is on, not the last
+        // thing they touched: a completed title still on the air is not what
+        // they are watching.
+        let animeEntries: [ListEntry] = savedLists[.anime]?.items ?? []
+        let watchingEntries: [ListEntry] = animeEntries.filter {
+            $0.status.lowercased() == "watching"
+        }
+        let watching: [ListEntry] = Array(watchingEntries.sorted { $0.updated > $1.updated }.prefix(3))
+        let watchingRows: [WidgetRow] = watching.map { entry in
+            Self.widgetRow(entry, kind: .anime, language: language)
+        }
+        widget.watching = watchingRows
         if let account, let stats = profile(for: account.name).stats?.value {
             widget.stats = WidgetStats(
                 animeCount: stats.animeCount, mangaCount: stats.mangaCount,
@@ -633,6 +641,14 @@ final class Store {
         // The widgets read the file, not the app, so they are asked to redraw
         // when it changes rather than waiting for their own timeline.
         WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// One row of a widget, named as the reader has chosen to read titles.
+    private static func widgetRow(_ entry: ListEntry, kind: Kind, language: String) -> WidgetRow {
+        WidgetRow(
+            id: entry.id, malID: entry.title.malID, kind: kind.rawValue,
+            name: entry.title.displayName(for: language), image: entry.title.image,
+            progress: entry.progress, total: entry.title.total)
     }
 
     /// A widget cannot raise an alert, so a tap it could not complete is written
