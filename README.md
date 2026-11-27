@@ -9,7 +9,8 @@ its own.
 
 - **Anime and Manga lists** — status groups, a Sort and Filter sheet for the order, direction, status, format
   and entry filters, search, pagination, swipe-to-update progress, swipe to
-  remove, and a full editor for scores, repeat counts, dates, notes and custom lists.
+  remove, a full editor for scores, repeat counts, dates, notes and custom lists, and a way to start a rewatch of a
+  completed title.
 - **Discover** — seasonal and ranked shelves, per-kind search, and genre, theme, studio and producer facets.
 - **Title pages** — summary, metadata, relations, characters, recommendations, trailer, theme songs, reviews,
   interest stacks, and friends’ list activity, plus the countdown to the next episode of an anime that is still
@@ -21,8 +22,12 @@ its own.
   statistics, favorites, recent activity and the friend's own friends.
 - **Profile** — account statistics, friends, public favorites (anime, manga, characters and people), custom
   lists, and a share link to the MyAnimeList profile.
-- **Settings** — accent color, preferred title language, in-app link handling, a post-completion score prompt,
-  preferred launch screen, iOS 26 tab-bar behavior, cache and search-history clearing, per-kind control over what a title page
+- **Home Screen widgets** — **Last Updated Anime** and **Last Updated Manga**, small or medium, with each title's
+  poster, a progress bar, the count, and a **+1** that updates MyAnimeList without opening the app; and
+  **Profile Statistics**, which draws the account's totals.
+- **Settings** — appearance (System, Light or Dark), accent color, preferred title language, an adult-content switch, in-app link handling, a post-completion
+  score prompt, preferred launch screen, which list groups open first, a Face ID or passcode lock with its timer, iOS 26
+  tab-bar behavior, cache and search-history clearing, per-kind control over what a title page
   shows (including one switch that hides everything below its summary), profile appearance switches, an AniList
   sign-in with its lists read-only, plus About Aniswift and sign out.
 
@@ -71,6 +76,7 @@ installing it on an iPhone or iPad.
 ```text
 ios/
   Aniswift/          SwiftUI app sources and assets
+  AniswiftWidgetExtension/  Last Updated and Profile Statistics Home Screen widgets
   AniswiftTests/     Swift Testing suites for decoding, titles, dates, stack links, store sync and OAuth callbacks
   Aniswift.xcodeproj Xcode project and shared scheme
   README.md           Setup, feature, settings and release guide

@@ -74,6 +74,7 @@ private enum SessionKeychain {
         guard let session else {
             let status = SecItemDelete(key as CFDictionary)
             guard status == errSecSuccess || status == errSecItemNotFound else { throw failure() }
+            WidgetCredentials.remove()
             return
         }
         let value = [kSecValueData as String: try JSONEncoder().encode(session)]
@@ -83,6 +84,9 @@ private enum SessionKeychain {
             query[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             guard SecItemAdd(query as CFDictionary, nil) == errSecSuccess else { throw failure() }
         } else if status != errSecSuccess { throw failure() }
+        // A widget's button reaches MyAnimeList with the same token, from the
+        // App Group container the extension can read.
+        WidgetCredentials.write(token: session.accessToken, expiresAt: session.expiresAt)
     }
 
     static func failure() -> APIError {
@@ -187,6 +191,9 @@ final class API: APIClient {
 
     func catalog(_ path: String, _ query: [URLQueryItem] = [], refresh: Bool = false) async throws -> Fields {
         try Task.checkCancellation()
+        // The safe copy is a different request from the unfiltered one, so the
+        // query decides the cache key as well as the URL.
+        let query = Self.safeQuery(query)
         let publicUserData = path.hasPrefix("users/")
         let cacheKey = Self.url(publicUserData ? jikan : tenrai, path, query)
         let lifetime = publicUserData ? Self.userLifetime : Self.catalogLifetime
@@ -213,6 +220,19 @@ final class API: APIClient {
         }
         try Task.checkCancellation()
         return result
+    }
+
+    /// The provider's own filter for adult titles, applied to whatever the caller
+    /// asked for while Settings hides them: search, a shelf, a facet and a stack
+    /// then answer with the safe copy. A request that asked for adult stacks
+    /// loses that answer rather than the flag it passed, and one that never
+    /// mentioned the filter is left alone.
+    private static func safeQuery(_ query: [URLQueryItem]) -> [URLQueryItem] {
+        let showsAdult = UserDefaults.standard.object(forKey: SettingKey.showAdultContent) as? Bool ?? true
+        guard !showsAdult else { return query }
+        var filtered = query.filter { $0.name != "sfw" && $0.name != "sfw-strict" }
+        filtered.append(URLQueryItem(name: "sfw", value: "true"))
+        return filtered
     }
 
     private func fetchCatalog(_ path: String, _ query: [URLQueryItem],
@@ -736,7 +756,12 @@ final class API: APIClient {
     }
 
     private func statusFields(_ kind: Kind) -> String {
-        let fields = kind == .anime ? "num_episodes_watched,num_times_rewatched" : "num_chapters_read,num_times_reread"
+        // The flag is asked for with the counts: MyAnimeList keeps a rewatch as
+        // a watching entry, so the list and the editor cannot tell one from an
+        // ordinary run without it.
+        let fields = kind == .anime
+            ? "num_episodes_watched,num_times_rewatched,is_rewatching"
+            : "num_chapters_read,num_times_reread,is_rereading"
         return "status,score,updated_at,start_date,finish_date,comments,\(fields)"
     }
 
@@ -774,6 +799,11 @@ final class API: APIClient {
         }
         let progressField = title.kind == .anime ? "num_watched_episodes" : "num_chapters_read"
         var form = ["status": change.status, "score": String(change.rating), progressField: String(change.progress)]
+        // A rewatch is a flag on a watching entry, so it travels with the status
+        // and a change that does not mention it leaves it alone.
+        if let restarts = change.restarts {
+            form[title.kind == .anime ? "is_rewatching" : "is_rereading"] = restarts ? "true" : "false"
+        }
         if let details = change.details {
             if let count = details.repeatCount {
                 form[title.kind == .anime ? "num_times_rewatched" : "num_times_reread"] = String(count)
@@ -958,6 +988,9 @@ struct AniListEntry: Identifiable {
     let kind: Kind
     let name: String
     let original: String
+    /// The title AniList keeps as its own: `title.native`, which the list is
+    /// read with so the Japanese preference has a name to show.
+    let japanese: String
     let image: URL?
     let status: String
     let progress: Int
@@ -974,6 +1007,7 @@ struct AniListEntry: Identifiable {
         self.kind = kind
         self.original = original
         name = title?.string("english") ?? original
+        japanese = title?.string("native") ?? ""
         let cover: Fields? = media.read("coverImage")
         image = cover.flatMap { publicURL($0.string("large")) }
         status = Self.statusLabel(fields.string("status"), kind: kind)
@@ -985,6 +1019,9 @@ struct AniListEntry: Identifiable {
 
     /// The name a reader should see for the stored preferred-language setting.
     func displayName(for language: String) -> String {
+        if language == TitleLanguage.japanese.rawValue {
+            return japanese.isEmpty ? (name.isEmpty ? original : name) : japanese
+        }
         if language == TitleLanguage.romaji.rawValue { return original.isEmpty ? name : original }
         return name.isEmpty ? original : name
     }
@@ -1166,7 +1203,8 @@ final class AniListClient {
                     """,
                     "variables": [
                         "mediaId": mediaID,
-                        "status": Self.status(change.status, kind: title.kind),
+                        "status": Self.status(
+                            change.status, kind: title.kind, restarts: change.restarts == true),
                         "progress": change.progress,
                         "scoreRaw": change.rating * 10,
                     ],
@@ -1207,9 +1245,12 @@ final class AniListClient {
         return id
     }
 
-    /// The AniList status a MyAnimeList status maps to.
-    private static func status(_ value: String, kind: Kind) -> String {
-        switch value.lowercased().replacingOccurrences(of: "_", with: " ") {
+    /// The AniList status a MyAnimeList status maps to. A rewatch is its own
+    /// state there, so it crosses as `REPEATING` rather than as the watching
+    /// status MyAnimeList keeps it under.
+    private static func status(_ value: String, kind: Kind, restarts: Bool = false) -> String {
+        if restarts { return "REPEATING" }
+        return switch value.lowercased().replacingOccurrences(of: "_", with: " ") {
         case "watching", "reading": "CURRENT"
         case "completed": "COMPLETED"
         case "on hold": "PAUSED"
@@ -1277,7 +1318,7 @@ final class AniListClient {
                     media {
                       id
                       idMal
-                      title { romaji english }
+                      title { romaji english native }
                       coverImage { large }
                       episodes
                       chapters

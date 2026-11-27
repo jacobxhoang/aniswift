@@ -1,4 +1,5 @@
 import SwiftUI
+import WidgetKit
 
 @MainActor
 @Observable
@@ -174,6 +175,9 @@ final class Store {
         if wrote {
             profiles[name.lowercased()] = updated
             ProfileCache.write(profiles)
+            // The statistics widget draws the totals, so it is rewritten when a
+            // profile reads them rather than waiting for the next list edit.
+            writeWidgetSnapshot()
         }
         let savedAt = [updated.stats?.savedAt, updated.favorites?.savedAt].compactMap { $0 }.min()
         return ProfileFetchOutcome(loaded: loaded, stale: stale,
@@ -596,6 +600,38 @@ final class Store {
         savedLists[kind] = snapshot
         entries[kind] = Self.index(snapshot.items)
         ListCache(account: account, lists: savedLists).write()
+        writeWidgetSnapshot()
+    }
+
+    /// Keeps the widget's rows beside the list's own snapshot: the three most
+    /// recently updated entries of each kind, named as the reader has chosen to
+    /// read them, so a widget shows what the app would.
+    private func writeWidgetSnapshot() {
+        let language =
+            UserDefaults.standard.string(forKey: SettingKey.titleLanguage)
+            ?? TitleLanguage.english.rawValue
+        var widget = WidgetSnapshot()
+        for kind in Kind.allCases {
+            let rows = (savedLists[kind]?.items ?? [])
+                .sorted { $0.updated > $1.updated }
+                .prefix(3)
+                .map { entry in
+                    WidgetRow(
+                        id: entry.id, malID: entry.title.malID, kind: kind.rawValue,
+                        name: entry.title.displayName(for: language), image: entry.title.image,
+                        progress: entry.progress, total: entry.title.total)
+                }
+            if kind == .anime { widget.anime = rows } else { widget.manga = rows }
+        }
+        if let account, let stats = profile(for: account.name).stats?.value {
+            widget.stats = WidgetStats(
+                animeCount: stats.animeCount, mangaCount: stats.mangaCount,
+                daysWatched: stats.daysWatched, chaptersRead: stats.chaptersRead)
+        }
+        widget.write()
+        // The widgets read the file, not the app, so they are asked to redraw
+        // when it changes rather than waiting for their own timeline.
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     /// Every row of a list by title id, for a poster tile's lookup.

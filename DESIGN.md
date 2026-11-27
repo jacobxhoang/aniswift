@@ -10,32 +10,36 @@ so precision and consistency outrank expression, and the brand lives in exact de
 
 ## The world: a cinema ledger
 
-Aniswift is a record book for what you have watched, drawn as a dark ledger rather than a shelf of artwork.
-The canvas is black, content sits on quiet cards edged with one hairline, and figures are set in monospaced
-digits under small uppercase labels. Posters are the only saturated colour on the page; everything else is
-white at a few fixed strengths plus one accent the reader chooses. No gradients, no ornament, no second
-accent. A screen should read like a page of a ledger that happens to carry posters.
+Aniswift is a record book for what you have watched, drawn as a ledger rather than a shelf of artwork. Content
+sits on quiet cards edged with one hairline, and figures are set in monospaced digits under small uppercase
+labels. Posters are the only saturated colour on the page; everything else is ink at a few fixed strengths plus one
+accent the reader chooses. No gradients, no ornament, no second accent. A screen should read like a page of a ledger
+that happens to carry posters.
 
-The dark appearance is deliberate, not an omission: the app is a dark-room object, posters glow against the
-black, and a light mode would need its own contrast pass on every token. There is therefore no appearance
-switch and `.preferredColorScheme(.dark)` is set once at the root.
+The world has two appearances and the same drawing rules in both. The dark one is the ledger at night and the one the
+app was built for: posters glow against the black. The light one is the same page in daylight — a white canvas, ink
+instead of white, and the same hairlines, corners and figures. Settings → Appearance chooses System (the default,
+which follows the device), Light or Dark, and `.preferredColorScheme` at the root is the only place the choice is
+read.
 
 ## Colour
 
-One accent at a time, chosen in Settings (White by default, plus eight others), applied as the tint to
-controls, links and the in-app browser. Everything else comes from `Palette` in `AniswiftApp.swift`:
+One accent at a time, chosen in Settings (White by default, plus eight others), applied as the tint to controls,
+links and the in-app browser. A choice that would vanish on one canvas darkens on the other, so White draws black
+in the light appearance, and the settings swatch keeps its dark shade in both so the row reads the same. Everything
+else comes from `Palette` in `AniswiftApp.swift`, which holds a light and a dark value for every token:
 
-| Token | Value | Use | Contrast on the canvas / on a surface |
-| --- | --- | --- | --- |
-| `background` | black | every page | — |
-| `surface` | white 12% | a card, a chip's fill source, an editor panel | — |
-| `sheet` | white 8% | the editor sheet behind a system Form | — |
-| `hairline` | white 34% | poster rims, panel edges, capsules, dividers | about 3:1 / 3:1 |
-| `border` | white 46% | an active or selected control | about 4.5:1 / 4.5:1 |
-| `fill` | white 12% | behind a chip that is on | carries no boundary |
-| `airingBehind` | amber | an aired episode is still unwatched | text-safe |
-| `airingCaughtUp` | green | every aired episode is watched | text-safe |
-| `progress` | green | the swipe that adds an episode or a chapter | fill only |
+| Token | Dark | Light | Use | Contrast on the canvas / on a surface |
+| --- | --- | --- | --- | --- |
+| `background` | black | white | every page | — |
+| `surface` | white 12% | black 5% | a card, a chip's fill source, an editor panel | — |
+| `sheet` | white 8% | black 3% | the editor sheet behind a system Form | — |
+| `hairline` | white 34% | black 42% | poster rims, panel edges, capsules, dividers | about 3:1 / 3:1 either way |
+| `border` | white 46% | black 56% | an active or selected control | about 4.5:1 / 4.5:1 either way |
+| `fill` | white 12% | black 8% | behind a chip that is on | carries no boundary |
+| `airingBehind` | amber | amber, darkened | an aired episode is still unwatched | text-safe in both |
+| `airingCaughtUp` | green | green, darkened | every aired episode is watched | text-safe in both |
+| `progress` | green | green, darkened | the swipe that adds an episode or a chapter | fill only |
 
 Rules: a boundary an edge carries clears 3:1 non-text contrast, and no view states a colour of its own.
 Colour never carries a state alone — an airing row says "You are behind." for VoiceOver, and a chosen chip

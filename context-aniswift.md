@@ -13,7 +13,7 @@ own. The capability and constraint record is in `PRODUCT.md`; the visual world i
 ## Constraints
 
 No backend, database or account of its own. MyAnimeList is the account and the only write target, and the AniList copy
-is one-way and permanent. The catalog is Tenrai first and Jikan Edge second. Client IDs are build-time only. The
+is one-way and permanent. The catalog is Tenrai first and Jikan Edge second. The app draws in a dark ledger and a light one, with the same drawing rules in both. Client IDs are build-time only. The
 appearance is dark only. `project.pbxproj` is never edited by hand, so a new Swift type goes into an existing file.
 The reasons for each are in `PRODUCT.md`.
 

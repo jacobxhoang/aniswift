@@ -74,6 +74,19 @@ struct Fields: Decodable {
             ?? titles?.first(where: { $0.string("type")?.lowercased() == "default" })?.string("title", "name")
     }
 
+    /// The Japanese title: MyAnimeList's `title_japanese`, AniList's `native`,
+    /// or the Jikan titles row of that type. A row that carries none has no
+    /// Japanese name, and its page shows the name it does have.
+    var japaneseTitle: String? {
+        let titles: [Fields]? = read("titles")
+        let localized: Fields? = read("title", "titles")
+        return string("title_japanese", "titleJapanese", "japaneseTitle", "japanese_title")
+            ?? localized?.string("native", "japanese")
+            ?? titles?.first(where: {
+                ["japanese", "native"].contains($0.string("type")?.lowercased() ?? "")
+            })?.string("title", "name")
+    }
+
     var includesEnglishTitleField: Bool {
         ["title_english", "titleEnglish", "englishTitle", "english_title", "alternative_titles", "alternativeTitles"]
             .contains { values.contains(Key(stringValue: $0)) }
@@ -111,6 +124,8 @@ struct CatalogFreshness: Equatable {
 enum TitleLanguage: String, CaseIterable, Identifiable {
     case english = "English"
     case romaji = "Romaji"
+    /// The name the title is known by in Japan: MyAnimeList's `title_japanese`.
+    case japanese = "Japanese"
 
     var id: String { rawValue }
 }
@@ -127,11 +142,16 @@ struct Title: Identifiable, Hashable, Codable {
     let original: String
     private(set) var image: URL?
     private var english: String?
+    private var japanese: String?
     private var sparseTitle: Bool?
     var englishName: String? { english ?? (name == original ? nil : name) }
+    var japaneseName: String? { japanese }
 
     /// The name a reader should see for the stored preferred-language setting.
     func displayName(for language: String) -> String {
+        if language == TitleLanguage.japanese.rawValue {
+            return japanese ?? (name.isEmpty ? original : name)
+        }
         if language == TitleLanguage.romaji.rawValue {
             return original.isEmpty ? name : original
         }
@@ -163,6 +183,7 @@ struct Title: Identifiable, Hashable, Codable {
         self.kind = kind
         self.original = original
         self.english = english
+        japanese = fields.japaneseTitle
         name = english ?? original
         sparseTitle = !fields.includesEnglishTitleField
         image = fields.image
@@ -249,6 +270,10 @@ struct ListEntry: Identifiable, Codable, Equatable {
     let rating: Int
     let updated: String
     let details: ListDetails?
+    /// Whether MyAnimeList holds the entry in a rewatch or reread: it keeps that
+    /// as a watching or reading entry with a flag, so the status alone cannot
+    /// tell the two apart.
+    var isRestarting: Bool? = nil
     var id: String { title.id }
 
     init(_ fields: Fields, title: Title, fallback: ListChange? = nil, previous: ListEntry? = nil) {
@@ -257,6 +282,7 @@ struct ListEntry: Identifiable, Codable, Equatable {
         progress = fields.read("num_episodes_watched", "num_chapters_read") ?? fallback?.progress ?? 0
         rating = fields.read("score") ?? fallback?.rating ?? 0
         updated = fields.string("updated_at") ?? Date().ISO8601Format()
+        isRestarting = fields.read("is_rewatching", "is_rereading") ?? fallback?.restarts
 
         let prior = previous?.details ?? ListDetails()
         let count: Int? = fields.read("num_times_rewatched", "num_times_reread")
@@ -277,6 +303,9 @@ struct ListChange: Encodable {
     var progress: Int
     var rating: Int
     var details: ListDetailPatch? = nil
+    /// Whether the change starts or ends a rewatch: `nil` leaves the flag as
+    /// MyAnimeList holds it, which is what every other edit does.
+    var restarts: Bool? = nil
 }
 
 struct CustomTitleList: Identifiable, Codable, Hashable {

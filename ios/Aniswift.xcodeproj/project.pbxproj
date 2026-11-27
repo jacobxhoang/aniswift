@@ -1,83 +1,572 @@
 // !$*UTF8*$!
 {
- archiveVersion = 1;
- classes = {};
- objectVersion = 56;
- objects = {
-  A00000000000000000000027 = {isa = PBXBuildFile; fileRef = A00000000000000000000037; };
-  A00000000000000000000028 = {isa = PBXBuildFile; fileRef = A00000000000000000000038; };
-  A00000000000000000000037 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterScreen.swift; sourceTree = "<group>"; };
-  A00000000000000000000038 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
-  A00000000000000000000061 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
-  A00000000000000000000062 = {isa = PBXBuildFile; fileRef = A00000000000000000000061; };
-  A00000000000000000000063 = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
-  A00000000000000000000064 = {isa = PBXBuildFile; fileRef = A00000000000000000000063; };
-  A00000000000000000000065 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreTests.swift; sourceTree = "<group>"; };
-  A00000000000000000000066 = {isa = PBXBuildFile; fileRef = A00000000000000000000065; };
-  A00000000000000000000067 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallbackTests.swift; sourceTree = "<group>"; };
-  A00000000000000000000068 = {isa = PBXBuildFile; fileRef = A00000000000000000000067; };
-  A00000000000000000000069 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackLinkTests.swift; sourceTree = "<group>"; };
-  A0000000000000000000006A = {isa = PBXBuildFile; fileRef = A00000000000000000000069; };
-  A00000000000000000000040 = {
-   isa = XCRemoteSwiftPackageReference;
-   repositoryURL = "https://github.com/onevcat/Kingfisher.git";
-   requirement = { kind = exactVersion; version = 8.12.0; };
-  };
-  A00000000000000000000041 = {
-   isa = XCSwiftPackageProductDependency;
-   package = A00000000000000000000040;
-   productName = Kingfisher;
-  };
-  A00000000000000000000042 = {isa = PBXBuildFile; productRef = A00000000000000000000041; };
-  A00000000000000000000050 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
-  A00000000000000000000051 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleTests.swift; sourceTree = "<group>"; };
-  A00000000000000000000052 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityDateTests.swift; sourceTree = "<group>"; };
-  A00000000000000000000053 = {isa = PBXBuildFile; fileRef = A00000000000000000000050; };
-  A00000000000000000000054 = {isa = PBXBuildFile; fileRef = A00000000000000000000051; };
-  A00000000000000000000055 = {isa = PBXBuildFile; fileRef = A00000000000000000000052; };
-  A00000000000000000000056 = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = AniswiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-  A00000000000000000000043 = {isa = PBXFileReference; lastKnownFileType = text; path = Kingfisher-LICENSE.txt; sourceTree = "<group>"; };
-  A00000000000000000000044 = {isa = PBXBuildFile; fileRef = A00000000000000000000043; };
-  A00000000000000000000026 = {isa = PBXBuildFile; fileRef = A00000000000000000000036; };
-  A00000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-  A00000000000000000000020 = {isa = PBXBuildFile; fileRef = A00000000000000000000030; };
-  A00000000000000000000021 = {isa = PBXBuildFile; fileRef = A00000000000000000000031; };
-  A00000000000000000000022 = {isa = PBXBuildFile; fileRef = A00000000000000000000032; };
-  A00000000000000000000023 = {isa = PBXBuildFile; fileRef = A00000000000000000000033; };
-  A00000000000000000000024 = {isa = PBXBuildFile; fileRef = A00000000000000000000034; };
-  A00000000000000000000025 = {isa = PBXBuildFile; fileRef = A00000000000000000000035; };
-  A00000000000000000000030 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AniswiftApp.swift; sourceTree = "<group>"; };
-  A00000000000000000000031 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
-  A00000000000000000000032 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
-  A00000000000000000000033 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
-  A00000000000000000000034 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogScreens.swift; sourceTree = "<group>"; };
-  A00000000000000000000035 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleScreen.swift; sourceTree = "<group>"; };
-  A00000000000000000000011 = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Aniswift.app; sourceTree = BUILT_PRODUCTS_DIR; };
-  A00000000000000000000012 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
-  A00000000000000000000001 = {isa = PBXGroup; children = (A00000000000000000000002, A00000000000000000000057, A00000000000000000000003); sourceTree = "<group>"; };
-  A00000000000000000000002 = {isa = PBXGroup; path = Aniswift; sourceTree = "<group>"; children = (A00000000000000000000030, A00000000000000000000031, A00000000000000000000032, A00000000000000000000033, A00000000000000000000061, A00000000000000000000034, A00000000000000000000035, A00000000000000000000037, A00000000000000000000038, A00000000000000000000012, A00000000000000000000036, A00000000000000000000043, A00000000000000000000063); };
-  A00000000000000000000003 = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (A00000000000000000000011, A00000000000000000000056); };
-  A00000000000000000000004 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000020, A00000000000000000000021, A00000000000000000000022, A00000000000000000000023, A00000000000000000000024, A00000000000000000000025, A00000000000000000000027, A00000000000000000000028, A00000000000000000000062); runOnlyForDeploymentPostprocessing = 0; };
-  A00000000000000000000005 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000042); runOnlyForDeploymentPostprocessing = 0; };
-  A00000000000000000000006 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000026, A00000000000000000000044, A00000000000000000000064); runOnlyForDeploymentPostprocessing = 0; };
-  A00000000000000000000007 = {isa = PBXNativeTarget; buildConfigurationList = A00000000000000000000015; buildPhases = (A00000000000000000000004, A00000000000000000000005, A00000000000000000000006); buildRules = (); dependencies = (); packageProductDependencies = (A00000000000000000000041); name = Aniswift; productName = Aniswift; productReference = A00000000000000000000011; productType = "com.apple.product-type.application"; };
-  A00000000000000000000008 = {isa = PBXProject; attributes = { LastUpgradeCheck = 2600; }; buildConfigurationList = A00000000000000000000014; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = A00000000000000000000001; productRefGroup = A00000000000000000000003; projectDirPath = ""; projectRoot = ""; packageReferences = (A00000000000000000000040); targets = (A00000000000000000000007, A00000000000000000000058); };
-  A00000000000000000000014 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000016, A00000000000000000000017); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-  A00000000000000000000015 = {isa = XCConfigurationList; buildConfigurations = (A00000000000000000000018, A00000000000000000000019); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-  A00000000000000000000016 = {isa = XCBuildConfiguration; name = Debug; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 5.0; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; }; };
-  A00000000000000000000017 = {isa = XCBuildConfiguration; name = Release; buildSettings = { SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 5.0; SWIFT_COMPILATION_MODE = wholemodule; }; };
-  A00000000000000000000018 = {isa = XCBuildConfiguration; name = Debug; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; ENABLE_TESTABILITY = YES; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_STRICT_CONCURRENCY = targeted; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Aniswift/Info.plist; PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 1.0; CURRENT_PROJECT_VERSION = 1; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; }; };
-  A00000000000000000000019 = {isa = XCBuildConfiguration; name = Release; buildSettings = { ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; SWIFT_STRICT_CONCURRENCY = targeted; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Aniswift/Info.plist; PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios; PRODUCT_NAME = "$(TARGET_NAME)"; MARKETING_VERSION = 1.0; CURRENT_PROJECT_VERSION = 1; TARGETED_DEVICE_FAMILY = "1,2"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; }; };
-  A00000000000000000000057 = {isa = PBXGroup; path = AniswiftTests; sourceTree = "<group>"; children = (A00000000000000000000050, A00000000000000000000051, A00000000000000000000052, A00000000000000000000065, A00000000000000000000067, A00000000000000000000069); };
-  A00000000000000000000059 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00000000000000000000053, A00000000000000000000054, A00000000000000000000055, A00000000000000000000066, A00000000000000000000068, A0000000000000000000006A); runOnlyForDeploymentPostprocessing = 0; };
-  A0000000000000000000005A = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-  A0000000000000000000005B = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
-  A00000000000000000000058 = {isa = PBXNativeTarget; buildConfigurationList = A0000000000000000000005C; buildPhases = (A00000000000000000000059, A0000000000000000000005A, A0000000000000000000005B); buildRules = (); dependencies = (A0000000000000000000005F); name = AniswiftTests; productName = AniswiftTests; productReference = A00000000000000000000056; productType = "com.apple.product-type.bundle.unit-test"; };
-  A0000000000000000000005F = {isa = PBXTargetDependency; target = A00000000000000000000007; targetProxy = A00000000000000000000060; };
-  A00000000000000000000060 = {isa = PBXContainerItemProxy; containerPortal = A00000000000000000000008; proxyType = 1; remoteGlobalIDString = A00000000000000000000007; remoteInfo = Aniswift; };
-  A0000000000000000000005C = {isa = XCConfigurationList; buildConfigurations = (A0000000000000000000005D, A0000000000000000000005E); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
-  A0000000000000000000005D = {isa = XCBuildConfiguration; name = Debug; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.iosTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aniswift.app/Aniswift"; }; };
-  A0000000000000000000005E = {isa = XCBuildConfiguration; name = Release; buildSettings = { BUNDLE_LOADER = "$(TEST_HOST)"; GENERATE_INFOPLIST_FILE = YES; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.iosTests; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = "1,2"; TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aniswift.app/Aniswift"; }; };
- };
- rootObject = A00000000000000000000008;
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		360DEBD0B6FDAE614263CD59 /* AniswiftWidgetExtension.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 1FE80425AB210E4477EBFEF2 /* AniswiftWidgetExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A00000000000000000000020 /* AniswiftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000030 /* AniswiftApp.swift */; };
+		A00000000000000000000021 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000031 /* Models.swift */; };
+		A00000000000000000000022 /* API.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000032 /* API.swift */; };
+		A00000000000000000000023 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000033 /* Store.swift */; };
+		A00000000000000000000024 /* CatalogScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000034 /* CatalogScreens.swift */; };
+		A00000000000000000000025 /* TitleScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000035 /* TitleScreen.swift */; };
+		A00000000000000000000026 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000036 /* Assets.xcassets */; };
+		A00000000000000000000027 /* CharacterScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000037 /* CharacterScreen.swift */; };
+		A00000000000000000000028 /* SettingsScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000038 /* SettingsScreen.swift */; };
+		A00000000000000000000042 /* Kingfisher in Frameworks */ = {isa = PBXBuildFile; productRef = A00000000000000000000041 /* Kingfisher */; };
+		A00000000000000000000044 /* Kingfisher-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000043 /* Kingfisher-LICENSE.txt */; };
+		A00000000000000000000053 /* DecodingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000050 /* DecodingTests.swift */; };
+		A00000000000000000000054 /* TitleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000051 /* TitleTests.swift */; };
+		A00000000000000000000055 /* ActivityDateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000052 /* ActivityDateTests.swift */; };
+		A00000000000000000000062 /* Persistence.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000061 /* Persistence.swift */; };
+		A00000000000000000000064 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000063 /* PrivacyInfo.xcprivacy */; };
+		A00000000000000000000066 /* StoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000065 /* StoreTests.swift */; };
+		A00000000000000000000068 /* CallbackTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000067 /* CallbackTests.swift */; };
+		A0000000000000000000006A /* StackLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A00000000000000000000069 /* StackLinkTests.swift */; };
+		D2220D0B6EB9424CB96EFE2D /* AniswiftWidgetExtension.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CAEAE65CC2AA6ABCE165091 /* AniswiftWidgetExtension.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		1EEDB33DEAA9529903D3B851 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000008 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 9A7875D328F1D5131FB268BD;
+			remoteInfo = AniswiftWidgetExtension;
+		};
+		A00000000000000000000060 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A00000000000000000000008 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A00000000000000000000007;
+			remoteInfo = Aniswift;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		DAB8ED63B3EC5340A3881CEC /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				360DEBD0B6FDAE614263CD59 /* AniswiftWidgetExtension.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		1FE80425AB210E4477EBFEF2 /* AniswiftWidgetExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; name = AniswiftWidgetExtension.appex; path = AniswiftWidgetExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		4CAEAE65CC2AA6ABCE165091 /* AniswiftWidgetExtension.swift */ = {isa = PBXFileReference; explicitFileType = sourcecode.swift; lastKnownFileType = sourcecode.swift; name = AniswiftWidgetExtension.swift; path = AniswiftWidgetExtension.swift; sourceTree = "<group>"; };
+		947A168FB50802AC4542B47A /* AniswiftWidgetExtension.entitlements */ = {isa = PBXFileReference; explicitFileType = text.plist.entitlements; lastKnownFileType = text.plist.entitlements; name = AniswiftWidgetExtension.entitlements; path = AniswiftWidgetExtension.entitlements; sourceTree = "<group>"; };
+		A00000000000000000000011 /* Aniswift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Aniswift.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000012 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A00000000000000000000030 /* AniswiftApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AniswiftApp.swift; sourceTree = "<group>"; };
+		A00000000000000000000031 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		A00000000000000000000032 /* API.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = API.swift; sourceTree = "<group>"; };
+		A00000000000000000000033 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
+		A00000000000000000000034 /* CatalogScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatalogScreens.swift; sourceTree = "<group>"; };
+		A00000000000000000000035 /* TitleScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleScreen.swift; sourceTree = "<group>"; };
+		A00000000000000000000036 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A00000000000000000000037 /* CharacterScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CharacterScreen.swift; sourceTree = "<group>"; };
+		A00000000000000000000038 /* SettingsScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsScreen.swift; sourceTree = "<group>"; };
+		A00000000000000000000043 /* Kingfisher-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "Kingfisher-LICENSE.txt"; sourceTree = "<group>"; };
+		A00000000000000000000050 /* DecodingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodingTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000051 /* TitleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TitleTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000052 /* ActivityDateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityDateTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000056 /* AniswiftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; path = AniswiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A00000000000000000000061 /* Persistence.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Persistence.swift; sourceTree = "<group>"; };
+		A00000000000000000000063 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A00000000000000000000065 /* StoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StoreTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000067 /* CallbackTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallbackTests.swift; sourceTree = "<group>"; };
+		A00000000000000000000069 /* StackLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StackLinkTests.swift; sourceTree = "<group>"; };
+		B0E3D872DBEDEA16CB743229 /* Info.plist */ = {isa = PBXFileReference; explicitFileType = text.plist; lastKnownFileType = text.plist.xml; name = Info.plist; path = Info.plist; sourceTree = "<group>"; };
+		D1A519FDA6DE701EEE769E7C /* Aniswift.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; name = Aniswift.entitlements; path = Aniswift/Aniswift.entitlements; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		5D2B9F9E686E0E474199AFC1 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000005 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000042 /* Kingfisher in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0000000000000000000005A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		64F5D21E89F0B7D08DBF2B0F /* AniswiftWidgetExtension */ = {
+			isa = PBXGroup;
+			children = (
+				4CAEAE65CC2AA6ABCE165091 /* AniswiftWidgetExtension.swift */,
+				B0E3D872DBEDEA16CB743229 /* Info.plist */,
+				947A168FB50802AC4542B47A /* AniswiftWidgetExtension.entitlements */,
+			);
+			name = AniswiftWidgetExtension;
+			path = AniswiftWidgetExtension;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000002 /* Aniswift */,
+				A00000000000000000000057 /* AniswiftTests */,
+				A00000000000000000000003 /* Products */,
+				64F5D21E89F0B7D08DBF2B0F /* AniswiftWidgetExtension */,
+			);
+			sourceTree = "<group>";
+		};
+		A00000000000000000000002 /* Aniswift */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000030 /* AniswiftApp.swift */,
+				A00000000000000000000031 /* Models.swift */,
+				A00000000000000000000032 /* API.swift */,
+				A00000000000000000000033 /* Store.swift */,
+				A00000000000000000000061 /* Persistence.swift */,
+				A00000000000000000000034 /* CatalogScreens.swift */,
+				A00000000000000000000035 /* TitleScreen.swift */,
+				A00000000000000000000037 /* CharacterScreen.swift */,
+				A00000000000000000000038 /* SettingsScreen.swift */,
+				A00000000000000000000012 /* Info.plist */,
+				A00000000000000000000036 /* Assets.xcassets */,
+				A00000000000000000000043 /* Kingfisher-LICENSE.txt */,
+				A00000000000000000000063 /* PrivacyInfo.xcprivacy */,
+				D1A519FDA6DE701EEE769E7C /* Aniswift.entitlements */,
+			);
+			path = Aniswift;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000003 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000011 /* Aniswift.app */,
+				A00000000000000000000056 /* AniswiftTests.xctest */,
+				1FE80425AB210E4477EBFEF2 /* AniswiftWidgetExtension.appex */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		A00000000000000000000057 /* AniswiftTests */ = {
+			isa = PBXGroup;
+			children = (
+				A00000000000000000000050 /* DecodingTests.swift */,
+				A00000000000000000000051 /* TitleTests.swift */,
+				A00000000000000000000052 /* ActivityDateTests.swift */,
+				A00000000000000000000065 /* StoreTests.swift */,
+				A00000000000000000000067 /* CallbackTests.swift */,
+				A00000000000000000000069 /* StackLinkTests.swift */,
+			);
+			path = AniswiftTests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		9A7875D328F1D5131FB268BD /* AniswiftWidgetExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4A71F4D44E757E01FB143B3F /* Build configuration list for PBXNativeTarget "AniswiftWidgetExtension" */;
+			buildPhases = (
+				A5E3382FA6AECF60AC8E5315 /* Sources */,
+				5D2B9F9E686E0E474199AFC1 /* Frameworks */,
+				EEA4F129D9C71509E23B209D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AniswiftWidgetExtension;
+			packageProductDependencies = (
+			);
+			productName = AniswiftWidgetExtension;
+			productReference = 1FE80425AB210E4477EBFEF2 /* AniswiftWidgetExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		A00000000000000000000007 /* Aniswift */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A00000000000000000000015 /* Build configuration list for PBXNativeTarget "Aniswift" */;
+			buildPhases = (
+				A00000000000000000000004 /* Sources */,
+				A00000000000000000000005 /* Frameworks */,
+				A00000000000000000000006 /* Resources */,
+				DAB8ED63B3EC5340A3881CEC /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				45DFDE7BF23C4916CF29D8C7 /* PBXTargetDependency */,
+			);
+			name = Aniswift;
+			packageProductDependencies = (
+				A00000000000000000000041 /* Kingfisher */,
+			);
+			productName = Aniswift;
+			productReference = A00000000000000000000011 /* Aniswift.app */;
+			productType = "com.apple.product-type.application";
+		};
+		A00000000000000000000058 /* AniswiftTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A0000000000000000000005C /* Build configuration list for PBXNativeTarget "AniswiftTests" */;
+			buildPhases = (
+				A00000000000000000000059 /* Sources */,
+				A0000000000000000000005A /* Frameworks */,
+				A0000000000000000000005B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A0000000000000000000005F /* PBXTargetDependency */,
+			);
+			name = AniswiftTests;
+			productName = AniswiftTests;
+			productReference = A00000000000000000000056 /* AniswiftTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A00000000000000000000008 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = A00000000000000000000014 /* Build configuration list for PBXProject "Aniswift" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A00000000000000000000001;
+			packageReferences = (
+				A00000000000000000000040 /* XCRemoteSwiftPackageReference "Kingfisher" */,
+			);
+			productRefGroup = A00000000000000000000003 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A00000000000000000000007 /* Aniswift */,
+				A00000000000000000000058 /* AniswiftTests */,
+				9A7875D328F1D5131FB268BD /* AniswiftWidgetExtension */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A00000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000026 /* Assets.xcassets in Resources */,
+				A00000000000000000000044 /* Kingfisher-LICENSE.txt in Resources */,
+				A00000000000000000000064 /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A0000000000000000000005B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		EEA4F129D9C71509E23B209D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A00000000000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000020 /* AniswiftApp.swift in Sources */,
+				A00000000000000000000021 /* Models.swift in Sources */,
+				A00000000000000000000022 /* API.swift in Sources */,
+				A00000000000000000000023 /* Store.swift in Sources */,
+				A00000000000000000000024 /* CatalogScreens.swift in Sources */,
+				A00000000000000000000025 /* TitleScreen.swift in Sources */,
+				A00000000000000000000027 /* CharacterScreen.swift in Sources */,
+				A00000000000000000000028 /* SettingsScreen.swift in Sources */,
+				A00000000000000000000062 /* Persistence.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A00000000000000000000059 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A00000000000000000000053 /* DecodingTests.swift in Sources */,
+				A00000000000000000000054 /* TitleTests.swift in Sources */,
+				A00000000000000000000055 /* ActivityDateTests.swift in Sources */,
+				A00000000000000000000066 /* StoreTests.swift in Sources */,
+				A00000000000000000000068 /* CallbackTests.swift in Sources */,
+				A0000000000000000000006A /* StackLinkTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A5E3382FA6AECF60AC8E5315 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2220D0B6EB9424CB96EFE2D /* AniswiftWidgetExtension.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		45DFDE7BF23C4916CF29D8C7 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = AniswiftWidgetExtension;
+			target = 9A7875D328F1D5131FB268BD /* AniswiftWidgetExtension */;
+			targetProxy = 1EEDB33DEAA9529903D3B851 /* PBXContainerItemProxy */;
+		};
+		A0000000000000000000005F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A00000000000000000000007 /* Aniswift */;
+			targetProxy = A00000000000000000000060 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		217E40AE3959E5CF8A4A70DC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AniswiftWidgetExtension/AniswiftWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_LANGUAGE = en;
+				EXECUTABLE_NAME = "$(PRODUCT_NAME)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AniswiftWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios.aniswiftwidgetextension;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = "XPC!";
+				PRODUCT_MODULE_NAME = AniswiftWidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		9E1789C2E2F221C83759B935 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_ENTITLEMENTS = AniswiftWidgetExtension/AniswiftWidgetExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_LANGUAGE = en;
+				EXECUTABLE_NAME = "$(PRODUCT_NAME)";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AniswiftWidgetExtension/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios.aniswiftwidgetextension;
+				PRODUCT_BUNDLE_PACKAGE_TYPE = "XPC!";
+				PRODUCT_MODULE_NAME = AniswiftWidgetExtension;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00000000000000000000016 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000017 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A00000000000000000000018 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Aniswift/Aniswift.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_TESTABILITY = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Aniswift/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		A00000000000000000000019 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_ENTITLEMENTS = Aniswift/Aniswift.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Aniswift/Info.plist;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.ios;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_STRICT_CONCURRENCY = targeted;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		A0000000000000000000005D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.iosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aniswift.app/Aniswift";
+			};
+			name = Debug;
+		};
+		A0000000000000000000005E /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = org.aniswift.iosTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Aniswift.app/Aniswift";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4A71F4D44E757E01FB143B3F /* Build configuration list for PBXNativeTarget "AniswiftWidgetExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9E1789C2E2F221C83759B935 /* Debug */,
+				217E40AE3959E5CF8A4A70DC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000014 /* Build configuration list for PBXProject "Aniswift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000016 /* Debug */,
+				A00000000000000000000017 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A00000000000000000000015 /* Build configuration list for PBXNativeTarget "Aniswift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000018 /* Debug */,
+				A00000000000000000000019 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A0000000000000000000005C /* Build configuration list for PBXNativeTarget "AniswiftTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A0000000000000000000005D /* Debug */,
+				A0000000000000000000005E /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A00000000000000000000040 /* XCRemoteSwiftPackageReference "Kingfisher" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/onevcat/Kingfisher.git";
+			requirement = {
+				kind = exactVersion;
+				version = 8.12.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A00000000000000000000041 /* Kingfisher */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A00000000000000000000040 /* XCRemoteSwiftPackageReference "Kingfisher" */;
+			productName = Kingfisher;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A00000000000000000000008 /* Project object */;
 }

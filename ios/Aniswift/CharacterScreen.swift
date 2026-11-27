@@ -662,6 +662,9 @@ private struct PersonRole: Identifiable {
     /// the provider flattened, carries only the romaji title, which is what this
     /// row used to show.
     func displayTitle(for language: String, known: String? = nil) -> String {
+        if language == TitleLanguage.japanese.rawValue {
+            return anime?.japaneseName ?? animeName
+        }
         if language == TitleLanguage.romaji.rawValue { return anime?.original ?? animeName }
         return known ?? anime?.displayName(for: language) ?? animeName
     }

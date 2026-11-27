@@ -59,6 +59,9 @@ struct TitleScreen: View {
     private static let friendScanLimit = 18
 
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
+    /// Whether the catalog may answer with adult titles, so the page offers the
+    /// MyAnimeList stacks link only while it may.
+    @AppStorage(SettingKey.showAdultContent) private var showsAdultContent = true
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
     /// The schedules AniList has published, so the airing band names the episode
     /// that is really next instead of counting weekly slots. Observation tracks
@@ -163,8 +166,9 @@ struct TitleScreen: View {
                     }
                     // The catalog does not index adult stacks, so a title whose
                     // stacks are all adult has none to hand over. MyAnimeList
-                    // keeps the list the app cannot read.
-                    if !stacksUnavailable, let url = stacksOnMyAnimeList {
+                    // keeps the list the app cannot read, and the link stays
+                    // away while Settings hides adult content.
+                    if !stacksUnavailable, showsAdultContent, let url = stacksOnMyAnimeList {
                         Link(destination: url) {
                             Label("Stacks on MyAnimeList", systemImage: "arrow.up.right")
                         }
@@ -275,6 +279,16 @@ struct TitleScreen: View {
                                 let progress = max(saved.progress, current.total ?? 0)
                                 updateList(ListChange(status: "completed", progress: progress, rating: saved.rating))
                             } label: { Label("Mark completed", systemImage: "checkmark") }
+                        } else {
+                            // A finished run starts again from here, and
+                            // MyAnimeList counts the rewatch when it finishes.
+                            Button {
+                                restart(saved)
+                            } label: {
+                                Label(
+                                    title.kind == .anime ? "Start rewatching" : "Start rereading",
+                                    systemImage: "arrow.counterclockwise")
+                            }
                         }
                         Button(role: .destructive) { confirmRemoval = true } label: {
                             Label("Remove from My List", systemImage: "trash")
@@ -345,6 +359,16 @@ struct TitleScreen: View {
         case .score, .full: 166
         }
         return [.height(baseHeight + quickSheetExtra), .large]
+    }
+
+    /// Starts a run again: the entry goes back to watching or reading with no
+    /// progress and keeps its score, and MyAnimeList records the rewatch when it
+    /// is completed once more.
+    private func restart(_ item: ListEntry) {
+        updateList(
+            ListChange(
+                status: title.kind.statuses.first ?? "watching", progress: 0,
+                rating: item.rating, restarts: true))
     }
 
     private func updateList(_ change: ListChange?) {
@@ -2184,7 +2208,9 @@ struct ListEditor: View {
     private var remoteChanged: Bool {
         guard let original else { return true }
         return original.status != change.status || original.progress != change.progress ||
-            original.rating != change.rating || (mode == .full && details != (original.details ?? ListDetails()))
+            original.rating != change.rating
+            || (original.isRestarting == true) != (change.restarts == true)
+            || (mode == .full && details != (original.details ?? ListDetails()))
     }
 
     private var originalListIDs: Set<UUID> {
@@ -2383,8 +2409,12 @@ struct ListEditor: View {
     }()
 
     private static func listChange(_ title: Title, _ entry: ListEntry?) -> ListChange {
-        ListChange(status: entry?.status ?? title.kind.statuses.last!,
-                   progress: entry?.progress ?? 0, rating: entry?.rating ?? 0)
+        // An entry MyAnimeList holds mid-rewatch opens the editor as it is, so
+        // saving a score does not end the run.
+        ListChange(
+            status: entry?.status ?? title.kind.statuses.last!,
+            progress: entry?.progress ?? 0, rating: entry?.rating ?? 0,
+            restarts: entry?.isRestarting == true ? true : nil)
     }
 
     private func prepare() async {
@@ -2419,10 +2449,32 @@ struct ListEditor: View {
     }
 
     private var statusPicker: some View {
-        Picker("Status", selection: $change.status) {
+        Picker("Status", selection: statusSelection) {
             ForEach(title.kind.statuses, id: \.self) { Text(statusLabel($0)).tag($0) }
+            // A completed entry starts its run again from here: MyAnimeList
+            // keeps that as a watching entry with the rewatch flag.
+            Text(title.kind == .anime ? "Rewatching" : "Rereading").tag(Self.restartValue)
         }
         .sensoryFeedback(.selection, trigger: change.status)
+    }
+
+    /// The picker's own value: a rewatch reads as its own status rather than as
+    /// Watching twice, and choosing it starts the run again from zero.
+    private static let restartValue = "rewatching"
+
+    private var statusSelection: Binding<String> {
+        Binding(
+            get: { change.restarts == true ? Self.restartValue : change.status },
+            set: { value in
+                if value == Self.restartValue {
+                    change.status = title.kind.statuses.first ?? "watching"
+                    change.progress = 0
+                    change.restarts = true
+                } else {
+                    change.status = value
+                    change.restarts = change.restarts == nil ? nil : false
+                }
+            })
     }
 
     private var quickEditor: some View {

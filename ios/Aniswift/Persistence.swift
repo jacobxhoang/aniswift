@@ -256,3 +256,82 @@ enum ProfileCache {
         SnapshotWriter.write(data, to: file)
     }
 }
+
+
+/// One row a Home Screen widget draws: what the reader sees and the progress its
+/// button adds to. No token and no account name travels in it.
+struct WidgetRow: Codable, Identifiable {
+    let id: String
+    let malID: Int
+    let kind: String
+    let name: String
+    let image: URL?
+    let progress: Int
+    let total: Int?
+}
+
+/// The account's totals as the statistics widget draws them: the counts the
+/// public profile publishes, with a figure left out where the provider has none.
+struct WidgetStats: Codable {
+    let animeCount: Int?
+    let mangaCount: Int?
+    let daysWatched: Double?
+    let chaptersRead: Int?
+}
+
+/// The rows the widgets draw, written after every list read or edit into the App
+/// Group container the app and its extension share. Each kind keeps its three
+/// most recently updated entries, which is all a widget draws.
+struct WidgetSnapshot: Codable {
+    var anime: [WidgetRow] = []
+    var manga: [WidgetRow] = []
+    /// The account's totals, once its public profile has been read.
+    var stats: WidgetStats?
+
+    static let group = "group.org.aniswift.ios.shared"
+    private static let name = "Aniswift-widget-v1.json"
+
+    static var file: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)?
+            .appending(path: name)
+    }
+
+    static func read() -> Self? {
+        guard let file, let data = try? Data(contentsOf: file) else { return nil }
+        return try? JSONDecoder().decode(Self.self, from: data)
+    }
+
+    func write() {
+        guard let file = Self.file, let data = try? JSONEncoder().encode(self) else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+}
+
+/// The access token a widget's button needs to reach MyAnimeList. The Keychain
+/// stays the app's one copy: an extension cannot read that item without a
+/// keychain access group whose name is only resolved at signing, so this one
+/// lives in the App Group container, protected until the device is first
+/// unlocked, and is removed when the account signs out.
+struct WidgetCredentials: Codable {
+    let accessToken: String
+    let expiresAt: Date
+
+    private static let name = "Aniswift-widget-token.json"
+
+    private static var file: URL? {
+        FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: WidgetSnapshot.group)?
+            .appending(path: name)
+    }
+
+    static func write(token: String, expiresAt: Date) {
+        guard let file = Self.file,
+            let data = try? JSONEncoder().encode(Self(accessToken: token, expiresAt: expiresAt))
+        else { return }
+        try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+    }
+
+    static func remove() {
+        guard let file = Self.file else { return }
+        try? FileManager.default.removeItem(at: file)
+    }
+}

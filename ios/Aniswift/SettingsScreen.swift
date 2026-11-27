@@ -19,7 +19,48 @@ enum AccentChoice: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// The tint the app draws its controls and links in. Each choice darkens on
+    /// a light canvas, so a link or a glyph keeps its contrast either way.
     var color: Color {
+        switch self {
+        case .white: Palette.adaptive(.black, .white)
+        case .blue:
+            Palette.adaptive(
+                UIColor(red: 0.10, green: 0.40, blue: 0.85, alpha: 1),
+                UIColor(red: 0.42, green: 0.70, blue: 0.98, alpha: 1))
+        case .red:
+            Palette.adaptive(
+                UIColor(red: 0.78, green: 0.14, blue: 0.14, alpha: 1),
+                UIColor(red: 0.94, green: 0.32, blue: 0.32, alpha: 1))
+        case .green:
+            Palette.adaptive(
+                UIColor(red: 0.04, green: 0.48, blue: 0.20, alpha: 1),
+                UIColor(red: 0.24, green: 0.78, blue: 0.42, alpha: 1))
+        case .brown:
+            Palette.adaptive(
+                UIColor(red: 0.46, green: 0.30, blue: 0.14, alpha: 1),
+                UIColor(red: 0.74, green: 0.56, blue: 0.38, alpha: 1))
+        case .cyan:
+            Palette.adaptive(
+                UIColor(red: 0.00, green: 0.44, blue: 0.58, alpha: 1),
+                UIColor(red: 0.32, green: 0.80, blue: 0.94, alpha: 1))
+        case .gray:
+            Palette.adaptive(
+                UIColor(white: 0.34, alpha: 1), UIColor(white: 0.62, alpha: 1))
+        case .purple:
+            Palette.adaptive(
+                UIColor(red: 0.34, green: 0.26, blue: 0.85, alpha: 1),
+                UIColor(red: 0.48, green: 0.44, blue: 0.98, alpha: 1))
+        case .mint:
+            Palette.adaptive(
+                UIColor(red: 0.00, green: 0.44, blue: 0.32, alpha: 1),
+                UIColor(red: 0.36, green: 0.86, blue: 0.72, alpha: 1))
+        }
+    }
+
+    /// The swatch in Settings is the dark value in both appearances, so the row
+    /// reads the same either way and its checkmark keeps its contrast.
+    var swatch: Color {
         switch self {
         case .white: .white
         case .blue: Color(red: 0.42, green: 0.70, blue: 0.98)
@@ -42,16 +83,95 @@ enum AccentChoice: String, CaseIterable, Identifiable {
     }
 }
 
+/// The appearance the app draws in: the device's own, or one chosen here. It is
+/// stored by raw value in `SettingKey.appearance` and read by the app root.
+enum AppearanceChoice: String, CaseIterable, Identifiable {
+    case system = "System"
+    case light = "Light"
+    case dark = "Dark"
+
+    var id: String { rawValue }
+
+    /// The scheme the app is told to draw, or nothing to follow the device.
+    var scheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+/// A list group as “Expand Sections on Launch” names it. Both kinds share one
+/// switch, because a reader who wants Completed shut wants it shut in both lists.
+enum LaunchSection: String, CaseIterable, Identifiable {
+    case watching = "Watching / Reading"
+    case completed = "Completed"
+    case onHold = "On Hold"
+    case dropped = "Dropped"
+    case planned = "Planned"
+
+    var id: String { rawValue }
+
+    /// The key the switch is stored under, one per group.
+    var key: String {
+        switch self {
+        case .watching: "aniswift.settings.launch.watching"
+        case .completed: "aniswift.settings.launch.completed"
+        case .onHold: "aniswift.settings.launch.onHold"
+        case .dropped: "aniswift.settings.launch.dropped"
+        case .planned: "aniswift.settings.launch.planned"
+        }
+    }
+
+    /// A list starts with the group the reader is in and the one he is going to
+    /// open, and the rest shut, which is what every list did before the switches.
+    var startsExpanded: Bool { self == .watching || self == .planned }
+
+    /// Whether an entry of either kind belongs to this group.
+    func holds(_ status: String) -> Bool {
+        switch self {
+        case .watching: status == "watching" || status == "reading"
+        case .completed: status == "completed"
+        case .onHold: status == "on_hold"
+        case .dropped: status == "dropped"
+        case .planned: status == "plan_to_watch" || status == "plan_to_read"
+        }
+    }
+
+    /// The groups a kind's list opens with shut, read once when the list is
+    /// built: a switch written in Settings reaches the next list that opens, and
+    /// a group opened by hand stays open for that visit.
+    static func collapsed(for kind: Kind) -> Set<String> {
+        let defaults = UserDefaults.standard
+        return Set(kind.statuses.filter { status in
+            guard let section = allCases.first(where: { $0.holds(status) }) else { return true }
+            return !(defaults.object(forKey: section.key) as? Bool ?? section.startsExpanded)
+        })
+    }
+}
+
 /// UserDefaults keys for every preference the settings screens write.
 enum SettingKey {
     static let accent = "aniswift.settings.accent"
+    /// The appearance chosen in Settings, or `System` to follow the device.
+    static let appearance = "aniswift.settings.appearance"
     static let titleLanguage = "aniswift.settings.titleLanguage"
+    /// Whether the catalog may answer with titles it marks as adult. On by
+    /// default, because the app asked for them before the switch existed.
+    static let showAdultContent = "aniswift.settings.showAdultContent"
     static let openLinksInApp = "aniswift.settings.openLinksInApp"
     static let askForScore = "aniswift.settings.askForScore"
     static let preferredLaunch = "aniswift.settings.preferredLaunch"
     static let launchTab = "aniswift.settings.launchTab"
     static let lastTab = "aniswift.settings.lastTab"
     static let tabBarBehavior = "aniswift.settings.tabBarBehavior"
+    /// Whether the app asks for Face ID, Touch ID or the passcode before it
+    /// shows a page.
+    static let lockEnabled = "aniswift.settings.lock.enabled"
+    /// How long the app may stay in the background before it locks, in seconds:
+    /// `0` locks it as it is backgrounded.
+    static let lockDelay = "aniswift.settings.lock.delay"
 
     static func detail(_ kind: Kind, _ section: String) -> String {
         "aniswift.settings.details.\(kind.rawValue).\(section)"
@@ -149,6 +269,7 @@ struct ProfilePreferences: Equatable {
 
 struct SettingsScreen: View {
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
+    @AppStorage(SettingKey.appearance) private var appearance = AppearanceChoice.system.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dismiss) private var dismiss
     @Environment(Store.self) private var store
@@ -163,6 +284,14 @@ struct SettingsScreen: View {
 
     var body: some View {
         List {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(AppearanceChoice.allCases) { Text($0.rawValue).tag($0.rawValue) }
+                }
+                .pickerStyle(.menu)
+                .sensoryFeedback(.selection, trigger: appearance)
+                .settingsRow()
+            }
             Section("Accent Color") {
                 accentRow
             }
@@ -171,6 +300,20 @@ struct SettingsScreen: View {
                     BehaviorSettingsScreen()
                 } label: {
                     SettingsRow(icon: "slider.horizontal.3", title: "Behavior")
+                }
+                .settingsRow()
+                NavigationLink {
+                    LaunchSectionsScreen()
+                } label: {
+                    // A settings row is its title alone, so the screen says what
+                    // the switches decide and the rows say which group.
+                    SettingsRow(icon: "rectangle.3.group", title: "Expand Sections on Launch")
+                }
+                .settingsRow()
+                NavigationLink {
+                    LockSettingsScreen()
+                } label: {
+                    SettingsRow(icon: "faceid", title: "Face ID / Passcode")
                 }
                 .settingsRow()
             }
@@ -289,9 +432,12 @@ struct SettingsScreen: View {
                         }
                     } label: {
                         ZStack {
-                            Circle().fill(choice.color).frame(width: 38, height: 38)
+                            // The swatch and its ring are the same shade in
+                            // both appearances, so the row reads the same and a
+                            // selected swatch keeps its edge.
+                            Circle().fill(choice.swatch).frame(width: 38, height: 38)
                             if selected {
-                                Circle().strokeBorder(.white.opacity(0.9), lineWidth: 2)
+                                Circle().strokeBorder(Palette.border, lineWidth: 2)
                                     .frame(width: 48, height: 48)
                                 Image(systemName: "checkmark")
                                     .font(.headline.weight(.heavy))
@@ -317,9 +463,11 @@ struct SettingsScreen: View {
 }
 
 struct BehaviorSettingsScreen: View {
+    @Environment(Store.self) private var store
     @AppStorage(SettingKey.titleLanguage) private var language = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
+    @AppStorage(SettingKey.showAdultContent) private var showsAdultContent = true
     @AppStorage(SettingKey.preferredLaunch) private var usesPreferredLaunch = false
     @AppStorage(SettingKey.launchTab) private var launchTab = "anime"
     @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
@@ -349,6 +497,16 @@ struct BehaviorSettingsScreen: View {
                 Toggle("Ask for Score After Watching an Anime", isOn: $asksForScore)
                     .sensoryFeedback(.selection, trigger: asksForScore)
                     .settingsRow()
+            }
+            Section {
+                Toggle("Show Adult Content", isOn: $showsAdultContent)
+                    .sensoryFeedback(.selection, trigger: showsAdultContent)
+                    .settingsRow()
+                    // The cache holds what the last answer was, so switching off
+                    // would still show it: the next screen asks again instead.
+                    .onChange(of: showsAdultContent) { _, _ in store.api.clearCatalogCache() }
+            } footer: {
+                Text("Adult titles are left out of search, Discover and interest stacks. Your own list is not filtered.")
             }
             Section {
                 Toggle("Enable Preferred Launch Screen", isOn: $usesPreferredLaunch)
@@ -525,6 +683,119 @@ private struct InfoSettingsScreen: View {
         .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Information")
         .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// Whether the app locks, and how long it may stay in the background first. The
+/// timer is a list of rows rather than a menu, so the chosen one is a checkmark
+/// beside the others, the way the timer reads in the app it mirrors.
+struct LockSettingsScreen: View {
+    @AppStorage(SettingKey.lockEnabled) private var lockEnabled = false
+    @AppStorage(SettingKey.lockDelay) private var lockDelay = 0
+
+    /// The timers, in the order a reader would look for them.
+    private static let delays: [(seconds: Int, label: String)] = [
+        (0, "Immediately"),
+        (30, "30 seconds"),
+        (60, "1 minute"),
+        (120, "2 minutes"),
+        (300, "5 minutes"),
+        (600, "10 minutes"),
+        (1800, "30 minutes"),
+    ]
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("Lock with Face ID / Passcode", isOn: $lockEnabled)
+                    .sensoryFeedback(.selection, trigger: lockEnabled)
+                    .settingsRow()
+            } footer: {
+                Text(
+                    "When it is on, Aniswift is locked when you close it, and asks for Face ID, Touch ID or your passcode when you open it."
+                )
+            }
+            if lockEnabled {
+                Section {
+                    ForEach(Self.delays, id: \.seconds) { delay in
+                        Button {
+                            lockDelay = delay.seconds
+                        } label: {
+                            HStack {
+                                Text(delay.label).foregroundStyle(.primary)
+                                Spacer(minLength: 8)
+                                if lockDelay == delay.seconds {
+                                    Image(systemName: "checkmark")
+                                        .font(.body.weight(.semibold))
+                                        .accessibilityHidden(true)
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .sensoryFeedback(.selection, trigger: lockDelay)
+                        .settingsRow()
+                        .accessibilityAddTraits(lockDelay == delay.seconds ? .isSelected : [])
+                    }
+                } header: {
+                    Text("Auto Lock Timer")
+                } footer: {
+                    Text(timerNote)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Face ID / Passcode")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// What the chosen timer means, in the words the rows cannot carry.
+    private var timerNote: String {
+        guard lockDelay > 0 else {
+            return "Aniswift will lock immediately when the app is backgrounded."
+        }
+        let label = Self.delays.first { $0.seconds == lockDelay }?.label ?? "a while"
+        return "Aniswift will lock once it has been in the background for \(label)."
+    }
+}
+
+/// Which list groups a fresh list opens with: a group that is on is open when a
+/// list is built, and one that is off starts shut and can still be opened by
+/// hand for that visit. Both kinds answer the same switch.
+struct LaunchSectionsScreen: View {
+    var body: some View {
+        List {
+            Section {
+                ForEach(LaunchSection.allCases) { section in
+                    LaunchToggle(section: section)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollContentBackground(.hidden)
+        .background(Palette.background.ignoresSafeArea())
+        .navigationTitle("Expand Sections on Launch")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// One group's switch, stored under the group's own key, so a reader who always
+/// opens Completed keeps that after a relaunch.
+private struct LaunchToggle: View {
+    let section: LaunchSection
+    @AppStorage private var isOn: Bool
+
+    init(section: LaunchSection) {
+        self.section = section
+        _isOn = AppStorage(wrappedValue: section.startsExpanded, section.key)
+    }
+
+    var body: some View {
+        Toggle(section.rawValue, isOn: $isOn)
+            .sensoryFeedback(.selection, trigger: isOn)
+            .settingsRow()
     }
 }
 

@@ -64,7 +64,8 @@ romaji. A manga's header lists its authors the way a title lists its
 studios, and tapping one opens that page. Reviews and friends' title activity appear when entries exist.
 Open **View All** in Reviews to browse and read reviews inside the app, including a spoiler reveal control in
 the reader. Interest stacks open from a title and list their entries with positions, scores and notes; in a
-stack flagged **Spoilers**, each author note stays behind **Reveal note**. Adult stacks are asked for, so a title
+stack flagged **Spoilers**, each author note stays behind **Reveal note**. With **Show Adult Content** on, adult
+stacks are asked for, so a title
 that is itself adult lists them too; one MyAnimeList never hands over — a stack made only of adult titles — opens
 from the title page's **Stacks on MyAnimeList** link instead. Many stacks chain themselves together
 with lines like `Part 2: https://myanimelist.net/stacks/6746`; those links open the stack they name inside the
@@ -79,7 +80,9 @@ refuses to play in an embed, so nothing is handed off to a browser. Anime detail
 theme songs.
 
 Use **Status**, **Progress** or **My Score** for a quick edit. The pencil opens the full editor for repeat
-counts, start and finish dates, and notes. These fields sync to MyAnimeList. Custom lists and visibility
+counts, start and finish dates, and notes. A completed title offers **Rewatching** or **Rereading** in its status —
+and the same action in the page's **More Actions** menu — which starts the run again from zero and keeps the score,
+so MyAnimeList counts the rewatch when it is completed once more. These fields sync to MyAnimeList. Custom lists and visibility
 preferences stay on this device for the signed-in account. Hidden status entries remain searchable. Status
 controls use interactive Liquid Glass on iOS 26 and translucent material on earlier versions.
 
@@ -87,8 +90,16 @@ controls use interactive Liquid Glass on iOS 26 and translucent material on earl
 
 Open **Profile → gear → Settings**. Every settings row is its title alone: the sections are headings, and the
 screen that explains the app rather than setting it — **About Aniswift** — sits under AniList, with Sign Out
-last. The share button at the top left of Profile shares your MyAnimeList profile. Settings apply to the whole
+last. **Expand Sections on Launch** and **Face ID / Passcode** sit beside Behavior, Details Page and Profile. The share button at the top left of Profile shares your MyAnimeList profile. Settings apply to the whole
 app and are stored on this device; they are not per account and are never synced to MyAnimeList.
+
+### Appearance
+
+**Settings → Appearance** chooses **System** (the default, which follows the device), **Light** or **Dark**. Both
+appearances draw the same ledger: one hairline on every card, one accent, the same figures and corners. Every edge
+clears the platform's 3:1 non-text contrast on either canvas, and the accent you chose darkens on the white one so
+a link or a glyph stays readable. The poster viewer and the trailer stay black in both, because a picture is what
+they show.
 
 ### Accent Color
 
@@ -100,10 +111,12 @@ checkmark, or updates without animation when Reduce Motion is on.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Preferred Title Language | English | Shows English titles when a translation exists, otherwise the original; Romaji shows the original title with the English name as fallback. Applies to title pages, lists, shelves, sorting, stacks, reviews, editor prompts and a person's roles and credits. |
+| Preferred Title Language | English | Shows English titles when a translation exists, otherwise the original; Romaji shows the original title with the English name as fallback; Japanese shows the Japanese title MyAnimeList keeps, with the English name and then the original as fallback. Applies to title pages, lists, shelves, sorting, stacks, reviews, editor prompts and a person's roles and credits. |
+| Show Adult Content | On | Asks the catalog for adult titles: a search, a Discover shelf, a facet, a relation, a recommendation and a title's interest stacks answer with them. Off, every catalog request carries `sfw=true` instead, so the safe copy answers and the adult stacks a title has are not listed; the **Stacks on MyAnimeList** link is hidden with it, and the catalog cache is cleared when the switch changes. Your MyAnimeList list, the Feed and Profile are never filtered, because a list row carries no rating. |
 | Open Links In-App | On | Opens http(s) links from titles, profiles, stacks and About in a Safari sheet inside Aniswift. When off, links open in the default browser. If no foreground window can present the sheet, the link opens outside the app instead of being dropped. |
 | Ask for Score After Watching an Anime | On | After an anime is marked completed with no score — from the title's completion action, the quick status editor or the full editor — presents a score sheet. It never appears for manga or from the score editor itself; the editor path also skips an entry that was already completed. |
 | Enable Preferred Launch Screen | Off | When on, the app opens the selected screen (Anime, Manga, Discover, Feed or Profile) on every cold launch. When off, it restores the last tab you used. |
+| Expand Sections on Launch | Watching / Reading and Planned on | One switch per list group, shared by Anime and Manga: a group that is on is open when a list opens, and one that is off starts shut and can still be opened by hand for that visit. A group opened by hand is not remembered. |
 | Preferred Screen | Anime | The tab used when preferred launch is enabled. |
 | Tab Bar Behavior (iOS 26) | Always Visible | Keeps the tab bar visible or lets it minimize while scrolling down. Earlier iOS versions always show the tab bar. |
 | Clear Cache | — | Clears Kingfisher's memory and disk image cache, the shared URL cache, the in-memory catalog response cache and the saved title pages. Sign-in, lists, feed/profile snapshots, custom lists and settings are kept. The row reports the measured image and URL cache size, or notes when only catalog responses are cached. |
@@ -111,6 +124,33 @@ checkmark, or updates without animation when Reduce Motion is on.
 
 Preferences are read live: changing the accent, language, a detail toggle or a profile toggle updates open
 screens immediately.
+
+### Face ID / Passcode
+
+**Settings → Face ID / Passcode** locks the app. With **Lock with Face ID / Passcode** on, Aniswift is locked when
+it opens and asks for Face ID, Touch ID or your device passcode; the **Auto Lock Timer** decides how long it may
+sit in the background first — immediately, 30 seconds, 1, 2, 5, 10 or 30 minutes — and the chosen one carries a
+checkmark. While the app is inactive its page is covered, so the app switcher never shows your lists. A device
+without a passcode cannot unlock it, and the screen says so instead of offering a prompt.
+
+### Widgets
+
+Add **Aniswift — Last Updated Anime**, **Last Updated Manga** or **Profile Statistics** from the Home Screen's
+widget gallery. The app writes the three most recently updated entries of each kind into the App Group container after
+every list read or edit, so a widget draws the poster, a progress bar, the count and a **+1** pill without opening
+the app; the widget's own name in the gallery and on the Home Screen is its heading, so nothing is repeated inside
+the card. The poster arrives when the widget refreshes, and a row whose picture does not come shows the kind's glyph
+instead. A small widget shows one row and a medium one shows three. The **+1** button adds one episode or chapter
+straight to MyAnimeList, with the token the app keeps for it in the App Group container — the one copy outside the
+Keychain, protected until the device is first unlocked and removed when you sign out — and the widget's row moves with
+it. A request that fails leaves the row where it was.
+
+**Profile Statistics** draws the totals MyAnimeList publishes for the account — anime, manga, days watched and
+chapters read — each with its glyph: a small widget carries two of them with a rule between, and a medium one all
+four in a grid. The app writes them into the same App Group container whenever a list is read or edited and
+whenever your Profile or a friend's profile reads its statistics, so the widget follows the app without opening it.
+Until one has been written it says **Open Aniswift to read your statistics.**, and a total the provider does not
+publish is left out rather than drawn as a zero.
 
 ### Details Page
 
@@ -222,7 +262,7 @@ launch; an entry older than ten minutes is asked for again while the saved one s
 leaves the file alone because it holds no user data.
 
 Every edge that carries a boundary — a poster's rim, a panel, a capsule, a divider — clears the platform's 3:1
-non-text contrast on the black canvas and on a panel above it, and the edge of a chosen control sits a step above
+non-text contrast on the canvas and on a panel above it, in either appearance, and the edge of a chosen control sits a step above
 that. A title page's header poster follows Dynamic Type with the name under it, and a poster or a thumbnail stops
 growing at 1.4× so a page keeps its shape at the accessibility sizes. A list, Discover and the Feed carry a
 **Refresh** control in the bar, which reads the page again without scrolling back to the top. On a hardware
@@ -356,4 +396,7 @@ The workflow uses the App ID and team from the provisioning profile and exports 
 - Open a title from an interest stack, the stacks list, a review author, the catalog browser, a Discover shelf,
   a custom list and a friend's media list. Each detail page must slide in over the current screen rather than
   appearing behind it, and Back must return to the same list.
+- Open your Profile, then add the **Profile Statistics** widget and confirm its totals match the statistics panel,
+  that the small size carries two of them and the medium one all four, and that a device with no saved profile
+  says **Open Aniswift to read your statistics.**
 - Use a signed device build and a registered iOS Client ID to verify account sync and Liquid Glass on iPhone.

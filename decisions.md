@@ -58,3 +58,22 @@
 - Why: the tab bar was the only way across the five tabs, and a hardware keyboard had no path to it
 - Rejected: visible per-tab controls in each screen's bar, which would add chrome to every page for a shortcut
 - Rests on: the one list of tabs in `tabOrder`, and a shortcut that belongs to the tab bar's own action
+
+
+## 2026-11-26 · A widget's +1 is given the token outside the Keychain
+- Decided by: agent default while the designer has not answered
+- Why: an interactive button runs in the extension's own process, and an extension cannot read the app's Keychain item
+  without a keychain access group whose name is only resolved at signing, so the button could not reach MyAnimeList at all
+- Rejected: an App Group UserDefaults copy in plain text, a widget that only opens the app for a tap, and dropping
+  the button from the widget
+- Rests on: the App Group container's protection until the device is first unlocked, and the file being removed at
+  sign-out
+
+
+## 2026-11-26 · The app draws in a light appearance too
+- Decided by: the designer, asking for a light mode
+- Why: the ledger's rules are colour-agnostic — one hairline, one corner, one accent — so the world carries in a
+  white canvas with ink instead of white, and a reader in daylight is not handed a dark room
+- Rejected: keeping the dark-only build and offering a "dim" variant of it
+- Overturns: the 2026-11-26 decision that the appearance stays dark only. `PRODUCT.md` and `DESIGN.md` are updated
+  in the same change, and System is the default so the device decides until the reader chooses

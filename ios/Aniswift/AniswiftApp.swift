@@ -1,5 +1,6 @@
 import AuthenticationServices
 import Kingfisher
+import LocalAuthentication
 import SwiftUI
 import UIKit
 
@@ -8,9 +9,18 @@ import UIKit
 struct AniswiftApp: App {
     @State private var store = Store()
     @AppStorage(SettingKey.accent) private var accent = AccentChoice.white.rawValue
+    @AppStorage(SettingKey.appearance) private var appearance = AppearanceChoice.system.rawValue
     @AppStorage(SettingKey.openLinksInApp) private var openLinksInApp = true
     @AppStorage(SettingKey.lastTab) private var lastTab = "anime"
     @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
+    @AppStorage(SettingKey.lockEnabled) private var lockEnabled = false
+    @AppStorage(SettingKey.lockDelay) private var lockDelay = 0
+    @Environment(\.scenePhase) private var scenePhase
+    /// When the app went to the background, so the timer can be measured.
+    @State private var leftAt: Date?
+    /// Whether the page is hidden: a build with the lock on starts locked, so
+    /// the first thing a reader sees is the prompt.
+    @State private var locked: Bool
     @State private var tab: String
 
     /// The tabs this build has, in the order the bar draws them: the only values
@@ -26,6 +36,7 @@ struct AniswiftApp: App {
             ? defaults.string(forKey: SettingKey.launchTab) ?? "anime"
             : defaults.string(forKey: SettingKey.lastTab) ?? "anime"
         _tab = State(initialValue: Self.tabOrder.contains(stored) ? stored : "anime")
+        _locked = State(initialValue: defaults.bool(forKey: SettingKey.lockEnabled))
         // Posters and avatars are reused across scrolling and back navigation, so
         // keep them longer than Kingfisher's one-week disk default.
         let images = ImageCache.default
@@ -44,7 +55,7 @@ struct AniswiftApp: App {
                 .onChange(of: tab) { _, value in lastTab = value }
                 .sensoryFeedback(.selection, trigger: tab)
                 .tint(accentColor)
-                .preferredColorScheme(.dark)
+                .preferredColorScheme(AppearanceChoice(rawValue: appearance)?.scheme)
                 .environment(
                     \.openURL,
                     OpenURLAction { url in
@@ -81,6 +92,36 @@ struct AniswiftApp: App {
                     guard let message else { return }
                     UIAccessibility.post(notification: .announcement, argument: message)
                 }
+                .onChange(of: scenePhase) { _, phase in updateLock(for: phase) }
+                // The page stays hidden until Face ID, Touch ID or the passcode
+                // answers. While the app is not active, a cover keeps the page
+                // out of the app switcher as well.
+                .overlay {
+                    if locked {
+                        LockScreen { locked = false }
+                    } else if lockEnabled, scenePhase != .active {
+                        Palette.background.ignoresSafeArea()
+                    }
+                }
+        }
+    }
+
+    /// Locks on launch, and after the timer runs out in the background. Both
+    /// the switch and the timer are read from the settings, so a change there
+    /// reaches the next launch and the next background.
+    private func updateLock(for phase: ScenePhase) {
+        switch phase {
+        case .background:
+            guard lockEnabled else { return }
+            leftAt = .now
+            if lockDelay == 0 { locked = true }
+        case .active:
+            let away = leftAt
+            leftAt = nil
+            guard lockEnabled, !locked, let away else { return }
+            if Date().timeIntervalSince(away) >= TimeInterval(lockDelay) { locked = true }
+        default:
+            break
         }
     }
 
@@ -210,6 +251,67 @@ struct AniswiftApp: App {
     }
 }
 
+/// The app's lock: the page is covered until Face ID, Touch ID or the device
+/// passcode answers. It asks as it appears, so opening the app is one prompt
+/// rather than a prompt and a tap, and the policy allows any of the three so a
+/// device without a biometric still unlocks.
+private struct LockScreen: View {
+    let unlock: () -> Void
+    @State private var asking = false
+    @State private var message: String?
+
+    var body: some View {
+        ZStack {
+            Palette.background.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 44, weight: .light))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text("Aniswift is locked")
+                    .font(.title3.weight(.semibold))
+                    .accessibilityAddTraits(.isHeader)
+                if let message {
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("Unlock") { Task { await ask() } }
+                    .ledgerGlassButton()
+                    .disabled(asking)
+                    .accessibilityHint("Asks for Face ID, Touch ID or your passcode")
+            }
+            .padding(LedgerLayout.inset)
+            .frame(maxWidth: 420)
+        }
+        .task { await ask() }
+    }
+
+    private func ask() async {
+        guard !asking else { return }
+        asking = true
+        defer { asking = false }
+        let context = LAContext()
+        var failure: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &failure) else {
+            message = "Set a passcode on this device, then open Aniswift again."
+            return
+        }
+        do {
+            let answered = try await context.evaluatePolicy(
+                .deviceOwnerAuthentication, localizedReason: "Unlock Aniswift")
+            guard answered else { return }
+            message = nil
+            unlock()
+        } catch {
+            guard !Task.isCancelled else { return }
+            message = "Aniswift is locked. Unlock to read your lists."
+        }
+    }
+}
+
 /// Tactile feedback for the moments a screen finishes something: a save that
 /// reached MyAnimeList, a request that failed. State-driven feedback (pickers,
 /// toggles, steppers) uses `.sensoryFeedback` at the control instead.
@@ -235,7 +337,7 @@ struct SkeletonBlock: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: radius, style: .continuous)
-            .fill(Color.white.opacity(pulse ? 0.13 : 0.06))
+            .fill(Palette.fill.opacity(pulse ? 1 : 0.55))
             .frame(width: width, height: height)
             .animation(reduceMotion ? nil : .easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
             .onAppear { pulse = true }
@@ -308,28 +410,41 @@ enum SocialLinks {
 }
 
 enum Palette {
-    static let background: Color = .black
-    static let surface = Color(white: 0.12)
-    static let sheet = Color(white: 0.08)
-    /// The hairline around posters, panels and capsules. The 8–14% white used
-    /// before measured about 1.3:1 against the canvas, and the 22% that followed
-    /// only about 2.05:1 against a surface, both short of the 3:1 non-text floor
-    /// an edge that carries a boundary has to clear.
-    static let hairline = Color.white.opacity(0.34)
+    /// A token whose colour follows the appearance: the light value on a light
+    /// canvas and the dark one on the black. A view states the token, so the
+    /// canvas decides what it is.
+    static func adaptive(_ light: UIColor, _ dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light })
+    }
+
+    static let background = adaptive(.white, .black)
+    static let surface = adaptive(UIColor(white: 0.95, alpha: 1), UIColor(white: 0.12, alpha: 1))
+    static let sheet = adaptive(UIColor(white: 0.97, alpha: 1), UIColor(white: 0.08, alpha: 1))
+    /// The hairline around posters, panels and capsules. Both values clear the
+    /// 3:1 non-text floor against the canvas and a surface above it: 34% white
+    /// on the black, 42% black on the white.
+    static let hairline = adaptive(UIColor(white: 0, alpha: 0.42), UIColor(white: 1, alpha: 0.34))
     /// The edge of an active or selected control, one step above `hairline`:
-    /// about 4.5:1 against a surface, so a chosen chip or a focused control
-    /// keeps its boundary on every surface it sits on.
-    static let border = Color.white.opacity(0.46)
+    /// about 4.5:1 against a surface in either appearance, so a chosen chip or
+    /// a focused control keeps its boundary on every surface it sits on.
+    static let border = adaptive(UIColor(white: 0, alpha: 0.56), UIColor(white: 1, alpha: 0.46))
     /// The fill behind a chip or a status pill. A fill carries no boundary, so
     /// it stays softer than a hairline.
-    static let fill = Color.white.opacity(0.12)
-    /// The green a list row's swipe wears when it adds an episode or a chapter.
-    /// It is the one control that used to state its colour as a value of its own.
-    static let progress = Color(red: 0.03, green: 0.57, blue: 0.08)
+    static let fill = adaptive(UIColor(white: 0, alpha: 0.08), UIColor(white: 1, alpha: 0.12))
     /// The two states of an airing row: amber while an episode that already
     /// aired is unwatched, green once the reader has caught up with the run.
-    static let airingBehind = Color(red: 0.97, green: 0.82, blue: 0.42)
-    static let airingCaughtUp = Color(red: 0.45, green: 0.85, blue: 0.55)
+    /// Both are text, so each value clears 4.5:1 on its canvas.
+    static let airingBehind = adaptive(
+        UIColor(red: 0.62, green: 0.40, blue: 0, alpha: 1),
+        UIColor(red: 0.97, green: 0.82, blue: 0.42, alpha: 1))
+    static let airingCaughtUp = adaptive(
+        UIColor(red: 0.09, green: 0.45, blue: 0.20, alpha: 1),
+        UIColor(red: 0.45, green: 0.85, blue: 0.55, alpha: 1))
+    /// The green a list row's swipe wears when it adds an episode or a chapter.
+    /// It is the one control that used to state its colour as a value of its own.
+    static let progress = adaptive(
+        UIColor(red: 0.03, green: 0.45, blue: 0.10, alpha: 1),
+        UIColor(red: 0.03, green: 0.57, blue: 0.08, alpha: 1))
 }
 
 enum LedgerLayout {
@@ -593,14 +708,15 @@ private struct LedgerPrimaryButtonStyle: ButtonStyle {
     @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
-        let fill = isEnabled ? (configuration.isPressed ? 0.32 : 0.22) : 0.15
-        return configuration.label
+        // The capsule and its label come from the palette, so the button reads
+        // in both appearances instead of being drawn in white on the black.
+        configuration.label
             .font(.body.weight(.semibold))
-            .foregroundStyle(Color.white.opacity(isEnabled ? 1 : 0.56))
+            .foregroundStyle(isEnabled ? Color.primary : Color.secondary)
             .padding(.horizontal, 18)
             .padding(.vertical, 6)
             .frame(minHeight: 44)
-            .background(Color(white: fill), in: .capsule)
+            .background(configuration.isPressed ? Palette.border : Palette.fill, in: .capsule)
             .overlay {
                 Capsule().strokeBorder(Palette.border).allowsHitTesting(false)
             }
@@ -722,14 +838,17 @@ struct PreferredTitle<Content: View>: View {
 
     var body: some View {
         let item = current
+        // The lookup fills the English name, so only an English preference waits
+        // for it or takes its answer: a Romaji or Japanese preference already
+        // has the name it shows on a sparse row.
+        let wantsEnglish = titleLanguage == TitleLanguage.english.rawValue
         let waiting =
-            !nameSettled && item.needsTitleLookup && attemptedID != title.id
+            wantsEnglish && !nameSettled && item.needsTitleLookup && attemptedID != title.id
             && !store.api.isNameResolved(title)
-        // A sparse row still carries its original title, so a reader that opts out
-        // of the placeholder always has something real to show. Romaji reads the
-        // original title instead of the English name.
+        // A sparse row still carries its own titles, so a reader that opts out of
+        // the placeholder always has something real to show.
         let name =
-            knownName
+            (wantsEnglish ? knownName : nil)
             ?? (waiting && showsLoadingTitle ? "Loading title…" : item.displayName(for: titleLanguage))
         let request = PreferredLookup(id: title.id, poster: repairsMissingPoster)
         content(item, name)
@@ -739,8 +858,8 @@ struct PreferredTitle<Content: View>: View {
                 // is worth one ask of its own. A title that answered with no
                 // poster at all is not asked twice.
                 let needsName =
-                    item.needsTitleLookup && !nameSettled && !store.api.isNameResolved(title)
-                    && attemptedID != title.id
+                    wantsEnglish && item.needsTitleLookup && !nameSettled
+                    && !store.api.isNameResolved(title) && attemptedID != title.id
                 let needsPoster =
                     loadMissingImage
                     && (item.image == nil

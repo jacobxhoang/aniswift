@@ -194,7 +194,10 @@ struct ListsScreen: View {
 
     init(kind: Kind) {
         self.kind = kind
-        _collapsed = State(initialValue: Set(kind.statuses.dropFirst().dropLast()))
+        // The switches in Settings → Expand Sections on Launch decide which
+        // groups a list starts with open, so the screen is built from them
+        // instead of always opening the first and the last.
+        _collapsed = State(initialValue: LaunchSection.collapsed(for: kind))
         _filter = State(initialValue: ListFilter.remembered(kind))
     }
 
@@ -497,15 +500,21 @@ struct ListsScreen: View {
     /// sorting every entry just to ask whether one is left.
     private func hasSearchMatch(_ group: [ListEntry]) -> Bool {
         group.contains { entry in
-            searchTerm.isEmpty || entry.title.name.localizedCaseInsensitiveContains(searchTerm)
-                || entry.title.original.localizedCaseInsensitiveContains(searchTerm)
+            searchTerm.isEmpty || matchesSearch(entry.title)
         }
+    }
+
+    /// A search finds a row by any of the names it can be shown under, so a
+    /// reader typing a Japanese title finds it with Japanese chosen or not.
+    private func matchesSearch(_ title: Title) -> Bool {
+        title.name.localizedCaseInsensitiveContains(searchTerm)
+            || title.original.localizedCaseInsensitiveContains(searchTerm)
+            || (title.japaneseName?.localizedCaseInsensitiveContains(searchTerm) ?? false)
     }
 
     private func visibleEntries(_ group: [ListEntry]) -> [ListEntry] {
         let matches = group.filter { entry in
-            searchTerm.isEmpty || entry.title.name.localizedCaseInsensitiveContains(searchTerm)
-                || entry.title.original.localizedCaseInsensitiveContains(searchTerm)
+            searchTerm.isEmpty || matchesSearch(entry.title)
         }
         // Each order is written ascending, and the sheet's direction reads it
         // the other way, so one comparator serves both.

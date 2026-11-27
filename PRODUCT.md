@@ -57,7 +57,8 @@ Confirmed constraints:
 - Scores cross between the two services on the 100-point scale, so a MyAnimeList 8 is AniList's 80.
 - `project.pbxproj` is never edited by hand and the project is not file-system-synchronised, so a new Swift type goes
   into an existing file.
-- The appearance is dark only. The visual world, its tokens and its rules are recorded in `DESIGN.md`.
+- The app draws in two appearances: a dark ledger and a light one, with the same tokens and rules in both, and
+  Settings → Appearance chooses System, Light or Dark. The visual world and its tokens are recorded in `DESIGN.md`.
 - Distribution beyond the owner's own devices is not planned, so no store listing, rating prompt or marketing surface is
   in scope.
 
