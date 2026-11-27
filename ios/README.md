@@ -25,10 +25,10 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, fetch more pages, and use swipe actions to update progress or remove a title. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. |
+| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, and use swipe actions to update progress or remove a title. The list reads every page on its own once it opens, so it arrives whole instead of growing as you scroll. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
-| Profile | View account statistics, friends and public favorites, open custom lists, share your MyAnimeList profile, choose what appears under **Settings → Profile**, and open Settings from the toolbar gear. |
+| Profile | Your card names the account and puts its anime and manga totals on one line, with days watched and chapters read under them. Below it, one **Statistics** panel holds both kinds — pick Anime or Manga, and open or shut it to see the totals, the share each status takes and the counts. Then friends and public favorites, custom lists, sharing your MyAnimeList profile, **Settings → Profile** for what appears, and Settings from the toolbar gear. |
 
 Friend profiles show public stats, recent list updates newest first, and favorite anime and manga. Tap a favorite
 or a recent update to open its title. Back returns to the friend's profile, then to the Feed. Pull down to
@@ -41,9 +41,12 @@ uses for its **Showing saved data** note, so a failure reads the same everywhere
 Title pages show English titles when **Settings → Behavior → Preferred Title Language** is English and a
 translation exists, or the Romaji title when Romaji is selected; each choice falls back to the other name when
 it is missing. An anime that is still on the air says when its next episode is due, in a band under its header
-("Episode 9 airs in 2 days · Sunday at 23:15 JST"), counted from the weekly slot MyAnimeList publishes for it;
-the episode is named while the run still fits the length it was announced with, and a title whose payload names
-no slot shows no band instead of a guess. The same rule applies to posters and
+("Episode 9 airs in 2 days"), and its row in the Anime list carries the same line — amber while an episode that
+already aired is still unwatched, green once you are caught up with all of them. The episode and the time are the
+ones AniList publishes for the run, which stay right through a break in the middle of a season; a title AniList
+does not carry falls back to the weekly slot MyAnimeList publishes, and one with neither shows no band instead of
+a guess. The slot itself — "Sunday at 23:15 JST" — is a fact about the series, so it sits in the Series info grid
+as **Broadcast**. The same rule applies to posters and
 rows, list sorting, interest-stack entries, review headers, and editor prompts. Genres, themes, producers and
 serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing,
 compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked
@@ -154,7 +157,8 @@ Profile settings, under **Settings → Profile**, choose what the Profile tab dr
 
 - Friends — the shelf of MyAnimeList friends, each opening their profile; hiding it skips the friends request
 - Days Watching — the days-watched metric in the header
-- Anime Statistics and Manga Statistics — the status counts, mean score and totals for each kind
+- Anime Statistics and Manga Statistics — the **Statistics** panel, which shows one kind at a time and switches
+  between them with a segmented control; hiding one kind leaves the other with no switch to show
 - Favorite Anime and Favorite Manga — the favorite shelves
 - Favorite Characters and Favorite People — the favorite character and voice actor shelves
 
@@ -209,8 +213,9 @@ stored on the device.
 
 1. At [MyAnimeList API settings](https://myanimelist.net/apiconfig), create an application with App Type `iOS`.
 2. Register the exact redirect URL `org.aniswift.ios://oauth`.
-3. Put that iOS app's Client ID in `Info.plist` (`AniswiftMALClientID`) and build; CI fills it from a secret. The
-   app has no field for it, so nothing is typed on the device. Then tap **Sign in with MyAnimeList** and complete
+3. The build already carries that app's Client ID in `Info.plist` (`AniswiftMALClientID`); CI overwrites it from
+   the `MAL_IOS_CLIENT_ID` secret when one is set. The app has no field for it, so nothing is typed on the device.
+   Then tap **Sign in with MyAnimeList** and complete
    the browser sign-in.
 
 The app exchanges the authorization code and refreshes tokens directly with MyAnimeList. Tokens are stored in

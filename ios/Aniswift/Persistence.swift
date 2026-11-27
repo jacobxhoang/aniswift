@@ -35,7 +35,10 @@ enum SnapshotWriter {
 struct SavedList: Codable, Equatable {
     var items: [ListEntry]
     let page: Int
-    let more: Bool
+    /// Whether the provider offered another page after this one. It is read as a
+    /// flag, not a fact: a run of pages that stops moving the list clears it, so
+    /// the list stops offering a page that would add nothing.
+    var more: Bool
     var needsReconciliation = false
 }
 

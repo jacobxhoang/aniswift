@@ -54,6 +54,9 @@ struct TitleScreen: View {
 
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     @AppStorage(SettingKey.askForScore) private var asksForScore = true
+    /// The schedules AniList has published, so the airing band names the episode
+    /// that is really next instead of counting weekly slots.
+    @ObservedObject private var schedules = AiringScheduleCache.shared
 
     /// Every Details Page toggle, read once per kind: the thirty-four `@AppStorage`
     /// wrappers this page used each read `UserDefaults` on access, on every pass
@@ -223,7 +226,12 @@ struct TitleScreen: View {
                         sectionsBelowSummary
                     }
                 }
-                .padding(LedgerLayout.inset)
+                // The header block sits closer to what follows it than the
+                // page's own edge, so the poster, the name and the numbers
+                // read as one opening rather than three fixes.
+                .padding(.horizontal, LedgerLayout.inset)
+                .padding(.top, 14)
+                .padding(.bottom, LedgerLayout.inset)
                 .frame(maxWidth: 800)
                 .frame(maxWidth: .infinity)
             }
@@ -260,6 +268,13 @@ struct TitleScreen: View {
             }
         }
         .task { await load() }
+        // The band names the episode that is really next once AniList's schedule
+        // for this title is in, which also keeps it right for a run that takes a
+        // break. A title that has finished is never asked about.
+        .task(id: current.isAiring) {
+            guard title.kind == .anime, current.isAiring else { return }
+            await schedules.learn([title.malID])
+        }
         // A Details Page toggle written in Settings reaches this page while it is
         // open: the toggles are read into one value per kind, so they are read
         // again when `UserDefaults` changes rather than per property wrapper.
@@ -334,7 +349,11 @@ struct TitleScreen: View {
     }
 
     private var header: some View {
-        VStack(spacing: 12) {
+        // The header stacks tightly: the poster, the name, the studios and the
+        // numbers read as one block, and the 44-point link targets between
+        // them are what sets the air rather than the spacing. The poster keeps
+        // the room it had under it, so the name sits off the artwork.
+        VStack(spacing: 6) {
             if showsHeaderPoster {
                 Button { showingPoster = true } label: {
                     Art(url: current.image ?? title.image, symbol: title.kind == .anime ? "film" : "book")
@@ -347,7 +366,9 @@ struct TitleScreen: View {
                         .contentShape(.rect(cornerRadius: LedgerLayout.panelRadius))
                 }
                 .buttonStyle(LedgerTileButtonStyle())
-                .padding(.bottom, 4)
+                // The one gap the header keeps wide: the name sits clear of
+                // the artwork, while everything under it is stacked tightly.
+                .padding(.bottom, 10)
                 .accessibilityLabel("Poster")
                 .accessibilityHint("Shows the poster full screen")
             }
@@ -400,42 +421,46 @@ struct TitleScreen: View {
                     }
                 }
                 .frame(maxWidth: 480)
-                .padding(.top, 8)
+                .padding(.top, 2)
             }
         }
-        .padding(.top, 12)
+        .padding(.top, 8)
         .padding(.horizontal, LedgerLayout.inset)
         .frame(maxWidth: .infinity)
     }
 
-    /// The next airing of an anime that is still on the air: its weekly slot
-    /// and how long it is away, in a slim band under the header rather than a
-    /// panel of its own. A payload that names no slot draws nothing.
+    /// The next airing of an anime that is still on the air: which episode is
+    /// due and how long it is away, in a slim band under the header rather than
+    /// a panel of its own. The weekly slot it takes is a fact about the series
+    /// and sits in the information grid, so the band carries the countdown
+    /// alone.
     @ViewBuilder
     private var airingSchedule: some View {
         if let airingLine {
             Text(airingLine)
-                .font(.subheadline)
+                .font(.subheadline.weight(.light))
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, LedgerLayout.inset)
                 .padding(.vertical, 3)
                 .background(Palette.surface)
-                .padding(.top, 6)
+                .padding(.top, 4)
         }
     }
 
     private var airingLine: String? {
         guard title.kind == .anime, shows(DetailSection.headerAiringSchedule) else { return nil }
-        guard let airing = record?.airingProgress() else { return nil }
-        return "\(airing.line()) · \(airing.slot.label)"
+        guard let airing = record?.airingProgress(schedule: schedules.schedule(for: title.malID)) else {
+            return nil
+        }
+        return airing.line()
     }
 
     /// The header's numbers, each only when it has a value: a column of em
     /// dashes under three labels says less than the numbers it does have.
     private var headerStatistics: [HeaderStatistic] {
         let score = current.score.flatMap {
-            $0 > 0 ? $0.formatted(.number.precision(.fractionLength(2))) : nil
+            $0 > 0 ? $0.ledgerDecimal(2...2) : nil
         }
         let rank: Int? = record?.read("rank")
         let popularity: Int? = record?.read("popularity")
@@ -561,6 +586,14 @@ struct TitleScreen: View {
                                 ?? (record.read("aired", "published") as Fields?)?.string("string")
                             {
                                 infoCell(title.kind == .anime ? "Aired" : "Published", aired)
+                            }
+                            // The weekly slot the band used to carry: it says
+                            // when the series airs, which belongs with the
+                            // series facts rather than over the header.
+                            if title.kind == .anime,
+                                let slot = AiringSlot(record.read("broadcast") as Fields?)
+                            {
+                                infoCell("Broadcast", slot.label)
                             }
                             if let duration = record.string("duration") { infoCell("Runtime", duration) }
                             if let season = record.string("season") {

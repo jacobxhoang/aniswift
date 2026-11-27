@@ -192,8 +192,10 @@ struct Title: Identifiable, Hashable, Codable {
     }
 
     /// The next airing of this title, while it is still on the air.
-    func nextAiring(after now: Date = .now) -> AiringProgress? {
-        AiringProgress.next(slot: slot, premiere: premiere, total: total, isAiring: isAiring, after: now)
+    func nextAiring(schedule: AiringSchedule? = nil, after now: Date = .now) -> AiringProgress? {
+        AiringProgress.next(
+            slot: slot, premiere: premiere, total: total, isAiring: isAiring, schedule: schedule,
+            after: now)
     }
 
     func fillingEnglishName(from cachedName: String?) -> Title {
@@ -614,9 +616,12 @@ struct AiringSlot: Hashable, Codable {
 /// premiere date — exact for a run without breaks, and silent about the
 /// episode once a run outlasts the length it was announced with.
 struct AiringProgress: Equatable {
-    let slot: AiringSlot
+    /// The weekly slot the payload named, when it named one: a schedule from
+    /// AniList names the next episode even for a title MyAnimeList gives no
+    /// slot for.
+    let slot: AiringSlot?
     let date: Date
-    /// The episode that airs at `date`, when the run still fits its length.
+    /// The episode that airs at `date`, when it is known.
     let episode: Int?
     /// How many episodes have aired by now, when that is known.
     let aired: Int?
@@ -639,11 +644,21 @@ struct AiringProgress: Equatable {
     }()
 
     /// When a title that is still on the air next airs, from the pieces a
-    /// payload carries: its weekly slot, the date it started and the length
-    /// it was announced with.
+    /// payload carries: its weekly slot, the date it started and the length it
+    /// was announced with, or from the schedule AniList publishes for the run.
     static func next(
-        slot: AiringSlot?, premiere: Date?, total: Int?, isAiring: Bool, after now: Date = .now
+        slot: AiringSlot?, premiere: Date?, total: Int?, isAiring: Bool,
+        schedule: AiringSchedule? = nil, after now: Date = .now
     ) -> AiringProgress? {
+        // A published schedule is the run's own: it names the episode that is
+        // really next and when it is really due, so a break in the middle of a
+        // run no longer shifts every count after it. How many have aired is the
+        // one before it.
+        if isAiring, let schedule {
+            return AiringProgress(
+                slot: slot, date: schedule.date, episode: schedule.episode,
+                aired: max(schedule.episode - 1, 0))
+        }
         guard isAiring, let slot, let date = slot.next(after: now) else { return nil }
         guard let premiere else {
             return AiringProgress(slot: slot, date: date, episode: nil, aired: nil)
@@ -662,7 +677,7 @@ struct AiringProgress: Equatable {
 extension Fields {
     /// The next airing this payload describes, when the title it names is
     /// still on the air.
-    func airingProgress(after now: Date = .now) -> AiringProgress? {
+    func airingProgress(schedule: AiringSchedule? = nil, after now: Date = .now) -> AiringProgress? {
         let airing: Bool? = read("airing")
         let status = (string("status") ?? "").lowercased().replacingOccurrences(of: "_", with: " ")
         let dates: Fields? = read("aired") ?? read("published")
@@ -674,7 +689,7 @@ extension Fields {
         return AiringProgress.next(
             slot: AiringSlot(read("broadcast")), premiere: premiere,
             total: count.flatMap { $0 > 0 ? $0 : nil },
-            isAiring: airing == true || status == "currently airing", after: now)
+            isAiring: airing == true || status == "currently airing", schedule: schedule, after: now)
     }
 }
 

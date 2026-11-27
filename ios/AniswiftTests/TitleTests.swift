@@ -73,4 +73,31 @@ struct TitleTests {
         let zero = try JSONDecoder().decode(Fields.self, from: Data(#"{"mal_id": 0, "title": "Cowboy Bebop"}"#.utf8))
         #expect(Title(zero, kind: .anime) == nil)
     }
+
+    @Test("A published schedule names the next episode exactly")
+    func publishedSchedule() throws {
+        let airing = try #require(
+            AiringProgress.next(
+                slot: nil, premiere: Date().addingTimeInterval(-6 * 7 * 24 * 3600), total: 12,
+                isAiring: true,
+                schedule: AiringSchedule(episode: 9, date: Date().addingTimeInterval(3600))))
+        #expect(airing.episode == 9)
+        #expect(airing.aired == 8)
+        #expect(airing.slot == nil)
+    }
+
+    @Test("A title with no slot still counts down from its schedule")
+    func scheduleWithoutASlot() throws {
+        let value = try title(#"{"mal_id": 7, "title": "Steel Ball Run", "airing": true}"#)
+        let airing = try #require(
+            value.nextAiring(schedule: AiringSchedule(episode: 4, date: Date().addingTimeInterval(7200))))
+        #expect(airing.episode == 4)
+        #expect(airing.aired == 3)
+    }
+
+    @Test("A finished title has no countdown even with a schedule")
+    func finishedTitle() throws {
+        let value = try title(#"{"mal_id": 8, "title": "Cowboy Bebop", "status": "finished_airing"}"#)
+        #expect(value.nextAiring(schedule: AiringSchedule(episode: 1, date: .now)) == nil)
+    }
 }

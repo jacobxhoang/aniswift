@@ -535,7 +535,7 @@ private struct CacheRow: View {
             return store.api.hasCachedCatalog ? "Catalog responses cached" : "Nothing cached"
         }
         let megabytes = Double(bytes) / 1_048_576
-        return "Cache size: \(megabytes.formatted(.number.precision(.fractionLength(2)))) MB"
+        return "Cache size: \(megabytes.ledgerDecimal(2...2)) MB"
     }
 
     var body: some View {

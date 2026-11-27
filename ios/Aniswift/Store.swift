@@ -288,6 +288,9 @@ final class Store: ObservableObject {
     private var accountGeneration = UUID()
     private var listRevisions: [Kind: Int] = [:]
     private var pagingLists: Set<Kind> = []
+    /// The most pages a list reads on its own: about five thousand rows, so a
+    /// very long list stops there and offers its next page instead.
+    private static let listPageLimit = 50
 
     var lists: [Kind: [ListEntry]] { savedLists.mapValues(\.items) }
     var nextList: [Kind: Int] { savedLists.compactMapValues { $0.more ? $0.page + 1 : nil } }
@@ -435,7 +438,12 @@ final class Store: ObservableObject {
         for kind in pending {
             guard accountGeneration == generation else { return }
             defer { if accountGeneration == generation { pendingListLoads.remove(kind) } }
-            do { try await refreshList(kind) }
+            do {
+                try await refreshList(kind)
+                // The rest of the list is read behind its first page, so a
+                // list arrives whole instead of one page per scroll to its end.
+                Task { await loadWholeList(kind, generation: generation) }
+            }
             catch {
                 // A list refresh cancelled by navigation is not a failure worth alerting.
                 guard !Task.isCancelled, !(error is CancellationError) else { return }
@@ -502,6 +510,37 @@ final class Store: ObservableObject {
         await resolveNames(in: result.items.map(\.title))
         guard accountGeneration == generation else { return }
         updateList(kind, SavedList(items: unique(previous + result.items), page: page, more: result.more))
+    }
+
+    /// Reads every page a list has left, once its first page has been drawn:
+    /// a list arrives whole rather than one page at a time as the reader
+    /// reaches its end. The pages go one at a time because the client already
+    /// serialises authenticated requests — so a page asked for early would only
+    /// wait its turn behind the one in flight — and a list that is moving
+    /// between pages is read in the order the provider gives. A page that fails
+    /// stops the run and leaves the retry the list already offers, a page that
+    /// adds nothing ends it, and a very long list stops at `listPageLimit` pages
+    /// with its next page still offered.
+    private func loadWholeList(_ kind: Kind, generation: UUID) async {
+        var pages = 0
+        while !Task.isCancelled, accountGeneration == generation, pages < Self.listPageLimit,
+            let page = nextList[kind]
+        {
+            pages += 1
+            let before = savedLists[kind]?.items.count ?? 0
+            do { try await loadList(kind, page: page) } catch { return }
+            // A page that moved the list nowhere ends the run and stops the list
+            // offering that page: a provider that keeps reporting another page
+            // while repeating the rows it already sent would otherwise spend the
+            // whole cap on duplicates.
+            guard (savedLists[kind]?.items.count ?? 0) > before else {
+                if var snapshot = savedLists[kind], snapshot.more {
+                    snapshot.more = false
+                    updateList(kind, snapshot)
+                }
+                return
+            }
+        }
     }
 
     func change(_ title: Title, _ change: ListChange?) async throws {

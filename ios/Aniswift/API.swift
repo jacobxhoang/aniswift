@@ -1000,7 +1000,7 @@ struct AniListEntry: Identifiable {
     /// kept: 85 is the 8.5 a reader scored, not an 8.
     var scoreLabel: String? {
         guard score > 0 else { return nil }
-        let value = (score / 10).formatted(.number.precision(.fractionLength(0...1)))
+        let value = (score / 10).ledgerDecimal(0...1)
         return "★ \(value)/10"
     }
 }
@@ -1306,6 +1306,43 @@ final class AniListClient: ObservableObject {
         return rows.compactMap { AniListEntry($0, kind: kind) }
     }
 
+    /// The next episode of a batch of anime, by MyAnimeList id. AniList answers
+    /// this without a session, so a title page and a list of rows get an exact
+    /// schedule whether or not AniList is connected in Settings. A title that is
+    /// not on the air has no next episode and is left out of the answer.
+    func schedules(forMALIDs ids: [Int]) async -> [Int: AiringSchedule] {
+        guard !ids.isEmpty else { return [:] }
+        let body: [String: Any] = [
+            "query": """
+            query ($ids: [Int]) {
+              Page(perPage: 50) {
+                media(idMal_in: $ids, type: ANIME) {
+                  idMal
+                  nextAiringEpisode { episode airingAt }
+                }
+              }
+            }
+            """,
+            "variables": ["ids": ids],
+        ]
+        guard let result = try? await query(body, token: nil),
+            let data: Fields = result.read("data"),
+            let page: Fields = data.read("Page"),
+            let rows: [Fields] = page.read("media")
+        else { return [:] }
+        var learned: [Int: AiringSchedule] = [:]
+        for row in rows {
+            guard let malID: Int = row.read("idMal"),
+                let next: Fields = row.read("nextAiringEpisode"),
+                let episode: Int = next.read("episode"), episode > 0,
+                let airingAt: Int = next.read("airingAt")
+            else { continue }
+            learned[malID] = AiringSchedule(
+                episode: episode, date: Date(timeIntervalSince1970: TimeInterval(airingAt)))
+        }
+        return learned
+    }
+
     private func query(_ body: [String: Any], token: String?) async throws -> Fields {
         var request = URLRequest(url: Self.graphql, timeoutInterval: 25)
         request.httpMethod = "POST"
@@ -1328,5 +1365,64 @@ final class AniListClient: ObservableObject {
             throw APIError(status: 0, message: "AniList answered with something unreadable.")
         }
         return fields
+    }
+}
+
+
+/// The next episode of an anime that is still on the air, as AniList publishes
+/// it: which episode it is and when it is due, in one exact value. MyAnimeList
+/// names only a weekly slot, which counts seven days between episodes and so
+/// drifts by an episode for every break a run takes; AniList tracks the run
+/// itself, so the countdown and the caught-up colour no longer drift with it.
+struct AiringSchedule: Equatable {
+    /// The episode that airs at `date`.
+    let episode: Int
+    let date: Date
+}
+
+/// The schedules AniList has published, by MyAnimeList id, so a list of airing
+/// anime costs one request rather than one per row, and a page opened again
+/// inside `lifetime` answers from what it already has. AniList answers a
+/// schedule query without a session, so this works whether or not the reader
+/// has connected AniList in Settings.
+@MainActor
+final class AiringScheduleCache: ObservableObject {
+    static let shared = AiringScheduleCache()
+
+    @Published private(set) var schedules: [Int: AiringSchedule] = [:]
+    /// When each id was asked for. An id that answered nothing — a run that has
+    /// finished, or a title AniList does not list — is stamped too, so it is not
+    /// asked for again on every pass.
+    private var askedAt: [Int: Date] = [:]
+    /// The ids a request is already on its way for, so a list and a title page
+    /// opening together cost one request instead of two.
+    private var inFlight: Set<Int> = []
+
+    private static let lifetime: TimeInterval = 10 * 60
+    private static let batchSize = 50
+
+    func schedule(for malID: Int) -> AiringSchedule? { schedules[malID] }
+
+    /// Asks AniList for the schedules it does not know yet, in batches of fifty,
+    /// and leaves every id it already has alone. A pull to refresh passes
+    /// `refresh` to read them again.
+    func learn(_ ids: [Int], refresh: Bool = false) async {
+        let now = Date()
+        let wanted = Set(ids.filter { $0 > 0 }).subtracting(inFlight).filter { id in
+            guard !refresh, let asked = askedAt[id] else { return true }
+            return now.timeIntervalSince(asked) > Self.lifetime
+        }.sorted()
+        guard !wanted.isEmpty else { return }
+        inFlight.formUnion(wanted)
+        defer { inFlight.subtract(wanted) }
+        var start = 0
+        while start < wanted.count, !Task.isCancelled {
+            let batch = Array(wanted[start..<min(start + Self.batchSize, wanted.count)])
+            start += batch.count
+            let learned = await AniListClient.shared.schedules(forMALIDs: batch)
+            let stamp = Date()
+            for id in batch { askedAt[id] = stamp }
+            for (id, schedule) in learned { schedules[id] = schedule }
+        }
     }
 }

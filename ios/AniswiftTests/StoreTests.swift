@@ -39,6 +39,7 @@ private final class StubAPI: APIClient {
 
     func list(_ kind: Kind, page: Int) async throws -> Page<ListEntry> {
         if let failure { throw failure }
+        if let listAnswer { return try listAnswer(kind, page) }
         return Page(items: [], more: false)
     }
 
@@ -66,6 +67,9 @@ private final class StubAPI: APIClient {
         return ([], CatalogFreshness())
     }
 
+    /// The pages a stub list request answers, by kind and page, instead of an
+    /// empty list.
+    var listAnswer: ((Kind, Int) throws -> Page<ListEntry>)?
     /// The pages a stub list request answers, by page, instead of an empty list.
     var listPageAnswer: ((Int) throws -> Page<FriendUpdate>)?
 
@@ -343,5 +347,93 @@ struct TitleNameTests {
 
         #expect(api.titleNameRequests.isEmpty)
         #expect(store.named(title).englishName == "Attack on Titan")
+    }
+}
+
+@Suite("Whole list loading")
+@MainActor
+struct WholeListTests {
+    private func entry(_ id: Int) throws -> ListEntry {
+        let titleFields = try StubAPI.fields("{\"mal_id\": \(id), \"title\": \"Show \(id)\"}")
+        let title = try #require(Title(titleFields, kind: .anime))
+        let status = try StubAPI.fields("{\"status\": \"watching\", \"num_episodes_watched\": \(id)}")
+        return ListEntry(status, title: title)
+    }
+
+    /// The list's remaining pages are read by a task the store starts rather
+    /// than awaits, so a test waits for them the way a reader waits for rows.
+    private func settle(_ store: Store, until condition: () -> Bool) async -> Bool {
+        for _ in 0..<200 {
+            if condition() { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return condition()
+    }
+
+    @Test("A list reads every page on its own")
+    func readsEveryPage() async throws {
+        ListCache.remove()
+        let api = StubAPI()
+        let store = Store(api: api)
+        store.account = Account(id: 7, name: "reader", image: nil)
+        let rows = try (1...3).map { try entry($0) }
+        api.listAnswer = { kind, page in
+            guard kind == .anime else { return Page(items: [], more: false) }
+            switch page {
+            case 1: return Page(items: [rows[0]], more: true)
+            case 2: return Page(items: [rows[1]], more: true)
+            default: return Page(items: [rows[2]], more: false)
+            }
+        }
+
+        await store.loadLists(force: true)
+        let finished = await settle(store) { store.nextList[.anime] == nil }
+
+        #expect(finished)
+        #expect(store.lists[.anime]?.map(\.title.malID) == [1, 2, 3])
+        ListCache.remove()
+    }
+
+    @Test("A page that fails keeps the rows before it and the page to retry")
+    func failedPageLeavesTheRetry() async throws {
+        ListCache.remove()
+        let api = StubAPI()
+        let store = Store(api: api)
+        store.account = Account(id: 7, name: "reader", image: nil)
+        let rows = try (1...3).map { try entry($0) }
+        api.listAnswer = { kind, page in
+            guard kind == .anime else { return Page(items: [], more: false) }
+            guard page < 3 else { throw APIError(status: 500, message: "Catalog unavailable.") }
+            return Page(items: [rows[page - 1]], more: true)
+        }
+
+        await store.loadLists(force: true)
+        _ = await settle(store) { (store.lists[.anime]?.count ?? 0) == 2 }
+
+        #expect(store.lists[.anime]?.count == 2)
+        #expect(store.nextList[.anime] == 3)
+        // A page the reader can ask for again is not a failed sync.
+        #expect(store.listFailures[.anime] == nil)
+        ListCache.remove()
+    }
+
+    @Test("A page that repeats the rows already read ends the run")
+    func repeatingPageEndsTheRun() async throws {
+        ListCache.remove()
+        let api = StubAPI()
+        let store = Store(api: api)
+        store.account = Account(id: 7, name: "reader", image: nil)
+        let first = try entry(1)
+        api.listAnswer = { kind, _ in
+            guard kind == .anime else { return Page(items: [], more: false) }
+            return Page(items: [first], more: true)
+        }
+
+        await store.loadLists(force: true)
+        let stopped = await settle(store) { store.nextList[.anime] == nil }
+
+        #expect(stopped)
+        #expect(store.lists[.anime]?.count == 1)
+        ListCache.remove()
     }
 }

@@ -240,8 +240,16 @@ enum LedgerLayout {
     static let rowRadius: CGFloat = 7
     /// The corners a panel, a shelf card and a preview share.
     static let panelRadius: CGFloat = 12
-    /// The corners of a sheet's content, where the system rounds it.
-    static let sheetRadius: CGFloat = 26
+}
+
+extension Double {
+    /// A decimal the way the app writes it: a period before the decimals and a
+    /// comma between thousands, whatever the device's locale. The app's copy is
+    /// English throughout, and on a keyboard that writes "8,40" a score reads as
+    /// two numbers rather than one.
+    func ledgerDecimal(_ fractionDigits: ClosedRange<Int>) -> String {
+        formatted(.number.precision(.fractionLength(fractionDigits)).locale(Locale(identifier: "en_US")))
+    }
 }
 
 /// One horizontal shelf for every carousel, so card width, gutters and snapping
@@ -675,12 +683,11 @@ struct CoverTile: View {
                 }
                 .overlay(alignment: .topTrailing) {
                     if showsScore, let score = title.score, score > 0 {
-                        Text(score.formatted(.number.precision(.fractionLength(2))))
+                        Text(score.ledgerDecimal(2...2))
                             .font(.caption.monospacedDigit().weight(.semibold))
                             .padding(.horizontal, 7).padding(.vertical, 5)
                             .ledgerGlassBadge().padding(6)
-                            .accessibilityLabel(
-                                "Score \(score.formatted(.number.precision(.fractionLength(2)))) out of 10")
+                            .accessibilityLabel("Score \(score.ledgerDecimal(2...2)) out of 10")
                     }
                 }
                 Text(name)
@@ -844,7 +851,7 @@ struct AccountScreen: View {
                     let status = store.profileStatus(for: account.name)
                     let hasSavedProfile = profile.stats != nil || profile.favorites != nil
                     ProfileStatsHeader(
-                        image: account.image, stats: profile.stats?.value,
+                        image: account.image, stats: profile.stats?.value, name: account.name,
                         loadedAnime: store.lists[.anime, default: []].count,
                         loadedManga: store.lists[.manga, default: []].count,
                         showsDays: preferences.shows(ProfileSection.days))
@@ -861,11 +868,14 @@ struct AccountScreen: View {
                         }
                         .padding(.horizontal, LedgerLayout.inset)
                     }
-                    if preferences.shows(ProfileSection.friends) { friendsShelf }
+                    // The numbers come before the social shelf: what the account
+                    // has watched is the page's subject, and the friends rail is
+                    // a door to somewhere else.
                     ProfileStatistics(
                         stats: profile.stats?.value,
                         showsAnime: preferences.shows(ProfileSection.animeStatistics),
                         showsManga: preferences.shows(ProfileSection.mangaStatistics))
+                    if preferences.shows(ProfileSection.friends) { friendsShelf }
                     customListsLink
                     ForEach(Kind.allCases) { kind in
                         let section = kind == .anime ? ProfileSection.favoriteAnime : ProfileSection.favoriteManga
@@ -874,14 +884,23 @@ struct AccountScreen: View {
                     if preferences.shows(ProfileSection.favoriteCharacters) { favoriteCharactersShelf }
                     if preferences.shows(ProfileSection.favoritePeople) { favoritePeopleShelf }
                 } else {
-                    VStack(alignment: .leading, spacing: 12) {
+                    // Signed out, the page still has a subject: one panel that
+                    // says what will appear here and the way in.
+                    VStack(alignment: .leading, spacing: 14) {
                         if store.checking {
                             ProgressView("Checking session")
                         } else {
-                            Text("Connect MyAnimeList to show your stats and favorites.").foregroundStyle(.secondary)
+                            Text("Your statistics, favorites and friends appear here once MyAnimeList is connected.")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             SignInButton()
                         }
-                    }.padding(.horizontal, LedgerLayout.inset)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(16)
+                    .ledgerPanel()
+                    .padding(.horizontal, LedgerLayout.inset)
                 }
             }.padding(.vertical, 18).frame(maxWidth: 800).frame(maxWidth: .infinity)
         }
@@ -1076,7 +1095,7 @@ struct FriendProfileScreen: View {
                 let profile = store.profile(for: friend.name)
                 let status = store.profileStatus(for: friend.name)
                 let hasSavedProfile = profile.stats != nil || profile.favorites != nil
-                ProfileStatsHeader(image: friend.avatar, stats: profile.stats?.value)
+                ProfileStatsHeader(image: friend.avatar, stats: profile.stats?.value, name: friend.name)
                 if let status, status.isShowingSavedData, hasSavedProfile {
                     SavedDataNote(savedAt: status.savedAt, message: status.failure, isBusy: loading) {
                         await load(refresh: true)
@@ -1389,6 +1408,9 @@ private struct FriendMediaListScreen: View {
 private struct ProfileStatsHeader: View {
     let image: URL?
     let stats: ProfileStats?
+    /// The handle this card belongs to. Your own profile and a friend's draw the
+    /// same card, so the two read alike.
+    var name: String? = nil
     var loadedAnime: Int? = nil
     var loadedManga: Int? = nil
     /// Whether the days-watched metric shows: Profile settings can hide it.
@@ -1396,13 +1418,13 @@ private struct ProfileStatsHeader: View {
 
     var body: some View {
         ViewThatFits(in: .horizontal) {
-            HStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 16) {
                 avatar
-                profileMetrics(stats?.animeCount, stats?.mangaCount, stats?.daysWatched, stats?.chaptersRead)
+                details
             }
             VStack(alignment: .leading, spacing: 16) {
                 avatar
-                profileMetrics(stats?.animeCount, stats?.mangaCount, stats?.daysWatched, stats?.chaptersRead)
+                details
             }
         }
         .padding(16)
@@ -1411,28 +1433,61 @@ private struct ProfileStatsHeader: View {
         .padding(.horizontal, LedgerLayout.inset)
     }
 
+    /// A person is a round portrait with the hairline every picture carries —
+    /// the shape the friends shelf gives everyone, this page's owner included.
     private var avatar: some View {
-        Art(url: image, symbol: "person.fill").frame(width: 88, height: 88)
-            .clipShape(.rect(cornerRadius: LedgerLayout.panelRadius))
+        Art(url: image, symbol: "person.fill")
+            .frame(width: 76, height: 76)
+            .clipShape(.circle)
+            .overlay {
+                Circle().strokeBorder(Palette.hairline).allowsHitTesting(false)
+            }
     }
 
-    private func profileMetrics(_ anime: Int?, _ manga: Int?, _ days: Double?, _ chapters: Int?) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .top, spacing: 12) {
-                metric(
-                    anime == nil && loadedAnime != nil ? "Anime loaded" : "Total anime",
-                    (anime ?? loadedAnime)?.formatted() ?? "—")
-                metric(
-                    manga == nil && loadedManga != nil ? "Manga loaded" : "Total manga",
-                    (manga ?? loadedManga)?.formatted() ?? "—")
+    /// Who, then how much, then how long. The two counts are a caption's worth
+    /// of fact; the two durations are the numbers worth their own line.
+    private var details: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if let name {
+                Text(name)
+                    .font(.title3.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
-            HStack(alignment: .top, spacing: 12) {
-                if showsDays {
-                    metric("Days watched", days?.formatted(.number.precision(.fractionLength(0...1))) ?? "—")
-                }
-                metric("Chapters read", chapters?.formatted() ?? "—")
+            Text(counts)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+            HStack(alignment: .top, spacing: 24) {
+                if showsDays { metric("Days watched", daysValue) }
+                metric("Chapters read", chaptersValue)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var counts: String {
+        let parts = [
+            count(stats?.animeCount, loaded: loadedAnime, "anime"),
+            count(stats?.mangaCount, loaded: loadedManga, "manga"),
+        ].compactMap { $0 }
+        return parts.isEmpty ? "No list totals yet" : parts.joined(separator: " · ")
+    }
+
+    private func count(_ value: Int?, loaded: Int?, _ unit: String) -> String? {
+        if let value { return "\(value.formatted()) \(unit)" }
+        // The totals come from the public statistics. Until they arrive, what
+        // this device has read off the list is the honest number to name.
+        guard let loaded else { return nil }
+        return "\(loaded.formatted()) \(unit) loaded"
+    }
+
+    private var daysValue: String {
+        stats?.daysWatched?.ledgerDecimal(0...1) ?? "—"
+    }
+
+    private var chaptersValue: String {
+        stats?.chaptersRead?.formatted() ?? "—"
     }
 
     private func metric(_ label: String, _ value: String) -> some View {
@@ -1440,48 +1495,114 @@ private struct ProfileStatsHeader: View {
             Text(label.uppercased()).font(.caption2.weight(.medium)).foregroundStyle(.secondary)
             Text(value).font(.title3.monospacedDigit().weight(.semibold))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
     }
 }
 
+/// The account's numbers, one kind at a time in one panel: the totals, the
+/// share each status takes, and the counts themselves. One panel with a picker
+/// replaces a card per kind, so the page holds one statistics block instead of
+/// two five-row tables, and the shut panel still carries the headline numbers.
 private struct ProfileStatistics: View {
     let stats: ProfileStats?
     var showsAnime = true
     var showsManga = true
 
+    @State private var chosen: Kind = .anime
+    @State private var expanded = true
+
+    init(stats: ProfileStats?, showsAnime: Bool = true, showsManga: Bool = true) {
+        self.stats = stats
+        self.showsAnime = showsAnime
+        self.showsManga = showsManga
+        _chosen = State(initialValue: showsAnime ? .anime : .manga)
+    }
+
     private func shows(_ kind: Kind) -> Bool {
         kind == .anime ? showsAnime : showsManga
     }
 
-    var body: some View {
-        ForEach(Kind.allCases) { kind in
-            if shows(kind), let stats, !stats.isListEmpty(for: kind), let details = stats.details(for: kind) {
-                ProfileStatisticsSection(kind: kind, stats: details)
-                    .padding(.horizontal, LedgerLayout.inset)
-            }
+    /// The kinds the panel can show: the ones Settings allows that the account
+    /// actually keeps a list for.
+    private var available: [Kind] {
+        guard let stats else { return [] }
+        return Kind.allCases.filter {
+            shows($0) && !stats.isListEmpty(for: $0) && stats.details(for: $0) != nil
         }
     }
 
+    private var active: Kind? { available.contains(chosen) ? chosen : available.first }
+
+    /// The picker's selection, clamped to a kind the panel can actually draw, so
+    /// hiding one kind in Settings while this page is open lands on the other.
+    private var picked: Binding<Kind> {
+        Binding(get: { active ?? .anime }, set: { chosen = $0 })
+    }
+
+    var body: some View {
+        if let kind = active, let details = stats?.details(for: kind) {
+            panel(kind: kind, details: details)
+                .padding(.horizontal, LedgerLayout.inset)
+        }
+    }
+
+    private func panel(kind: Kind, details: ProfileMediaStats) -> some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 16) {
+                if available.count > 1 {
+                    Picker("Statistics", selection: picked) {
+                        ForEach(available) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+                ProfileStatisticsSection(kind: kind, stats: details)
+            }
+            .padding(.top, 14)
+            .padding(.bottom, 8)
+        } label: {
+            HStack(spacing: 8) {
+                Text("Statistics")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Text(headline(kind: kind, details: details))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isHeader)
+        }
+        .tint(Color(uiColor: .secondaryLabel))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 2)
+        .ledgerPanel()
+    }
+
+    private func headline(kind: Kind, details: ProfileMediaStats) -> String {
+        var parts: [String] = []
+        let total = kind.statuses.compactMap { details.statusCounts[$0] }.reduce(0, +)
+        if total > 0 { parts.append("\(total.formatted()) \(total == 1 ? "title" : "titles")") }
+        if let score = details.meanScore, score > 0 {
+            parts.append(score.ledgerDecimal(2...2))
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 private struct ProfileStatisticsSection: View {
     let kind: Kind
     let stats: ProfileMediaStats
-    @State private var expanded = true
 
+    /// The statuses in the order a list groups them, each with the strength the
+    /// proportion bar and its dot read at: one tint at five strengths, rather
+    /// than five system hues the rest of the app never uses.
     private var statuses: [Status] {
-        zip(
-            kind.statuses,
-            [
-                (kind == .anime ? "play.fill" : "book.fill", Color(uiColor: .systemBlue)),
-                ("checkmark", Color(uiColor: .systemGreen)),
-                ("pause.fill", Color(uiColor: .systemOrange)),
-                ("xmark", Color(uiColor: .systemRed)),
-                ("calendar", Color(uiColor: .systemGray)),
-            ]
-        ).map { key, style in
-            Status(key: key, icon: style.0, color: style.1, count: stats.statusCounts[key])
+        zip(kind.statuses, [1.0, 0.72, 0.5, 0.32, 0.16]).map { key, strength in
+            Status(key: key, strength: strength, count: stats.statusCounts[key])
         }
     }
 
@@ -1501,147 +1622,108 @@ private struct ProfileStatisticsSection: View {
     }
 
     var body: some View {
-        let shape = RoundedRectangle(cornerRadius: LedgerLayout.sheetRadius, style: .continuous)
-        if #available(iOS 26.0, *) {
-            disclosure.glassEffect(.regular, in: shape)
-        } else {
-            disclosure.background(Color(uiColor: .secondarySystemGroupedBackground), in: shape)
-        }
-    }
-
-    private var disclosure: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 0) {
-                Divider()
-                if (stats.meanScore ?? 0) > 0 || stats.days != nil || total > 0 {
-                    VStack(alignment: .leading, spacing: 10) {
-                        summary
-                        if total > 0 {
-                            statusChart
-                            if statuses.allSatisfy({ $0.count != nil }) {
-                                Text(total == 1 ? "1 title" : "\(total.formatted()) titles")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .frame(maxWidth: .infinity, alignment: .trailing)
-                            }
-                        }
-                    }
-                    .padding(.vertical, 12)
-                    Divider()
-                }
+        VStack(alignment: .leading, spacing: 16) {
+            totals
+            if total > 0 {
+                proportion
                 statusRows
-                if !totalsLabel.isEmpty {
-                    Divider()
-                    Text(totalsLabel)
-                        .font(.footnote)
+            }
+            if !totalsLabel.isEmpty {
+                Text(totalsLabel)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// A number is drawn only where it has one — the rule the title page's
+    /// header follows — so the row never shows a column of dashes.
+    private var totals: some View {
+        let metrics: [Metric] = [
+            total > 0 ? Metric(label: total == 1 ? "Title" : "Titles", value: total.formatted()) : nil,
+            (stats.meanScore ?? 0) > 0
+                ? Metric(label: "Mean score", value: (stats.meanScore ?? 0).ledgerDecimal(2...2))
+                : nil,
+            stats.days.map {
+                Metric(
+                    label: kind == .anime ? "Days watched" : "Days read",
+                    value: $0.ledgerDecimal(0...1))
+            },
+        ].compactMap { $0 }
+        return HStack(alignment: .top, spacing: 20) {
+            ForEach(metrics) { item in
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(item.label.uppercased())
+                        .font(.caption2.weight(.medium))
                         .foregroundStyle(.secondary)
-                        .padding(.vertical, 10)
+                    Text(item.value)
+                        .font(.title3.weight(.semibold))
+                        .monospacedDigit()
                 }
-            }
-            .padding(.bottom, 4)
-        } label: {
-            Text("\(kind.label) Statistics")
-                .font(.headline)
-                .foregroundStyle(.primary)
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                .contentShape(Rectangle())
-                .accessibilityAddTraits(.isHeader)
-        }
-        .tint(Color(uiColor: .secondaryLabel))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 4)
-    }
-
-    private var summary: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 16) {
-                meanScore
-                Spacer(minLength: 0)
-                days
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                meanScore
-                days
+                .accessibilityElement(children: .combine)
             }
         }
     }
 
-    @ViewBuilder
-    private var meanScore: some View {
-        if let score = stats.meanScore, score > 0 {
-            metric("Mean score", score.formatted(.number.precision(.fractionLength(2))))
-        }
+    private struct Metric: Identifiable {
+        let label: String
+        let value: String
+        var id: String { label }
     }
 
-    @ViewBuilder
-    private var days: some View {
-        if let days = stats.days {
-            metric(
-                kind == .anime ? "Days watched" : "Days read",
-                days.formatted(.number.precision(.fractionLength(0...1))))
-        }
-    }
-
-    private func metric(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var statusChart: some View {
-        GeometryReader { geometry in
-            HStack(spacing: 0) {
-                ForEach(statuses.filter { ($0.count ?? 0) > 0 }) { status in
-                    status.color.opacity(0.65)
-                        .frame(width: geometry.size.width * CGFloat(status.count ?? 0) / CGFloat(total))
+    /// How the statuses divide the list: one tint at five strengths, with the
+    /// hairline gaps the app puts between touching surfaces, so the bar reads as
+    /// one material instead of five hues the rest of the app never uses.
+    private var proportion: some View {
+        let shown = statuses.filter { ($0.count ?? 0) > 0 }
+        return GeometryReader { geometry in
+            let gaps = CGFloat(max(shown.count - 1, 0)) * 2
+            let width = max(geometry.size.width - gaps, 0)
+            HStack(spacing: 2) {
+                ForEach(shown) { status in
+                    Rectangle()
+                        .fill(.tint)
+                        .frame(width: max(width * CGFloat(status.count ?? 0) / CGFloat(max(total, 1)), 2))
+                        .opacity(status.strength)
                 }
             }
         }
-        .frame(height: 6)
+        .frame(height: 8)
         .clipShape(Capsule())
         .accessibilityHidden(true)
     }
 
+    /// The counts, each with the dot its slice of the bar carries, so the row
+    /// and the bar name the same thing twice in two ways a reader can use.
     private var statusRows: some View {
         VStack(spacing: 0) {
             ForEach(statuses) { status in
-                if status.id != statuses.first?.id {
-                    Divider().padding(.leading, 40)
-                }
-                LabeledContent {
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(.tint)
+                        .frame(width: 7, height: 7)
+                        .opacity(status.strength)
+                        .accessibilityHidden(true)
+                    Text(status.label)
+                    Spacer(minLength: 8)
                     Text(status.count?.formatted() ?? "—")
                         .monospacedDigit()
-                        .accessibilityLabel(status.count?.formatted() ?? "Count unavailable")
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: status.icon)
-                            .font(.subheadline.weight(.semibold))
-                            .foregroundStyle(status.color)
-                            .frame(width: 30, height: 30)
-                            .background(
-                                status.color.opacity(0.16),
-                                in: RoundedRectangle(cornerRadius: LedgerLayout.rowRadius, style: .continuous)
-                            )
-                            .accessibilityHidden(true)
-                        Text(status.label)
-                    }
+                        .foregroundStyle(status.count == nil ? Color.secondary : Color.primary)
                 }
+                .font(.subheadline)
                 .padding(.vertical, 7)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    status.count.map { "\(status.label), \($0)" } ?? "\(status.label), count unavailable")
             }
         }
     }
 
     private struct Status: Identifiable {
         let key: String
-        let icon: String
-        let color: Color
+        /// How strong the tint reads for this status, from the list's first
+        /// status to its last. The bar's slice and the row's dot share it.
+        let strength: Double
         let count: Int?
         var id: String { key }
 

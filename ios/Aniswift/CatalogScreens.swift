@@ -161,6 +161,8 @@ struct ListFilter: Codable, Equatable {
 
 struct ListsScreen: View {
     @EnvironmentObject private var store: Store
+    /// The next-episode schedules AniList has published for the airing rows.
+    @ObservedObject private var schedules = AiringScheduleCache.shared
     @AppStorage(SettingKey.titleLanguage) private var titleLanguage = TitleLanguage.english.rawValue
     let kind: Kind
     @State private var collapsed: Set<String> = []
@@ -190,6 +192,12 @@ struct ListsScreen: View {
     /// Whether the list is narrowed at all, by a filter or by a search, so a
     /// group with no match is not drawn and a collapsed one opens itself.
     private var isNarrowed: Bool { isFiltering || !searchTerm.isEmpty }
+
+    /// The airing anime in the list, whose schedules are read in one request so
+    /// each row can name the episode that is really next.
+    private var airingIDs: [Int] {
+        kind == .anime ? entries.filter { $0.title.isAiring }.map(\.title.malID).sorted() : []
+    }
 
     /// Whether an entry survives the sheet's chips. A status chip reads the
     /// entry's own status; the rest read what its title or its row carries.
@@ -332,6 +340,10 @@ struct ListsScreen: View {
         .onChange(of: filter) { _, value in ListFilter.remember(value, kind: kind) }
         .scrollDismissesKeyboard(.interactively)
         .prefetchingPosters(entries) { $0.title.image }
+        // The airing rows name the episode that is really next once AniList's
+        // schedule for them is in, so it is read in one request whenever the set
+        // of airing titles changes.
+        .task(id: airingIDs) { await schedules.learn(airingIDs) }
         .onChange(of: store.account?.id) { _, _ in
             query = ""
             listPageError = nil
@@ -489,7 +501,9 @@ struct ListsScreen: View {
                         .accessibilityElement(children: .ignore)
                         .accessibilityLabel("My rating \(item.rating) out of ten")
                     }
-                    if let airing = item.title.nextAiring() {
+                    if let airing = item.title.nextAiring(
+                        schedule: schedules.schedule(for: item.title.malID)
+                    ) {
                         airingLine(airing, progress: item.progress)
                     }
                 }
@@ -1223,7 +1237,7 @@ private struct SearchResultCard: View {
             values.append("\(total) \(total == 1 ? unit : unit + "s")")
         }
         if let score = title.score, score > 0 {
-            values.append(score.formatted(.number.precision(.fractionLength(2))))
+            values.append(score.ledgerDecimal(2...2))
         }
         return values.joined(separator: " · ")
     }
