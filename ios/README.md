@@ -165,24 +165,24 @@ publish is left out rather than drawn as a zero.
 
 A widget is a second bundle inside the app — `PlugIns/AniswiftWidgetExtension.appex`, with its own bundle
 identifier `org.aniswift.ios.aniswiftwidgetextension` — and the only place it can read your list from is the App
-Group container the two bundles share. Which group that is comes from the signature rather than from the app:
-`AppGroup` lists the groups a build may be signed with — the five a certificate sold for sideloading carries, then
-the app's own `group.org.aniswift.ios.shared` — and takes the first one that actually opens, so a build is never
-edited to match a certificate. iOS has no public call that lists the groups a signature grants, which is why that
-list is written down, in both `Persistence.swift` and the extension.
+Group container the two bundles share, `group.org.aniswift.ios.shared`. That group is the app's own and the only
+one the project names: a group belongs to the team that registered it, so no certificate's identifier is written
+into the app. A build signed with a certificate carrying a group of its own adds that name to `AppGroup.known`, in
+both `Persistence.swift` and the extension, and the first group that opens is the one the two bundles use. iOS has
+no public call that lists the groups a signature grants, which is why the list is written down at all.
 
 Two things still have to line up, and they are where the widgets get lost:
 
-- **The signing profile has to carry one of those groups.** If it carries none of them the container comes back
-  `nil`, and every widget says **This build has no App Group, so the widget cannot read your list.** however often
+- **The signature has to grant that group.** A signature that grants nothing leaves the container `nil`, and every
+  widget says **This build has no App Group, so the widget cannot read your list.** however often
   the app is opened — that sentence is how a signing problem is told apart from an empty list. A group the list does
   not name is one more entry in `AppGroup.known` in both bundles, and the same name in the two `.entitlements` files,
   so the signer has an entitlement to keep.
 - **The extension has to be signed too.** A tool that signs only the outer app leaves the `.appex` without a valid
   signature, and iOS then installs the app without its widget, so no Aniswift widget appears in the gallery at all.
 
-So sign with a certificate whose profile names one of those groups — nothing in the app changes between one
-certificate and another — and check that the tool signs the `.appex` as well. Open the app once and read your
+So sign with a certificate that keeps the app's own group, which a sideloader does, or put that certificate's group
+in `AppGroup.known` and in the two `.entitlements` files for that build; and check that the tool signs the `.appex` as well. Open the app once and read your
 Profile or a list, which is what writes the snapshot, then add the widget.
 
 **About Aniswift → Home Screen widgets** reads back what the signature gave the build: the app's identifier, the

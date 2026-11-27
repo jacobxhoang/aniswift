@@ -32,14 +32,10 @@ struct WidgetStats: Codable {
 /// container is looked up in the list and the first group that opens is the one
 /// the certificate gave this build.
 enum AppGroup {
-    static let known = [
-        "group.87b8794ebcab6708.1",
-        "group.87b8794ebcab6708.2",
-        "group.87b8794ebcab6708.3",
-        "group.87b8794ebcab6708.4",
-        "group.87b8794ebcab6708.5",
-        "group.org.aniswift.ios.shared",
-    ]
+    /// The app's own group, and any a certificate that signs a build carries,
+    /// which is added here for that build. The first that opens is the one used,
+    /// and this copy has to name what the app's copy names.
+    static let known = ["group.org.aniswift.ios.shared"]
 
     /// The group this signature actually grants, when it grants any of them.
     static let identifier: String? = known.first {

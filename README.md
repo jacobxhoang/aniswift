@@ -41,9 +41,9 @@ its own.
   one is set: the app has no field for it, so a build signs in with the ID it was built with.
 - No AniList app is needed for the read-only AniList section: the build ships a client ID, and you can put your
   own in `Info.plist` (`AniswiftAniListClientID`) instead.
-- The Home Screen widgets share an App Group with the extension, and the build uses whichever group its signature
-  grants: `AppGroup.known` names the groups a sideload certificate carries and the app's own, and the first that
-  opens wins. A signature that grants none of them still installs, but its widgets cannot read your list.
+- The Home Screen widgets share the app's own App Group (`group.org.aniswift.ios.shared`) with the extension. A
+  build signed with a certificate that carries a different group works by adding that name to `AppGroup.known`;
+  a signature that grants no group still installs, but its widgets read nothing.
 
 ## Data sources
 

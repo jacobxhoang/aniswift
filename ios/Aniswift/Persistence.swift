@@ -286,17 +286,10 @@ struct WidgetStats: Codable {
 /// certificate gave this build. A certificate carrying another group needs that
 /// name added here and to the extension's copy, and nothing else.
 enum AppGroup {
-    /// The groups a build may be signed with: the ones a certificate sold for
-    /// sideloading carries, and the app's own, which a build signed with a team
-    /// of its own uses.
-    static let known = [
-        "group.87b8794ebcab6708.1",
-        "group.87b8794ebcab6708.2",
-        "group.87b8794ebcab6708.3",
-        "group.87b8794ebcab6708.4",
-        "group.87b8794ebcab6708.5",
-        "group.org.aniswift.ios.shared",
-    ]
+    /// The groups a build may be signed with: the app's own, and any a
+    /// certificate that signs a build carries, which is added here for that
+    /// build. The first of them that opens is the one used.
+    static let known = ["group.org.aniswift.ios.shared"]
 
     /// The group this signature actually grants, when it grants any of them.
     static let identifier: String? = known.first {
