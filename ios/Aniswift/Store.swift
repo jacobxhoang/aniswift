@@ -601,7 +601,22 @@ final class Store {
         savedLists[kind] = snapshot
         entries[kind] = Self.index(snapshot.items)
         ListCache(account: account, lists: savedLists).write()
-        writeWidgetSnapshot()
+        scheduleWidgetSnapshot()
+    }
+
+    /// A whole list is read a page at a time, so the widget's rows are written
+    /// once a burst of pages has settled: every page used to write the file and
+    /// reload every timeline, which is the cost a pull-to-refresh paid fifty
+    /// times over.
+    private var widgetWrite: Task<Void, Never>?
+
+    private func scheduleWidgetSnapshot() {
+        widgetWrite?.cancel()
+        widgetWrite = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(700))
+            guard !Task.isCancelled else { return }
+            self?.writeWidgetSnapshot()
+        }
     }
 
     /// Keeps the widget's rows beside the list's own snapshot: the three most

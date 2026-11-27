@@ -410,7 +410,11 @@ struct ListsScreen: View {
             listPageError = nil
         }
         .refreshable {
-            await store.loadLists(force: true)
+            // A list syncs every page of itself, so the gesture starts the read
+            // and returns: the rows arrive as each page lands, with the list's
+            // own "reading" count on the group headers, instead of holding the
+            // spinner for as long as fifty requests take.
+            Task { await store.loadLists(force: true) }
             listPageError = nil
         }
         // A removal or a step is a swipe and an Undo, not a question: the row
@@ -1255,7 +1259,20 @@ struct CatalogFacet: Hashable, Identifiable {
             filters.append(URLQueryItem(name: "nulls", value: "first"))
         }
         if !query.isEmpty { filters.append(URLQueryItem(name: "q", value: query)) }
-        return catalogPage(try await api.catalog(kind.rawValue, filters, refresh: refresh), kind: kind)
+        let result = catalogPage(try await api.catalog(kind.rawValue, filters, refresh: refresh), kind: kind)
+        // A provider that cannot order a studio's titles answers with nothing at
+        // all, which read as "No titles found" on a page that has plenty: the
+        // page is asked once more in the provider's own order before it is
+        // reported empty.
+        if result.items.isEmpty, sort != .catalog, query.isEmpty {
+            let plain = catalogPage(
+                try await api.catalog(kind.rawValue, [
+                    URLQueryItem(name: category.filter, value: String(id)),
+                    URLQueryItem(name: "page", value: String(page))
+                ], refresh: refresh), kind: kind)
+            if !plain.items.isEmpty { return plain }
+        }
+        return result
     }
 
     @MainActor
@@ -1612,16 +1629,29 @@ struct PosterResults: View {
         loading = true
         failed = false
         defer { if current == generation { loading = false } }
+
+        func request(_ force: Bool) async throws -> Page<Title> {
+            if let shelf {
+                return try await shelf.page(page, api: store.api, refresh: force)
+            }
+            if let facet {
+                return try await facet.page(page, query: query, sort: sort, api: store.api, refresh: force)
+            }
+            let filters = [
+                URLQueryItem(name: "page", value: String(page)),
+                URLQueryItem(name: "q", value: query)
+            ]
+            return catalogPage(try await store.api.catalog(kind.rawValue, filters, refresh: force), kind: kind)
+        }
+
         do {
-            let result: Page<Title>
             if page == 1, !query.isEmpty { try await Task.sleep(for: .milliseconds(300)) }
-            if let shelf { result = try await shelf.page(page, api: store.api, refresh: refresh) }
-            else if let facet {
-                result = try await facet.page(page, query: query, sort: sort, api: store.api, refresh: refresh)
-            } else {
-                let filters = [URLQueryItem(name: "page", value: String(page)), URLQueryItem(name: "q", value: query)]
-                result = catalogPage(
-                    try await store.api.catalog(kind.rawValue, filters, refresh: refresh), kind: kind)
+            var result = try await request(refresh)
+            // A forced refresh that answers with nothing is asked once more
+            // through the cache before the page is reported empty: a studio or
+            // genre page pulled down used to lose every row it had.
+            if refresh, result.items.isEmpty {
+                result = try await request(false)
             }
             guard !Task.isCancelled, current == generation else { return }
             titles = unique(titles + result.items)

@@ -138,10 +138,20 @@ struct AniswiftApp: App {    @State private var store = Store()
             let malID = Int(parts[1])
         else { return }
         Task {
-            guard let fields = try? await store.api.catalog(
-                "\(kind.rawValue)/\(malID)", [], refresh: false),
-                let title = Title(fields, kind: kind)
-            else { return }
+            // The catalogue answers a title inside its `data` wrapper, and a
+            // provider that answers the page bare is read as it stands: passing
+            // the envelope to `Title` decoded nothing and the sheet never came.
+            guard let body = try? await store.api.catalog(
+                "\(kind.rawValue)/\(malID)", [], refresh: false)
+            else {
+                store.message = "The title could not be opened."
+                return
+            }
+            let fields: Fields = body.read("data") ?? body
+            guard let title = Title(fields, kind: kind) else {
+                store.message = "The title could not be opened."
+                return
+            }
             linkedTitle = LinkedTitle(title: title)
         }
     }

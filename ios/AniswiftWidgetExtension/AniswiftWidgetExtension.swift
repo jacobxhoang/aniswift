@@ -521,12 +521,16 @@ struct AniswiftAiringView: View {
                 WidgetEmptyNote(text: "list")
                 Spacer(minLength: 0)
             } else {
-                ForEach(visible) { row in
+                ForEach(Array(visible.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { Divider() }
                     Link(destination: row.link) {
                         AniswiftAiringRowView(
                             row: row, poster: entry.posters[row.id], airing: entry.airing[row.id]
                         )
                     }
+                    // Each row takes an equal share of the card and is separated
+                    // from the one above by a rule, so two rows read as two
+                    // halves rather than as a gap the card could not fill.
                     .frame(maxHeight: .infinity)
                 }
             }
