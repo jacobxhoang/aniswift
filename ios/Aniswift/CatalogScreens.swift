@@ -330,6 +330,18 @@ struct ListsScreen: View {
                             .listRowSeparator(.hidden)
                     }
                 }
+                // The list says when it has read everything, so its last row is
+                // the end of the list rather than the point where the reading
+                // stopped. A narrowed or still-loading list makes no claim.
+                if store.nextList[kind] == nil, !isNarrowed, !store.refreshingLists.contains(kind) {
+                    Text("Every entry is in this list.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 14)
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
         }
         .listStyle(.plain)

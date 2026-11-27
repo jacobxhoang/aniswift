@@ -238,7 +238,7 @@ struct CharacterScreen: View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerSectionTitle("Summary")
             if let about = profile.string("about", "biography") {
-                Text(about).lineSpacing(3).textSelection(.enabled)
+                BiographyText(text: about)
             } else {
                 Text("No biography is available.").foregroundStyle(.secondary)
             }
@@ -264,8 +264,11 @@ struct CharacterScreen: View {
     }
 
     private func voiceCard(_ voice: CharacterVoice) -> some View {
+        // The language sits under the name rather than in a reserved slot, so a
+        // name that wraps takes its language with it instead of leaving a gap.
         PortraitCard(
-            image: voice.image, name: voice.name, detail: voice.language, posterWidth: LedgerLayout.posterWidth
+            image: voice.image, name: voice.name, detail: voice.language, compactCaption: true,
+            posterWidth: LedgerLayout.posterWidth
         )
         .frame(width: LedgerLayout.posterWidth)
     }
@@ -308,10 +311,10 @@ struct PersonScreen: View {
     @State private var failed = false
     @State private var showingAllRoles = false
     @State private var expandedCredits: Set<Kind> = []
-    /// English names for this person's credits, resolved in one batched request
-    /// per kind instead of a detail request per row.
+    /// English names for this person's credits and voiced roles, resolved in one
+    /// batched request per kind instead of a detail request per row.
     @State private var creditNames: [String: String] = [:]
-    /// Every credit the batch asked about, so a row whose name did not come back
+    /// Every row the batch asked about, so a row whose name did not come back
     /// shows its original title instead of asking again.
     @State private var askedCreditNames: Set<String> = []
 
@@ -419,7 +422,7 @@ struct PersonScreen: View {
     private func summary(_ about: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             LedgerSectionTitle("Summary")
-            Text(about).lineSpacing(3).textSelection(.enabled)
+            BiographyText(text: about)
             Divider().padding(.top, 6)
         }
         .padding(.horizontal, LedgerLayout.inset)
@@ -471,10 +474,11 @@ struct PersonScreen: View {
     }
 
     private func roleRow(_ role: PersonRole) -> some View {
+        let known = creditNames[nameKey(.anime, role.animeID)]
         let row = personRow(
             image: role.image, symbol: "person.fill",
-            title: role.characterName ?? role.displayTitle(for: titleLanguage),
-            note: role.subtitle(for: titleLanguage),
+            title: role.characterName ?? role.displayTitle(for: titleLanguage, known: known),
+            note: role.subtitle(for: titleLanguage, known: known),
             linked: role.character != nil || role.anime != nil)
         return Group {
             if let character = role.character {
@@ -517,7 +521,7 @@ struct PersonScreen: View {
                                 }
                                 .personRowDivider()
                             } else {
-                                plainCredit(credit, kind: kind)
+                                plainCredit(credit)
                             }
                         }
                     }
@@ -534,36 +538,49 @@ struct PersonScreen: View {
     }
 
     private func nameKey(_ title: Title) -> String { "\(title.kind.rawValue)-\(title.malID)" }
+    private func nameKey(_ kind: Kind, _ malID: Int) -> String { "\(kind.rawValue)-\(malID)" }
 
-    /// Every credit is a sparse title of its own, so the page names them all in
-    /// one `ids` request per kind instead of a detail request per row.
-    private func creditTitles(in fields: Fields) -> [Title] {
-        var titles: [Title] = []
+    /// Every anime and manga id this page names in a row that still needs its
+    /// English title: a nested node that came back sparse, and every row the
+    /// provider flattened into ids and a romaji name. One `ids` request per kind
+    /// names them all, instead of a detail request per row.
+    private func idsToResolve(in fields: Fields) -> [Kind: [Int]] {
+        var wanted: [Kind: [Int]] = [:]
         for kind in Kind.allCases {
             let rows: [Fields] = fields.read(kind == .anime ? "anime" : "manga") ?? []
-            let credits = rows.compactMap { PersonCredit($0, kind: kind) }
-            titles += credits.compactMap(\.title)
+            for credit in rows.compactMap({ PersonCredit($0, kind: kind) }) {
+                if credit.title?.needsTitleLookup ?? true {
+                    wanted[kind, default: []].append(credit.malID)
+                }
+            }
         }
-        return unique(titles).filter(\.needsTitleLookup)
+        // A voiced role names an anime too, so it is asked for in the same
+        // batch: a role row used to read the payload's romaji title.
+        let voices: [Fields] = fields.read("voices") ?? []
+        for role in voices.compactMap(PersonRole.init) {
+            wanted[.anime, default: []].append(role.animeID)
+        }
+        return wanted
     }
 
-    private func resolveCreditNames(_ titles: [Title]) async -> [String: String] {
+    private func resolveNames(_ wanted: [Kind: [Int]]) async -> [String: String] {
         var names: [String: String] = [:]
         for kind in Kind.allCases {
-            let ids = titles.filter { $0.kind == kind }.map(\.malID)
+            let ids = wanted[kind] ?? []
             guard !ids.isEmpty else { continue }
             let resolved = await store.api.titleNames(ids, kind: kind)
-            for (id, name) in resolved { names["\(kind.rawValue)-\(id)"] = name }
+            for (id, name) in resolved { names[nameKey(kind, id)] = name }
         }
         return names
     }
 
     /// A credit the provider flattens into ids and names carries no poster, so
     /// it still takes the shared row with a kind glyph standing in for one.
-    private func plainCredit(_ credit: PersonCredit, kind: Kind) -> some View {
+    private func plainCredit(_ credit: PersonCredit) -> some View {
         personRow(
-            image: nil, symbol: kind == .anime ? "film" : "book",
-            title: credit.name ?? "", note: credit.note, linked: false
+            image: nil, symbol: credit.kind == .anime ? "film" : "book",
+            title: creditNames[nameKey(credit.kind, credit.malID)] ?? credit.name ?? "",
+            note: credit.note, linked: false
         )
         .personRowDivider()
     }
@@ -577,13 +594,13 @@ struct PersonScreen: View {
                 failed = true
                 return
             }
-            // Mark every credit as asked before the rows are drawn, so they show
-            // their original title for a moment instead of each firing a detail
-            // request that renames it one at a time.
-            let pending = creditTitles(in: updated)
-            askedCreditNames = Set(pending.map(nameKey))
+            // Mark every row as asked before it is drawn, so a row shows its
+            // original title for a moment instead of each firing a detail request
+            // that renames it one at a time.
+            let wanted = idsToResolve(in: updated)
+            askedCreditNames = Set(wanted.flatMap { kind, ids in ids.map { nameKey(kind, $0) } })
             profile = updated
-            let names = await resolveCreditNames(pending)
+            let names = await resolveNames(wanted)
             guard !Task.isCancelled else { return }
             creditNames = names
         } catch {
@@ -598,6 +615,9 @@ private struct PersonRole: Identifiable {
     let id: String
     let characterName: String?
     let animeName: String
+    /// The anime's MyAnimeList id, kept even when the provider flattened the
+    /// row, so the page can ask for its English name in one batch.
+    let animeID: Int
     let role: String?
     let image: URL?
     let character: CharacterReference?
@@ -614,6 +634,7 @@ private struct PersonRole: Identifiable {
             self.anime = anime
             characterName = character?.name
             animeName = ""
+            animeID = anime.malID
             role = part
             image = character?.image ?? anime.image
             id = "\(anime.id)-\(character?.id ?? 0)-\(part ?? "")"
@@ -625,9 +646,10 @@ private struct PersonRole: Identifiable {
         let characterID: Int? = fields.read("characterId")
         let part = fields.string("characterRole", "role")
         character = nil
-        self.anime = nil
+        anime = nil
         characterName = fields.string("characterName").map(displayPersonName)
         self.animeName = animeName
+        self.animeID = animeID
         role = part
         image =
             publicURL(fields.string("characterImageUrl"))
@@ -635,14 +657,19 @@ private struct PersonRole: Identifiable {
         id = "\(animeID)-\(characterID ?? 0)-\(part ?? "")"
     }
 
-    func displayTitle(for language: String) -> String {
-        anime?.displayName(for: language) ?? animeName
+    /// The anime's name in the reader's preferred language. `known` is the
+    /// English name the page resolved in its batch: a sparse node, and every row
+    /// the provider flattened, carries only the romaji title, which is what this
+    /// row used to show.
+    func displayTitle(for language: String, known: String? = nil) -> String {
+        if language == TitleLanguage.romaji.rawValue { return anime?.original ?? animeName }
+        return known ?? anime?.displayName(for: language) ?? animeName
     }
 
-    func subtitle(for language: String) -> String {
+    func subtitle(for language: String, known: String? = nil) -> String {
         var parts: [String] = []
         if let role, !role.isEmpty { parts.append(role) }
-        let title = displayTitle(for: language)
+        let title = displayTitle(for: language, known: known)
         if !title.isEmpty { parts.append(title) }
         return parts.joined(separator: " · ")
     }
@@ -655,6 +682,10 @@ private struct PersonCredit: Identifiable {
     let name: String?
     let note: String
     let title: Title?
+    /// The title's MyAnimeList id and kind, kept even when the provider
+    /// flattened the row, so the page can name it in English from its batch.
+    let malID: Int
+    let kind: Kind
 
     init?(_ fields: Fields, kind: Kind) {
         if let node: Fields = fields.read(kind.rawValue),
@@ -664,6 +695,8 @@ private struct PersonCredit: Identifiable {
             self.title = title
             name = nil
             note = position
+            malID = title.malID
+            self.kind = kind
             id = "\(title.id)-\(position)"
             return
         }
@@ -675,6 +708,8 @@ private struct PersonCredit: Identifiable {
         title = nil
         self.name = name
         note = position
+        self.malID = malID
+        self.kind = kind
         id = "\(kind.rawValue)-\(malID)-\(position)"
     }
 }
@@ -737,6 +772,168 @@ private struct PortraitCard: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A biography as MyAnimeList writes it: prose, and any part the provider marked
+/// as a spoiler waiting behind a tap. The markers — `[Spoiler] … [/Spoiler]`,
+/// sometimes with the closing bracket on a line of its own — are never drawn.
+private struct BiographyText: View {
+    let text: String
+    @State private var revealed: Set<Int> = []
+    private let parts: [CharacterBiography.Part]
+
+    init(text: String) {
+        self.text = text
+        parts = CharacterBiography.parts(of: text)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(parts) { part in
+                if part.isSpoiler, !revealed.contains(part.id) {
+                    // The button is the whole of the hidden state: a line above
+                    // it said the same thing twice for every spoiler in a bio.
+                    Button("Show spoiler") { revealed.insert(part.id) }
+                        .ledgerGlassButton()
+                        .accessibilityHint("Shows the hidden part of the biography")
+                } else {
+                    Text(BiographyLinks.attributed(part.text))
+                        .lineSpacing(3)
+                        .textSelection(.enabled)
+                    if part.isSpoiler {
+                        Button("Hide spoiler") { revealed.remove(part.id) }
+                            .font(.footnote.weight(.semibold))
+                            .buttonStyle(.borderless)
+                            .frame(minHeight: 44)
+                            .accessibilityHint("Hides the part of the biography again")
+                    }
+                }
+            }
+        }
+        // A biography read again marks its parts afresh, so a revealed spoiler
+        // from the previous copy is not left open in the new one.
+        .onChange(of: text) { _, _ in revealed = [] }
+    }
+}
+
+/// The split itself: one part per run of prose or of spoiler text, numbered in
+/// the order the biography reads, so a part keeps its identity across passes.
+private enum CharacterBiography {
+    struct Part: Identifiable {
+        let id: Int
+        let text: String
+        let isSpoiler: Bool
+    }
+
+    static func parts(of text: String) -> [Part] {
+        var parts: [Part] = []
+        var remainder = Substring(text)
+        while let open = remainder.range(of: "[spoiler]", options: .caseInsensitive) {
+            append(&parts, remainder[..<open.lowerBound], spoiler: false)
+            let rest = remainder[open.upperBound...]
+            guard let close = rest.range(of: "[/spoiler]", options: .caseInsensitive) else {
+                // An unclosed marker hides the rest instead of showing it.
+                append(&parts, rest, spoiler: true)
+                remainder = Substring("")
+                break
+            }
+            append(&parts, rest[..<close.lowerBound], spoiler: true)
+            remainder = rest[close.upperBound...]
+        }
+        append(&parts, remainder, spoiler: false)
+        return parts
+    }
+
+    private static func append(_ parts: inout [Part], _ raw: Substring, spoiler: Bool) {
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        // Two spoiler markers in a row are one hidden region, so they take one
+        // button instead of two facing each other.
+        if spoiler, let last = parts.last, last.isSpoiler {
+            parts[parts.count - 1] = Part(
+                id: last.id, text: last.text + "\n\n" + text, isSpoiler: true)
+            return
+        }
+        parts.append(Part(id: parts.count, text: text, isSpoiler: spoiler))
+    }
+}
+
+/// A biography's prose with the links MyAnimeList writes as plain text turned
+/// into tappable ones: any URL, and a handle on a line that names Twitter or X.
+/// A handle anywhere else stays part of the sentence.
+private enum BiographyLinks {
+    static func attributed(_ text: String) -> AttributedString {
+        var result = AttributedString()
+        var cursor = text.startIndex
+        for (range, url) in found(in: text).sorted(by: { $0.0.lowerBound < $1.0.lowerBound }) {
+            guard range.lowerBound >= cursor else { continue }
+            if cursor < range.lowerBound { result += AttributedString(text[cursor..<range.lowerBound]) }
+            var piece = AttributedString(text[range])
+            piece.link = url
+            result += piece
+            cursor = range.upperBound
+        }
+        if cursor < text.endIndex { result += AttributedString(text[cursor...]) }
+        return result
+    }
+
+    private static func found(in text: String) -> [(Range<String.Index>, URL)] {
+        var links: [(Range<String.Index>, URL)] = []
+        for match in text.matches(of: /https?:\/\/[^\s<>()]+/) {
+            let raw = String(match.output).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?)]}"))
+            guard !raw.isEmpty, let url = URL(string: raw) else { continue }
+            let start = match.output.startIndex
+            links.append((start..<text.index(start, offsetBy: raw.count), url))
+        }
+        // "Twitter: @name", "X: @name", "Instagram: @name" and "Facebook:
+        // name" are how a biography names an account: the label before a token is
+        // what makes it a handle, and only the handle itself is linked.
+        for match in text.matches(of: /(?i)(?:twitter|x|instagram|facebook)[^@\n]{0,12}@[A-Za-z0-9_.]{1,30}/) {
+            appendHandle(&links, in: text, matched: match.output)
+        }
+        // Instagram's handle is often written without its @, so the label alone
+        // makes the word after it the handle.
+        for match in text.matches(of: /(?i)instagram\s*:?\s*[a-z0-9_][a-z0-9_.]{1,29}/) {
+            appendHandle(&links, in: text, matched: match.output)
+        }
+        return links
+    }
+
+    /// The service a matched line names, and the host its profile link goes to.
+    private static func service(in matched: String) -> (name: String, host: String)? {
+        let value = matched.lowercased()
+        if value.hasPrefix("twitter") || value.hasPrefix("x") { return ("twitter", "x.com") }
+        if value.hasPrefix("instagram") { return ("instagram", "instagram.com") }
+        if value.hasPrefix("facebook") { return ("facebook", "facebook.com") }
+        return nil
+    }
+
+    private static func appendHandle(
+        _ links: inout [(Range<String.Index>, URL)], in text: String, matched: Substring
+    ) {
+        let value = String(matched)
+        guard let service = service(in: value), let start = handleStart(in: value, service: service.name),
+            let url = URL(string: "https://\(service.host)/\(value[start...])")
+        else { return }
+        let index = text.index(matched.startIndex, offsetBy: value.distance(from: value.startIndex, to: start))
+        links.append((index..<matched.endIndex, url))
+    }
+
+    /// Where the handle begins: the service's name, then the punctuation between
+    /// it and the handle, which is never part of the link.
+    private static func handleStart(in value: String, service: String) -> String.Index? {
+        var index = value.index(value.startIndex, offsetBy: service.count)
+        while index < value.endIndex {
+            let character = value[index]
+            if character == ":" || character == " " || character == "@" {
+                index = value.index(after: index)
+                continue
+            }
+            guard character.isLetter || character.isNumber || character == "_" else { return nil }
+            return index
+        }
+        return nil
     }
 }
 

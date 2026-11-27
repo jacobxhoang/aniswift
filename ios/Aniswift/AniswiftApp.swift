@@ -13,10 +13,10 @@ struct AniswiftApp: App {
     @AppStorage(SettingKey.tabBarBehavior) private var tabBarBehavior = "never"
     @State private var tab: String
 
-    /// The tabs this build has, and the only values a stored preference may
-    /// select. An identifier written by an older build would otherwise restore a
-    /// tab that no longer exists and leave the tab view with nothing selected.
-    private static let tabIdentifiers: Set<String> = ["anime", "manga", "discover", "feed", "profile"]
+    /// The tabs this build has, in the order the bar draws them: the only values
+    /// a stored preference may select, since an identifier written by an older
+    /// build would restore a tab that no longer exists.
+    private static let tabOrder = ["anime", "manga", "discover", "feed", "profile"]
 
     init() {
         let defaults = UserDefaults.standard
@@ -25,7 +25,7 @@ struct AniswiftApp: App {
             startsOnPreferred
             ? defaults.string(forKey: SettingKey.launchTab) ?? "anime"
             : defaults.string(forKey: SettingKey.lastTab) ?? "anime"
-        _tab = State(initialValue: Self.tabIdentifiers.contains(stored) ? stored : "anime")
+        _tab = State(initialValue: Self.tabOrder.contains(stored) ? stored : "anime")
         // Posters and avatars are reused across scrolling and back navigation, so
         // keep them longer than Kingfisher's one-week disk default.
         let images = ImageCache.default
@@ -48,6 +48,13 @@ struct AniswiftApp: App {
                 .environment(
                     \.openURL,
                     OpenURLAction { url in
+                        // A social link is tried as an app first, so a reader
+                        // with the app installed never leaves the device: the app
+                        // answers it, and the page opens when nothing does.
+                        if let host = url.host(), SocialLinks.isSocial(host) {
+                            SocialLinks.open(url)
+                            return .handled
+                        }
                         guard openLinksInApp, let scheme = url.scheme,
                             ["http", "https"].contains(scheme)
                         else { return .systemAction }
@@ -103,6 +110,7 @@ struct AniswiftApp: App {
             }
             .modifier(LedgerTabBarMinimization(behavior: tabBarBehavior))
             .modifier(LedgerSidebarTabs())
+            .background { tabShortcuts }
         } else {
             TabView(selection: $tab) {
                 stack { ListsScreen(kind: .anime) }
@@ -122,7 +130,21 @@ struct AniswiftApp: App {
                     .tag("profile")
             }
             .modifier(LedgerSidebarTabs())
+            .background { tabShortcuts }
         }
+    }
+
+    /// Command-1 through Command-5 choose a tab from a hardware keyboard, in the
+    /// order the bar draws them. The buttons are hidden because the tab bar
+    /// already names every tab: a shortcut belongs to a control, and this is the
+    /// tab bar's own action.
+    private var tabShortcuts: some View {
+        ForEach(Array(Self.tabOrder.enumerated()), id: \.element) { index, value in
+            Button(value) { tab = value }
+                .keyboardShortcut(KeyEquivalent(Character("\(index + 1)")), modifiers: .command)
+                .hidden()
+        }
+        .accessibilityHidden(true)
     }
 
     private func stack<Content: View>(@ViewBuilder content: () -> Content) -> some View {
@@ -218,6 +240,70 @@ struct SkeletonBlock: View {
             .animation(reduceMotion ? nil : .easeInOut(duration: 1).repeatForever(autoreverses: true), value: pulse)
             .onAppear { pulse = true }
             .accessibilityHidden(true)
+    }
+}
+
+/// A link to a service whose own app can answer it. The app is tried first, and
+/// the page opens when nothing handles it, so a reader without the app installed
+/// gets the website instead of an error. The bundle's URL scheme needs no entry in
+/// `LSApplicationQueriesSchemes`, because `open` reports whether it was handled.
+@MainActor
+enum SocialLinks {
+    /// Each service's hosts, and the scheme that opens a profile there.
+    private static let services: [(hosts: [String], scheme: String)] = [
+        (["twitter.com", "x.com"], "twitter://user?screen_name="),
+        (["instagram.com"], "instagram://user?username="),
+        (["facebook.com", "fb.com"], "fb://profile/"),
+    ]
+    /// A path that is not a profile, so its page opens rather than an app screen.
+    private static let otherPages: Set<String> = [
+        "i", "intent", "share", "home", "accounts", "p", "reel", "reels", "explore", "stories", "watch",
+        "groups", "events", "marketplace",
+    ]
+
+    static func isSocial(_ host: String) -> Bool {
+        let name = host.lowercased()
+        return services.contains { service in
+            service.hosts.contains { name == $0 || name.hasSuffix(".\($0)") }
+        }
+    }
+
+    static func open(_ url: URL) {
+        guard let app = app(for: url) else {
+            UIApplication.shared.open(url)
+            return
+        }
+        UIApplication.shared.open(app, options: [:]) { opened in
+            guard !opened else { return }
+            UIApplication.shared.open(url)
+        }
+    }
+
+    private static func app(for url: URL) -> URL? {
+        guard let host = url.host()?.lowercased(),
+            let service = services.first(where: { service in
+                service.hosts.contains { host == $0 || host.hasSuffix(".\($0)") }
+            }),
+            let handle = handle(in: url)
+        else { return nil }
+        return URL(string: service.scheme + handle)
+    }
+
+    /// The handle a profile link names: `x.com/<handle>`,
+    /// `instagram.com/<handle>` or a `screen_name` query. A link to anything
+    /// else, a post or a page of the site rather than a person, opens as it is.
+    private static func handle(in url: URL) -> String? {
+        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems
+        if let name = query?.first(where: { $0.name == "screen_name" || $0.name == "username" })?.value,
+            !name.isEmpty
+        {
+            return name
+        }
+        let parts = url.pathComponents.filter { $0 != "/" && !$0.isEmpty }
+        guard let first = parts.first, !first.contains("."), !otherPages.contains(first.lowercased()) else {
+            return nil
+        }
+        return first.hasPrefix("@") ? String(first.dropFirst()) : first
     }
 }
 

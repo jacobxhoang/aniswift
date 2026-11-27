@@ -52,6 +52,8 @@ its own.
 - [Product record: users, purpose and principles](PRODUCT.md)
 - [Architecture and API analysis](ARCHITECTURE.md)
 - [Interface reference: tokens, components and interaction rules](DESIGN.md)
+- [UX evaluation: what holds and what is missing](evaluation-aniswift.md)
+- [Decision log: each choice, its reason and what it rejected](decisions.md)
 - [iOS releases](https://github.com/jacobxhoang/aniswift/releases)
 
 ## Releases

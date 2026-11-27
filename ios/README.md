@@ -25,7 +25,7 @@ xcodebuild -project ios/Aniswift.xcodeproj -scheme Aniswift \
 
 | Tab | What you can do |
 | --- | --- |
-| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, and use swipe actions to update progress or remove a title, each with a six-second Undo. The list reads every page on its own once it opens, so it arrives whole instead of growing as you scroll. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. Signed out, the tab says what will appear there and offers the catalog. |
+| Anime and Manga | Expand status groups, order and narrow the list in **Sort and Filter** (five orders, either direction, then status, format, entry-detail and year chips — the format chips are the tab's own, so Manga offers manga, novels, one-shots and manhwa — remembered per tab), search loaded entries, and use swipe actions to update progress or remove a title, each with a six-second Undo. A list that has read every entry says so under its last row. The list reads every page on its own once it opens, so it arrives whole instead of growing as you scroll. A title that is still on the air names its next episode under its facts, in **amber** while an episode that already aired is unwatched and **green** once you are caught up with every one of them. Signed out, the tab says what will appear there and offers the catalog. |
 | Discover | Search anime and manga using the system search field, browse releases and rankings, and open title details. |
 | Feed | Browse public friend updates, gathered from a dozen friends at a time and from their list pages while that is thin. Tap a name or avatar to open a native profile. Tap a title or poster to see its details. |
 | Profile | Your card names the account and puts its anime and manga totals on one line, with days watched and chapters read under them. Below it, one **Statistics** panel holds both kinds — pick Anime or Manga, and open or shut it to see the totals, the share each status takes and the counts. Then friends and public favorites, custom lists, sharing your MyAnimeList profile, **Settings → Profile** for what appears, and Settings from the toolbar gear. |
@@ -52,10 +52,15 @@ a guess. The slot itself — "Sunday at 23:15 JST" — is a fact about the serie
 as **Broadcast**. The same rule applies to posters and
 rows, list sorting, interest-stack entries, review headers, and editor prompts. Genres, themes, producers and
 serializations wrap onto additional lines. Relations, Characters and Recommended shelves share portrait sizing,
-compact captions and a **View All** grid. Character profiles show biographies, voice actors and linked
+compact captions and a **View All** grid. Character profiles show biographies — a part MyAnimeList marks as a
+spoiler stays behind **Show spoiler** until it is tapped, and the markers themselves are never drawn; a Twitter,
+Instagram or Facebook handle on a line of one is a link, which opens the app when it is installed and the site when
+it is not — voice actors and linked
 appearances. A voice actor opens their own page: portrait, alternate names, birthday, member favorites,
 biography, their voiced roles with main parts first, and their anime and manga staff credits — a role leads
-back to its character, a credit to its title. A manga's header lists its authors the way a title lists its
+back to its character, a credit to its title. Both lists are named in the language chosen in Settings, so a
+title the provider sends only in romaji is asked for its English name in the same batch instead of staying in
+romaji. A manga's header lists its authors the way a title lists its
 studios, and tapping one opens that page. Reviews and friends' title activity appear when entries exist.
 Open **View All** in Reviews to browse and read reviews inside the app, including a spoiler reveal control in
 the reader. Interest stacks open from a title and list their entries with positions, scores and notes; in a
@@ -95,7 +100,7 @@ checkmark, or updates without animation when Reduce Motion is on.
 
 | Setting | Default | Effect |
 | --- | --- | --- |
-| Preferred Title Language | English | Shows English titles when a translation exists, otherwise the original; Romaji shows the original title with the English name as fallback. Applies to title pages, lists, shelves, sorting, stacks, reviews and editor prompts. |
+| Preferred Title Language | English | Shows English titles when a translation exists, otherwise the original; Romaji shows the original title with the English name as fallback. Applies to title pages, lists, shelves, sorting, stacks, reviews, editor prompts and a person's roles and credits. |
 | Open Links In-App | On | Opens http(s) links from titles, profiles, stacks and About in a Safari sheet inside Aniswift. When off, links open in the default browser. If no foreground window can present the sheet, the link opens outside the app instead of being dropped. |
 | Ask for Score After Watching an Anime | On | After an anime is marked completed with no score — from the title's completion action, the quick status editor or the full editor — presents a score sheet. It never appears for manga or from the score editor itself; the editor path also skips an entry that was already completed. |
 | Enable Preferred Launch Screen | Off | When on, the app opens the selected screen (Anime, Manga, Discover, Feed or Profile) on every cold launch. When off, it restores the last tab you used. |
@@ -173,7 +178,8 @@ Profile settings, under **Settings → Profile**, choose what the Profile tab dr
 ### AniList
 
 **Settings → AniList** signs this device in to AniList and shows its lists, read-only, beside MyAnimeList.
-Changes you make on MyAnimeList are carried over to AniList; nothing is read back from AniList.
+Changes you make on MyAnimeList are carried over to AniList; nothing is read back from AniList, and the section
+says so under its rows once the account is connected.
 
 1. Create an app at [anilist.co/settings/developer](https://anilist.co/settings/developer). Its redirect URL can be
    anything AniList accepts — a custom scheme or a page of its own — because the sign-in sheet reads the token from
@@ -220,7 +226,8 @@ non-text contrast on the black canvas and on a panel above it, and the edge of a
 that. A title page's header poster follows Dynamic Type with the name under it, and a poster or a thumbnail stops
 growing at 1.4× so a page keeps its shape at the accessibility sizes. A list, Discover and the Feed carry a
 **Refresh** control in the bar, which reads the page again without scrolling back to the top. On a hardware
-keyboard, **Command-R** refreshes, **Command-E** opens a title's editor and **Command-Shift-F** a list's Sort and Filter.
+keyboard, **Command-1** to **Command-5** choose a tab, **Command-R** refreshes, **Command-E** opens a title's
+editor and **Command-Shift-F** a list's Sort and Filter.
 
 Snapshots are encoded on the screen's actor and written through one serial background queue, so a list edit or a
 feed page never waits on the disk. `Aniswift/PrivacyInfo.xcprivacy` carries the app's privacy manifest: no

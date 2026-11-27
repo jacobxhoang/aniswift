@@ -223,12 +223,17 @@ struct SettingsScreen: View {
                 Text("AniList")
             } footer: {
                 // A row names what it opens or sets and nothing more, so what a
-                // connection needs and what it failed with read as the section's
-                // footer instead of as a line under the row they belong to.
+                // connection needs, what it failed with, and what the copy into
+                // AniList does read as the section's footer instead of as a
+                // line under the row they belong to.
                 if AniListClient.bundledClientID == nil {
                     Text("This build has no AniList client ID.")
                 } else if let message = aniList.message {
                     Text(message)
+                } else if aniList.isSignedIn {
+                    // The copy is permanent and one-way, so a reader editing a
+                    // score is told it happens before he acts again.
+                    Text("Changes you make on MyAnimeList are copied to AniList. Nothing is read back.")
                 }
             }
             // About sits under AniList: it explains the app rather than what the

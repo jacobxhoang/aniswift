@@ -96,6 +96,9 @@ Filters). A signed-out tab is a different thing and always wears the panel.
 - Motion is short and purposeful: `.snappy(duration: 0.22)` for a bar or a sheet, `.easeOut(0.12)` for a
   press, a 1-second pulse for a skeleton. Every one of them is skipped under Reduce Motion.
 - A failure never takes the screen: it arrives in the notice panel where the reader is and is announced.
+- A link goes where it already belongs: a Twitter, Instagram or Facebook link opens its app when installed and its
+  page when it is not, and every other link keeps the browser chosen in Settings. A handle is a link only where the
+  line names one of those, and Instagram's bare handle counts because that is how it is written.
 
 ## Copy
 
@@ -114,5 +117,5 @@ sizes. Reduce Motion is honored at every transition, and the failure bar is post
 
 ## Open items
 
-- Keyboard accelerators: Command-R refreshes a list or Discover, Command-E opens a title page's editor, and
-  Command-Shift-F a list's sort and filter sheet. Tab switching still needs a visible control before it gets one.
+- Keyboard accelerators: Command-1 to Command-5 choose a tab, Command-R refreshes a list or Discover, Command-E
+  opens a title page's editor, and Command-Shift-F a list's sort and filter sheet.
