@@ -235,15 +235,27 @@ final class API: APIClient {
         return filtered
     }
 
+    /// The last catalog request and what it answered, so a page that cannot load
+    /// can say which provider refused and why instead of only that it did.
+    static var lastFailure: String?
+
     private func fetchCatalog(_ path: String, _ query: [URLQueryItem],
                               publicUserData: Bool) async throws -> (Fields, Data) {
-        for base in publicUserData ? [jikan] : [tenrai, jikan] {
+        // A producer or genre filter is served by the catalog of record alone:
+        // the fallback says so itself — "producers is not supported on this
+        // route" — so a filtered page waits on the first provider twice instead
+        // of taking that error.
+        let filtered = query.contains { $0.name == "producers" || $0.name == "genres" }
+        let bases = publicUserData ? [jikan] : (filtered ? [tenrai, tenrai] : [tenrai, jikan])
+        for base in bases {
             do {
                 let url = Self.url(base, path, query)
-                return try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 5 : 10))
+                Self.lastFailure = nil
+                return try await request(URLRequest(url: url, timeoutInterval: base == tenrai ? 15 : 20))
             } catch {
                 try Task.checkCancellation()
-                if base == jikan { throw error }
+                Self.lastFailure = "\(base.absoluteString)/\(path) · \(error)"
+                if base == bases.last { throw error }
             }
         }
         throw APIError(status: 0, message: "Catalog unavailable.")

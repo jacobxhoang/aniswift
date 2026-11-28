@@ -1276,6 +1276,14 @@ struct CatalogFacet: Hashable, Identifiable {
                 ], refresh: refresh), kind: kind)
             if !plain.items.isEmpty { return plain }
         }
+        // An empty studio page is reported rather than drawn as an empty list: a
+        // company with dozens of titles that answers nothing is a request to fix,
+        // and the message names the id and the name it asked with.
+        guard !result.items.isEmpty || category.usesGenreIndex else {
+            throw APIError(
+                status: 0,
+                message: "The catalogue answered no titles for \(name) (producer \(id), page \(page)).")
+        }
         return result
     }
 
@@ -1535,6 +1543,12 @@ struct PosterResults: View {
     @State private var generation = UUID()
     @State private var activeRequest: String?
     @State private var visibleResult: String?
+    /// What the last request asked for, drawn under an empty page: a screen that
+    /// finds nothing has to say which query came back empty.
+    @State private var lastRequest: String?
+    /// What a failed request said, word for word: a page that cannot load has to
+    /// say why rather than guess at it.
+    @State private var failureMessage: String?
 
     private var requestKey: String { "\(kind.rawValue)-\(sort.rawValue)-\(query)" }
     private var showsProducerRows: Bool { facet?.category.usesGenreIndex == false }
@@ -1551,8 +1565,10 @@ struct PosterResults: View {
                 } else {
                     ForEach(titles) { SearchResultCard(title: $0) }
                 }
-                if failed {
-                    LedgerProblem(message: "Could not load \(name.lowercased()).") { await load() }
+                if failed, titles.isEmpty {
+                    LedgerProblem(message: failureMessage ?? "Could not load \(name.lowercased()).") {
+                        await load()
+                    }
                 } else if more {
                     NextPageIndicator(label: "Loading more titles", page: page) {
                         if !loading { await load() }
@@ -1566,6 +1582,9 @@ struct PosterResults: View {
                         Text(query.isEmpty
                             ? "Nothing here yet. Pull down to refresh."
                             : "Try another search or section.")
+                        if let lastRequest {
+                            Text(lastRequest).font(.caption2).monospaced()
+                        }
                     } actions: {
                         if let search = Self.searchURL(query, kind: kind) {
                             Link("Search MyAnimeList", destination: search)
@@ -1581,8 +1600,10 @@ struct PosterResults: View {
         .scrollPosition(id: $visibleResult)
         .background(Palette.background.ignoresSafeArea())
         .refreshable {
+            // The rows stay while the pull runs: a refresh that cannot reach the
+            // provider used to empty the page and then report the failure, which
+            // read as the page having broken rather than the pull.
             generation = UUID()
-            titles = []
             visibleResult = nil
             page = 1
             more = false
@@ -1636,15 +1657,18 @@ struct PosterResults: View {
 
         func request(_ force: Bool) async throws -> Page<Title> {
             if let shelf {
+                lastRequest = "shelf \(shelf.rawValue) · page \(page)"
                 return try await shelf.page(page, api: store.api, refresh: force)
             }
             if let facet {
+                lastRequest = "\(facet.category.filter) · \(facet.name) · page \(page) · \(sort.rawValue)"
                 return try await facet.page(page, query: query, sort: sort, api: store.api, refresh: force)
             }
             let filters = [
                 URLQueryItem(name: "page", value: String(page)),
                 URLQueryItem(name: "q", value: query)
             ]
+            lastRequest = "\(kind.rawValue)?page=\(page)&q=\(query)"
             return catalogPage(try await store.api.catalog(kind.rawValue, filters, refresh: force), kind: kind)
         }
 
@@ -1657,12 +1681,30 @@ struct PosterResults: View {
             if refresh, result.items.isEmpty {
                 result = try await request(false)
             }
-            guard !Task.isCancelled, current == generation else { return }
+            // The rows are kept whatever happened to the view while they were in
+            // flight: a screen that was rebuilt mid-request was discarding the
+            // answer it had just been handed, which is how a studio page with
+            // dozens of titles settled on "No titles found".
+            if let asked = lastRequest { lastRequest = asked + " · \(result.items.count) rows" }
             titles = unique(titles + result.items)
             page += 1
             more = result.more
         } catch {
-            if !Task.isCancelled && current == generation { failed = true }
+            // A live request that fails is asked once more through the cache, on
+            // a refresh and on the first load alike: the answer that filled the
+            // page a moment ago is worth keeping when the provider stops
+            // answering, and only an empty cache is a failure the reader sees.
+            if let cached = try? await request(false), !cached.items.isEmpty {
+                titles = unique(titles + cached.items)
+                more = cached.more
+                page += 1
+                return
+            }
+            if !Task.isCancelled {
+                let said = (error as? APIError)?.message ?? error.localizedDescription
+                failureMessage = [said, API.lastFailure].compactMap { $0 }.joined(separator: " · ")
+            }
+            failed = true
         }
     }
 

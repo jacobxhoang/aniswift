@@ -272,7 +272,7 @@ struct TitleScreen: View {
                 }
                 Menu {
                     ShareLink(item: title.malURL)
-                    Link(destination: title.malURL) { Label("View on MyAnimeList", systemImage: "arrow.up.right") }
+                    Link(destination: title.malURL) { Label("View on MAL", systemImage: "arrow.up.right") }
                     if store.account != nil, let saved {
                         if saved.status != "completed" {
                             Button {
@@ -291,7 +291,7 @@ struct TitleScreen: View {
                             }
                         }
                         Button(role: .destructive) { confirmRemoval = true } label: {
-                            Label("Remove from My List", systemImage: "trash")
+                            Label("Remove from List", systemImage: "trash")
                         }
                     }
                 } label: {
